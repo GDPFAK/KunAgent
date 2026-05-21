@@ -18,7 +18,7 @@ set -euo pipefail
 #   --no-commit-notes    generic build info only (old behavior)
 #
 # Speed knobs:
-#   MAC_RELEASE_PARALLEL=0          disable parallel arm64/x64 builds
+#   MAC_RELEASE_PARALLEL=force      force parallel arm64/x64 builds even when signing
 #   RELEASE_UPLOAD_CONCURRENCY=4    GitHub/R2 upload concurrency
 #   DEEPSEEK_GUI_RUNTIME_CACHE=0    disable bundled runtime cache
 #
@@ -151,6 +151,12 @@ build_macos_parallel() {
 }
 
 build_macos() {
+  if $SIGNING && [[ "${MAC_RELEASE_PARALLEL}" != "force" ]]; then
+    cyan "Building macOS serially because Developer ID signing is enabled."
+    npm run dist:mac || die "macOS build failed"
+    return
+  fi
+
   if [[ "${MAC_RELEASE_PARALLEL}" == "0" ]]; then
     cyan "Building macOS serially (MAC_RELEASE_PARALLEL=0)..."
     npm run dist:mac || die "macOS build failed"
