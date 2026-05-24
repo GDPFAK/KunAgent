@@ -239,7 +239,7 @@ export function MessageTimeline({
 
   return (
     <div ref={containerRef} className="ds-no-drag flex min-h-0 flex-1 flex-col overflow-y-auto overflow-x-hidden">
-      <div className="mx-auto flex w-full min-w-0 max-w-4xl flex-col gap-8 px-4 pb-10 pt-8 sm:px-6 md:px-8">
+      <div className="ds-chat-column-inset mx-auto flex w-full min-w-0 max-w-4xl flex-col gap-8 pb-10 pt-8">
         {!activeThreadId && (
           <EmptyHero
             route={heroRoute}
@@ -493,32 +493,32 @@ function EmptyHero({
   ]
 
   return (
-    <div className="ds-no-drag flex flex-col items-center justify-center px-4 pb-4 pt-20 text-center md:pt-28">
-      <h1 className="text-[40px] font-semibold tracking-[-0.045em] text-ds-ink md:text-[56px]">
+    <div className="ds-empty-hero ds-no-drag flex flex-col items-center justify-center px-4 pb-4 pt-20 text-center">
+      <h1 className="ds-empty-hero-title text-[40px] font-semibold tracking-[-0.045em] text-ds-ink">
         {t('emptyHeroTitle')}
       </h1>
-      <p className="mt-5 text-[17px] leading-8 text-ds-muted md:text-[18px]">
+      <p className="ds-empty-hero-sub mt-5 text-[17px] leading-8 text-ds-muted">
         {t('emptyHeroSub')}
       </p>
 
-      <div className="mt-12 grid w-full max-w-[980px] grid-cols-1 gap-5 sm:grid-cols-2">
+      <div className="ds-empty-hero-grid mt-12 grid w-full max-w-[980px] gap-5">
         {suggestions.map((s) => (
           <button
             key={s.titleKey}
             type="button"
             onClick={() => onSelectSuggestion?.(t(s.promptKey))}
-            className="group flex min-h-[118px] items-center gap-4 rounded-[24px] border border-[rgba(15,23,42,0.1)] bg-[rgba(255,255,255,0.92)] px-6 py-5 text-left shadow-[0_18px_48px_rgba(86,103,136,0.08)] transition duration-200 hover:-translate-y-0.5 hover:border-[rgba(0,136,255,0.18)] hover:shadow-[0_24px_56px_rgba(86,103,136,0.14)] dark:border-white/10 dark:bg-[rgba(24,24,24,0.9)] dark:shadow-[0_20px_52px_rgba(0,0,0,0.24)]"
+            className="ds-empty-hero-card group flex min-h-[118px] items-center gap-4 rounded-[24px] border border-[rgba(15,23,42,0.1)] bg-[rgba(255,255,255,0.92)] px-6 py-5 text-left shadow-[0_18px_48px_rgba(86,103,136,0.08)] transition duration-200 hover:-translate-y-0.5 hover:border-[rgba(0,136,255,0.18)] hover:shadow-[0_24px_56px_rgba(86,103,136,0.14)] dark:border-white/10 dark:bg-[rgba(24,24,24,0.9)] dark:shadow-[0_20px_52px_rgba(0,0,0,0.24)]"
           >
             <span
-              className={`flex h-14 w-14 shrink-0 items-center justify-center rounded-[18px] ${SUGGESTION_TONE[s.tone]}`}
+              className={`ds-empty-hero-card-icon flex h-14 w-14 shrink-0 items-center justify-center rounded-[18px] ${SUGGESTION_TONE[s.tone]}`}
             >
               {s.icon}
             </span>
             <span className="min-w-0 flex-1">
-              <span className="block truncate text-[18px] font-semibold tracking-[-0.02em] text-ds-ink md:text-[20px]">
+              <span className="ds-empty-hero-card-title block truncate text-[18px] font-semibold tracking-[-0.02em] text-ds-ink">
                 {t(s.titleKey)}
               </span>
-              <span className="mt-1 block text-[15px] leading-6 text-ds-faint md:text-[16px]">
+              <span className="ds-empty-hero-card-sub mt-1 block text-[15px] leading-6 text-ds-faint">
                 {t(s.subKey)}
               </span>
             </span>

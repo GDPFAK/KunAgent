@@ -238,7 +238,7 @@ export function FloatingComposer({
   }
 
   return (
-    <div className="pointer-events-auto w-full max-w-4xl px-4 pb-5 pt-1 sm:px-6 md:px-8">
+    <div className="ds-chat-column-inset pointer-events-auto w-full max-w-4xl pb-5 pt-1">
       {queuedMessages.length > 0 ? (
         <div className="mb-2 rounded-[22px] border border-ds-border bg-ds-card/88 px-4 py-3 shadow-sm backdrop-blur-xl">
           <div className="flex flex-wrap items-center justify-between gap-2">
@@ -402,7 +402,7 @@ export function FloatingComposer({
               }}
             />
 
-            <label className="ds-no-drag relative hidden max-w-[220px] shrink-0 items-center sm:inline-flex">
+            <label className="ds-composer-model-picker ds-no-drag relative max-w-[220px] shrink-0 items-center">
               <span className="sr-only">{t('composerModel')}</span>
               <select
                 value={composerModel}

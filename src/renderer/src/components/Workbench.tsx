@@ -1,5 +1,5 @@
 import type { PointerEvent as ReactPointerEvent, ReactElement } from 'react'
-import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
+import { lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Globe2, PanelLeftClose, PanelLeftOpen } from 'lucide-react'
 import { useShallow } from 'zustand/react/shallow'
@@ -8,6 +8,7 @@ import { parseClawCommand } from '@shared/claw-commands'
 import type { ChatBlock } from '../agent/types'
 import { CLAW_COMPOSER_MODEL_IDS, useChatStore } from '../store/chat-store'
 import {
+  extractLatestTurnAutoOpenDevPreviewUrls,
   extractLatestTurnDevPreviewUrls,
   formatDevPreviewUrlLabel
 } from '../lib/dev-preview-detection'
@@ -48,6 +49,7 @@ const RIGHT_PANEL_MODE_KEY = 'deepseekgui.layout.rightPanelMode'
 const BOTTOM_PANEL_HEIGHT_KEY = 'deepseekgui.layout.bottomTerminalHeight'
 const LEFT_PANEL_DEFAULT = 288
 const RIGHT_PANEL_DEFAULT = 360
+const CODE_PANEL_PREFERRED = 560
 const BOTTOM_PANEL_DEFAULT = 260
 const LEFT_PANEL_MIN = 236
 const LEFT_PANEL_MAX = 500
@@ -58,6 +60,7 @@ const BOTTOM_PANEL_MAX = 520
 const SIDEBAR_HARD_MIN = 180
 const MAIN_MIN_WIDTH = 560
 const MAIN_MIN_HEIGHT = 240
+const PANEL_RESIZE_HANDLE_WIDTH = 8
 
 function clampWidth(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value))
@@ -137,6 +140,11 @@ function fitWorkbenchWidths(
   rightWidth: number,
   panels: { leftPanelVisible: boolean; rightPanelVisible: boolean }
 ): { left: number; right: number } {
+  const handleWidth =
+    (panels.leftPanelVisible ? PANEL_RESIZE_HANDLE_WIDTH : 0) +
+    (panels.rightPanelVisible ? PANEL_RESIZE_HANDLE_WIDTH : 0)
+  const usableWidth = Math.max(0, containerWidth - handleWidth)
+
   if (!panels.leftPanelVisible) {
     if (!panels.rightPanelVisible) {
       return {
@@ -144,7 +152,7 @@ function fitWorkbenchWidths(
         right: clampWidth(rightWidth, RIGHT_PANEL_MIN, RIGHT_PANEL_MAX)
       }
     }
-    const safeContainer = Math.max(containerWidth, MAIN_MIN_WIDTH + SIDEBAR_HARD_MIN)
+    const safeContainer = Math.max(usableWidth, MAIN_MIN_WIDTH + SIDEBAR_HARD_MIN)
     const rightFloor =
       safeContainer - MAIN_MIN_WIDTH >= RIGHT_PANEL_MIN ? RIGHT_PANEL_MIN : SIDEBAR_HARD_MIN
     const rightCeil = Math.min(
@@ -158,7 +166,7 @@ function fitWorkbenchWidths(
   }
 
   const safeContainer = Math.max(
-    containerWidth,
+    usableWidth,
     MAIN_MIN_WIDTH + SIDEBAR_HARD_MIN + (panels.rightPanelVisible ? SIDEBAR_HARD_MIN : 0)
   )
   if (!panels.rightPanelVisible) {
@@ -300,7 +308,7 @@ export function Workbench(): ReactElement {
     readStoredWidth(BOTTOM_PANEL_HEIGHT_KEY, BOTTOM_PANEL_DEFAULT)
   )
   const [runtimeDiagnosticsOpen, setRuntimeDiagnosticsOpen] = useState(false)
-  const stageInsetClass = 'px-5 md:px-10 lg:px-16 xl:px-24'
+  const stageInsetClass = 'ds-stage-inset'
 
   const shellRef = useRef<HTMLDivElement | null>(null)
   const draftByThread = useRef<Record<string, string>>({})
@@ -325,11 +333,16 @@ export function Workbench(): ReactElement {
     () => extractLatestTurnDevPreviewUrls(devPreviewBlocks),
     [devPreviewBlocks]
   )
+  const autoOpenDevPreviewUrls = useMemo(
+    () => extractLatestTurnAutoOpenDevPreviewUrls(devPreviewBlocks),
+    [devPreviewBlocks]
+  )
   const activeClawChannel = useMemo(
     () => clawChannels.find((channel) => channel.id === activeClawChannelId) ?? null,
     [activeClawChannelId, clawChannels]
   )
   const latestDevPreviewUrl = detectedDevPreviewUrls[0] ?? null
+  const latestAutoOpenDevPreviewUrl = autoOpenDevPreviewUrls[0] ?? null
   const showDevPreviewCard =
     route === 'chat' &&
     latestDevPreviewUrl !== null
@@ -393,6 +406,7 @@ export function Workbench(): ReactElement {
         ...detail,
         workspaceRoot: detail.workspaceRoot ?? workspaceRoot
       })
+      setRightSidebarWidth((width) => Math.max(width, CODE_PANEL_PREFERRED))
       setRightPanelMode('file')
     }
 
@@ -412,11 +426,11 @@ export function Workbench(): ReactElement {
   }, [activeThreadId, rightPanelMode])
 
   useEffect(() => {
-    if (!latestDevPreviewUrl || route !== 'chat') return
-    if (autoOpenedPreviewUrlRef.current === latestDevPreviewUrl) return
-    autoOpenedPreviewUrlRef.current = latestDevPreviewUrl
+    if (!latestAutoOpenDevPreviewUrl || route !== 'chat') return
+    if (autoOpenedPreviewUrlRef.current === latestAutoOpenDevPreviewUrl) return
+    autoOpenedPreviewUrlRef.current = latestAutoOpenDevPreviewUrl
     setRightPanelMode('browser')
-  }, [latestDevPreviewUrl, route])
+  }, [latestAutoOpenDevPreviewUrl, route])
 
   useEffect(() => {
     if (workspaceRoot.trim()) return
@@ -488,7 +502,7 @@ export function Workbench(): ReactElement {
     return () => window.removeEventListener('keydown', onKey)
   }, [createThread])
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const sync = (): void => {
       const containerWidth = shellRef.current?.clientWidth ?? window.innerWidth
       const next = fitWorkbenchWidths(
@@ -858,7 +872,7 @@ export function Workbench(): ReactElement {
 
         <div className="flex min-h-0 flex-1">
           <div className={`flex min-h-0 min-w-0 flex-1 ${stageInsetClass}`}>
-          <section className="ds-drag flex min-h-0 min-w-0 flex-1 flex-col">
+          <section className="ds-chat-stage ds-drag flex min-h-0 min-w-0 flex-1 flex-col">
             <header className="ds-topbar-surface relative z-10 mt-3 flex min-h-[46px] w-full shrink-0 items-stretch overflow-visible rounded-[24px]">
               <div className="flex w-full min-w-0 items-center justify-between gap-3 px-3 py-2 sm:px-4 md:pl-5 md:pr-2">
                 <div className="flex min-w-0 flex-1 items-center gap-2.5">

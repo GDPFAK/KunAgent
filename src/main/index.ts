@@ -322,8 +322,11 @@ function createAppIcon(source: string): Electron.NativeImage {
 
 const appIcon = createAppIcon(deepseekLogoPng)
 traceStartup('app icon loaded', { source: deepseekLogoPng.startsWith('data:') ? 'data-url' : 'path' })
-const gotSingleInstanceLock = app.requestSingleInstanceLock()
-traceStartup('single instance lock checked', { gotSingleInstanceLock })
+const gotSingleInstanceLock = runningClawScheduleMcpServer || app.requestSingleInstanceLock()
+traceStartup('single instance lock checked', {
+  gotSingleInstanceLock,
+  skippedForClawScheduleMcpServer: runningClawScheduleMcpServer
+})
 
 function normalizeNotificationText(raw: string | undefined, fallback: string, maxLength: number): string {
   const value = typeof raw === 'string' && raw.trim() ? raw.trim() : fallback
@@ -410,7 +413,7 @@ function resolveGuiReleaseRepo(): string | null {
   }
 }
 
-if (!gotSingleInstanceLock) {
+if (!runningClawScheduleMcpServer && !gotSingleInstanceLock) {
   app.quit()
 }
 

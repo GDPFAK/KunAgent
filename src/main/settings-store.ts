@@ -3,6 +3,7 @@ import { homedir } from 'node:os'
 import { basename, dirname, join } from 'node:path'
 import {
   DEFAULT_DEEPSEEK_BASE_URL,
+  DEFAULT_GUI_UPDATE_CHANNEL,
   defaultClawSettings,
   mergeClawSettings,
   normalizeAppSettings,
@@ -137,7 +138,7 @@ const defaultSettings = (): AppSettingsV1 => ({
     turnComplete: true
   },
   guiUpdate: {
-    channel: 'frontier'
+    channel: DEFAULT_GUI_UPDATE_CHANNEL
   },
   claw: defaultClawSettings()
 })
