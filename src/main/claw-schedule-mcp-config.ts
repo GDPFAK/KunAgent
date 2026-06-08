@@ -28,7 +28,14 @@ export function resolveKunConfigPath(): string {
 }
 
 export function resolveDeepseekConfigPath(): string {
-  return resolveKunConfigPath()
+  // The "DeepSeek config" surfaced to GUI users is the JSON file that
+  // syncGuiManagedKunConfig() reads on every Kun startup. Keep this
+  // alias pointing at the JSON file so that the IPC handlers
+  // `deepseek:config:{read,write,open-dir}` use the same path that the
+  // runtime consumes (see issue #68). The historical alias
+  // (resolveKunConfigPath = ~/.kun/config.toml) still exists for callers
+  // that need to clean up legacy TOML data.
+  return resolveKunMcpJsonPath()
 }
 
 export function resolveKunMcpJsonPath(): string {

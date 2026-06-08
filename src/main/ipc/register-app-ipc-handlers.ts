@@ -209,7 +209,6 @@ export function registerAppIpcHandlers(options: RegisterAppIpcHandlersOptions): 
     pollFeishuInstall,
     startWeixinInstallQrcode,
     pollWeixinInstall,
-    resolveKunConfigPath,
     showTurnCompleteNotification,
     getAppVersion,
     readGuiUpdateState,
@@ -509,7 +508,7 @@ export function registerAppIpcHandlers(options: RegisterAppIpcHandlersOptions): 
   })
 
   ipcMain.handle('deepseek:config:read', async () => {
-    const path = resolveKunConfigPath()
+    const path = options.resolveKunConfigPath()
     try {
       const content = await readFile(path, 'utf8')
       return { path, content, exists: true as const }
@@ -527,7 +526,7 @@ export function registerAppIpcHandlers(options: RegisterAppIpcHandlersOptions): 
       deepseekConfigContentSchema,
       content
     )
-    const path = resolveKunConfigPath()
+    const path = options.resolveKunConfigPath()
     await mkdir(dirname(path), { recursive: true })
     await writeFile(path, validatedContent, 'utf8')
     return { ok: true as const, path }
@@ -535,7 +534,7 @@ export function registerAppIpcHandlers(options: RegisterAppIpcHandlersOptions): 
 
   ipcMain.handle('deepseek:config:open-dir', async () => {
     try {
-      const path = resolveKunConfigPath()
+      const path = options.resolveKunConfigPath()
       const dirPath = dirname(path)
       await mkdir(dirPath, { recursive: true })
       return openPathWithShell(dirPath)

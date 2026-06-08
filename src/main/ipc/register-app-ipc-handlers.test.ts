@@ -1,4 +1,7 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   mergeScheduleSettings,
   defaultClawSettings,
@@ -271,5 +274,77 @@ describe('registerAppIpcHandlers', () => {
     expect(webContents.setZoomLevel).toHaveBeenCalledWith(1)
     expect(mainWindow.maximize).toHaveBeenCalledTimes(1)
     expect(mainWindow.close).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('deepseek:config handlers use the resolved path that Kun runtime reads', () => {
+  let tempRoot: string | undefined
+
+  beforeEach(async () => {
+    handlers.clear()
+    tempRoot = await mkdtemp(join(tmpdir(), 'deepseek-config-handler-'))
+  })
+
+  afterEach(async () => {
+    if (tempRoot) {
+      await rm(tempRoot, { recursive: true, force: true })
+      tempRoot = undefined
+    }
+  })
+
+  it('writes and reads deepseek MCP config through the injected path (issue #68)', async () => {
+    const { registerAppIpcHandlers } = await import('./register-app-ipc-handlers')
+    const mcpConfigPath = join(tempRoot!, 'mcp.json')
+    const tomlConfigPath = join(tempRoot!, 'config.toml')
+    registerAppIpcHandlers(registerOptions({
+      resolveKunConfigPath: () => mcpConfigPath
+    }))
+
+    const payload = JSON.stringify({
+      servers: { 'stata-mcp': { command: 'uvx', args: ['stata-mcp'] } }
+    })
+
+    // write → goes to mcp.json (not config.toml)
+    const writeResult = await handlers.get('deepseek:config:write')?.({}, payload) as { ok: boolean; path: string }
+    expect(writeResult).toMatchObject({ ok: true, path: mcpConfigPath })
+
+    const written = JSON.parse(await readFile(mcpConfigPath, 'utf8')) as { servers: Record<string, unknown> }
+    expect(written.servers['stata-mcp']).toMatchObject({ command: 'uvx', args: ['stata-mcp'] })
+
+    // confirm the TOML path was NOT touched (would be the old broken behaviour)
+    await expect(readFile(tomlConfigPath, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
+
+    // read → returns content from the same mcp.json
+    const readResult = await handlers.get('deepseek:config:read')?.({}) as { path: string; content: string; exists: boolean }
+    expect(readResult.path).toBe(mcpConfigPath)
+    expect(readResult.exists).toBe(true)
+    expect(JSON.parse(readResult.content)).toMatchObject({
+      servers: { 'stata-mcp': { command: 'uvx', args: ['stata-mcp'] } }
+    })
+  })
+
+  it('opens the directory that contains the resolved MCP config file', async () => {
+    vi.resetModules()
+    const openPathWithShell = vi.fn(async () => ({ ok: true as const }))
+    vi.doMock('../services/workspace-editors', async () => {
+      const actual = await vi.importActual<typeof import('../services/workspace-editors')>('../services/workspace-editors')
+      return { ...actual, openPathWithShell }
+    })
+    try {
+      const { registerAppIpcHandlers } = await import('./register-app-ipc-handlers')
+      const mcpConfigPath = join(tempRoot!, 'mcp.json')
+      registerAppIpcHandlers(registerOptions({
+        resolveKunConfigPath: () => mcpConfigPath
+      }))
+
+      const openResult = await handlers.get('deepseek:config:open-dir')?.({}) as { ok: boolean }
+
+      expect(openResult.ok).toBe(true)
+      // dirPath = dirname(mcpConfigPath) === tempRoot
+      expect(openPathWithShell).toHaveBeenCalledWith(tempRoot)
+    } finally {
+      vi.doUnmock('../services/workspace-editors')
+      vi.resetModules()
+    }
   })
 })

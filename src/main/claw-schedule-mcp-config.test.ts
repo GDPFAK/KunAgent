@@ -78,7 +78,7 @@ describe('claw schedule MCP config', () => {
   it('uses Kun config files by default', () => {
     expect(resolveKunConfigPath()).toBe(join(homedir(), '.kun', 'config.toml'))
     expect(resolveKunMcpJsonPath()).toBe(join(homedir(), '.kun', 'mcp.json'))
-    expect(resolveDeepseekConfigPath()).toBe(resolveKunConfigPath())
+    expect(resolveDeepseekConfigPath()).toBe(resolveKunMcpJsonPath())
   })
 
   it('writes the gui_schedule server to the Kun MCP JSON config shape', () => {
