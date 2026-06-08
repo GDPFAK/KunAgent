@@ -44,9 +44,8 @@ export class InMemoryApprovalGate implements ApprovalGate {
   decide(approvalId: string, decision: 'allow' | 'deny', reason?: string): boolean {
     const approval = this.approvals.get(approvalId)
     if (!approval) return false
-    this.cleanupEntry(approvalId)
     const resolver = this.resolvers.get(approvalId)
-    this.resolvers.delete(approvalId)
+    this.cleanupEntry(approvalId)
     resolver?.resolve(decision)
     return true
   }
@@ -81,14 +80,14 @@ export class InMemoryApprovalGate implements ApprovalGate {
   private expire(approvalId: string, reason = 'approval expired'): void {
     const approval = this.approvals.get(approvalId)
     if (!approval) return
-    this.cleanupEntry(approvalId)
     const resolver = this.resolvers.get(approvalId)
-    this.resolvers.delete(approvalId)
+    this.cleanupEntry(approvalId)
     resolver?.reject(new Error(`${reason}: ${approvalId}`))
   }
 
   private cleanupEntry(approvalId: string): void {
     this.approvals.delete(approvalId)
+    this.resolvers.delete(approvalId)
     const timer = this.timers.get(approvalId)
     if (timer) {
       clearTimeout(timer)
