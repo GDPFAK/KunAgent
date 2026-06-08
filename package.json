@@ -9,6 +9,7 @@
     "build": "npm run build:kun && electron-vite build",
     "build:kun": "node ./scripts/ensure-kun-install.cjs && npm --prefix kun run build",
     "lint": "eslint .",
+    "lint:guard": "eslint --config eslint.config.guard.js src/renderer",
     "test": "vitest run",
     "test:watch": "vitest",
     "dist": "npm run build && npx --yes electron-builder@26.8.1 --config electron-builder.config.cjs --publish never",
