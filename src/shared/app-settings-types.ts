@@ -2,12 +2,14 @@ import type { GuiUpdateChannel } from './gui-update'
 import type { KeyboardShortcutsConfigV1 } from './keyboard-shortcuts'
 import type { ApprovalPolicy, SandboxMode } from '../../kun/src/contracts/policy.js'
 import type { ModelEndpointFormat } from '../../kun/src/contracts/model-endpoint-format.js'
+import type { ConnectionsSettingsPatchV1, ConnectionsSettingsV1 } from './app-settings-connections'
 export {
   DEFAULT_MODEL_ENDPOINT_FORMAT,
   MODEL_ENDPOINT_FORMATS,
   modelEndpointPath,
   normalizeModelEndpointFormat
 } from '../../kun/src/contracts/model-endpoint-format.js'
+export type { ConnectionsSettingsPatchV1, ConnectionsSettingsV1, SshConnectionV1 } from './app-settings-connections'
 export { DEFAULT_GUI_UPDATE_CHANNEL, normalizeGuiUpdateChannel, type GuiUpdateChannel } from './gui-update'
 export {
   DEFAULT_APPROVAL_POLICY,
@@ -480,6 +482,7 @@ export type AppSettingsV1 = {
   notifications: NotificationConfigV1
   appBehavior: AppBehaviorConfigV1
   keyboardShortcuts: KeyboardShortcutsConfigV1
+  connections: ConnectionsSettingsV1
   write: WriteSettingsV1
   claw: ClawSettingsV1
   schedule: ScheduleSettingsV1
@@ -488,7 +491,7 @@ export type AppSettingsV1 = {
 }
 
 export type AppSettingsPatch = Partial<
-  Omit<AppSettingsV1, 'provider' | 'agents' | 'log' | 'notifications' | 'appBehavior' | 'keyboardShortcuts' | 'write' | 'claw' | 'schedule' | 'guiUpdate'>
+  Omit<AppSettingsV1, 'provider' | 'agents' | 'log' | 'notifications' | 'appBehavior' | 'keyboardShortcuts' | 'connections' | 'write' | 'claw' | 'schedule' | 'guiUpdate'>
 > & {
   provider?: ModelProviderSettingsPatchV1
   agents?: KunSettingsEnvelopePatchV1
@@ -496,6 +499,7 @@ export type AppSettingsPatch = Partial<
   notifications?: Partial<NotificationConfigV1>
   appBehavior?: Partial<AppBehaviorConfigV1>
   keyboardShortcuts?: Partial<KeyboardShortcutsConfigV1>
+  connections?: ConnectionsSettingsPatchV1
   write?: WriteSettingsPatchV1
   claw?: ClawSettingsPatchV1
   schedule?: ScheduleSettingsPatchV1

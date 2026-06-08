@@ -6,6 +6,7 @@ import {
 } from './managed-runtime-idle'
 import {
   defaultClawSettings,
+  defaultConnectionsSettings,
   defaultKeyboardShortcuts,
   defaultKunRuntimeSettings,
   defaultModelProviderSettings,
@@ -26,6 +27,7 @@ const settings: AppSettingsV1 = {
   notifications: { turnComplete: true },
   appBehavior: { openAtLogin: false, startMinimized: false, closeToTray: false },
   keyboardShortcuts: defaultKeyboardShortcuts(),
+  connections: defaultConnectionsSettings(),
   write: defaultWriteSettings(),
   claw: defaultClawSettings(),
   schedule: defaultScheduleSettings(),

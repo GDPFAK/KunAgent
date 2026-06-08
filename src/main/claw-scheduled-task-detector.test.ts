@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   defaultClawSettings,
+  defaultConnectionsSettings,
   defaultKeyboardShortcuts,
   defaultKunRuntimeSettings,
   defaultModelProviderSettings,
@@ -35,6 +36,7 @@ function settings(endpointFormat: ModelEndpointFormat): AppSettingsV1 {
     notifications: { turnComplete: true },
     appBehavior: { openAtLogin: false, startMinimized: false, closeToTray: false },
     keyboardShortcuts: defaultKeyboardShortcuts(),
+    connections: defaultConnectionsSettings(),
     write: defaultWriteSettings(),
     claw: defaultClawSettings(),
     schedule: defaultScheduleSettings(),

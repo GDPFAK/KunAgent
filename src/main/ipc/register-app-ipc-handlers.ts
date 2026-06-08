@@ -46,6 +46,7 @@ import {
   skillSaveFilePayloadSchema,
   settingsPatchSchema,
   streamIdSchema,
+  sshConnectionTestPayloadSchema,
   workspaceDirectoryCreatePayloadSchema,
   workspaceClipboardImageSavePayloadSchema,
   workspaceDirectoryTargetPayloadSchema,
@@ -91,6 +92,7 @@ import {
 import { requestWriteInfographic } from '../services/write-infographic-service'
 import { copyWriteDocumentAsRichText, exportWriteDocument } from '../services/write-export-service'
 import { listGuiSkills } from '../services/skill-service'
+import { testSshConnection } from '../services/ssh-service'
 
 type GuiUpdaterModule = typeof import('../gui-updater')
 
@@ -333,6 +335,10 @@ export function registerAppIpcHandlers(options: RegisterAppIpcHandlersOptions): 
   })
 
   ipcMain.handle('upstream:models', async () => fetchUpstreamModels())
+
+  ipcMain.handle('ssh:test-connection', async (_, payload: unknown) =>
+    testSshConnection(parseIpcPayload('ssh:test-connection', sshConnectionTestPayloadSchema, payload))
+  )
 
   ipcMain.handle('claw:status', async (): Promise<ClawRuntimeStatus> =>
     getClawRuntime()?.status() ?? {

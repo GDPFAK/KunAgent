@@ -79,6 +79,7 @@ export type SettingsRouteSection =
   | 'agents'
   | 'skill'
   | 'mcp'
+  | 'connections'
   | 'shortcuts'
   | 'claw'
 export type AppRoute = 'chat' | 'write' | 'settings' | 'plugins' | 'claw' | 'schedule'
