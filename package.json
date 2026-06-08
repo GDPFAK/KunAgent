@@ -53,7 +53,7 @@
     "lucide-react": "^0.544.0",
     "openclaw": "file:vendor/openclaw-shim",
     "pdf-lib": "^1.17.1",
-    "pdfjs-dist": "^4.10.38",
+    "pdfjs-dist": "3.11.174",
     "pngjs": "^7.0.0",
     "qrcode.react": "^4.2.0",
     "react": "^19.0.0",
@@ -102,6 +102,10 @@
       "esbuild",
       "protobufjs",
       "tesseract.js"
+    ],
+    "ignoredOptionalDependencies": [
+      "canvas",
+      "path2d-polyfill"
     ]
   }
 }
