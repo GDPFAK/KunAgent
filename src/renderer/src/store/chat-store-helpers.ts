@@ -105,11 +105,7 @@ export function mergeComposerPickList(upstreamOk: boolean, upstreamIds: string[]
       if (id.trim()) ordered.add(id.trim())
     }
   }
-  // 过滤掉官方已不再提供的chat和reasoner模型
-  const deprecatedModels = new Set(['deepseek-chat', 'deepseek-reasoner'])
-  const tail = [...ordered]
-    .filter((id) => id !== 'auto' && !deprecatedModels.has(id))
-    .sort((a, b) => a.localeCompare(b))
+  const tail = [...ordered].filter((id) => id !== 'auto').sort((a, b) => a.localeCompare(b))
   return ['auto', ...tail]
 }
 
