@@ -46,11 +46,9 @@ export function applyUiFontScale(scale: UiFontScale): void {
   const root = document.documentElement
   const factor =
     scale === 'small'
-      ? 0.82
+      ? '0.82'
       : scale === 'large'
-        ? 1
-        : 0.88
-  root.style.setProperty('--ds-ui-scale', String(factor))
-  // 设置基础字体大小，让所有使用相对单位的元素都能响应缩放
-  root.style.fontSize = `${factor * 16}px`
+        ? '1'
+        : '0.88'
+  root.style.setProperty('--ds-ui-scale', factor)
 }
