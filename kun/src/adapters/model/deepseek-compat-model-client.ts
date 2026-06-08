@@ -26,6 +26,19 @@ export type DeepseekCompatConfig = {
   nonStreaming?: boolean
   /** Maximum idle time between streaming chunks before the turn fails. */
   streamIdleTimeoutMs?: number
+  /**
+   * Retry configuration for transient HTTP errors (429, 5xx) and
+   * network failures. Retries only happen before any streaming chunk
+   * is yielded, so the consumer never sees partial + retried output.
+   */
+  retry?: {
+    /** Total attempts including the initial request. Defaults to 3. */
+    maxAttempts?: number
+    /** Base delay for exponential backoff in ms. Defaults to 500. */
+    baseDelayMs?: number
+    /** Upper bound for a single backoff delay in ms. Defaults to 8000. */
+    maxDelayMs?: number
+  }
 }
 
 type ChatMessage = {
@@ -86,6 +99,15 @@ type StreamReadResult =
   | { kind: 'error'; message: string }
 
 const DEFAULT_STREAM_IDLE_TIMEOUT_MS = 45_000
+const DEFAULT_RETRY_MAX_ATTEMPTS = 3
+const DEFAULT_RETRY_BASE_DELAY_MS = 500
+const DEFAULT_RETRY_MAX_DELAY_MS = 8_000
+
+type ResolvedRetryOptions = {
+  maxAttempts: number
+  baseDelayMs: number
+  maxDelayMs: number
+}
 
 /**
  * DeepSeek-compatible model client.
@@ -129,22 +151,43 @@ export class DeepseekCompatModelClient implements ModelClient {
       body: JSON.stringify(body),
       signal: request.abortSignal
     }
-    let response: Response
-    try {
-      response = await this.fetchImpl(url, init)
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
-      yield { kind: 'error', message: `model request failed: ${message}` }
-      return
-    }
-    if (!response.ok) {
-      const text = await response.text()
-      const classified = await this.classifyHttpError(response.status, text)
-      yield {
-        kind: 'error',
-        message: classified.message,
-        code: classified.code
+    let response: Response | undefined
+    const retry = this.retryOptions()
+    for (let attempt = 0; ; attempt += 1) {
+      if (request.abortSignal.aborted) {
+        yield { kind: 'error', message: 'request was aborted before start' }
+        return
       }
+      try {
+        response = await this.fetchImpl(url, init)
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        if (attempt < retry.maxAttempts - 1) {
+          await sleep(computeBackoffDelay(attempt, retry), request.abortSignal)
+          continue
+        }
+        yield { kind: 'error', message: `model request failed: ${message}` }
+        return
+      }
+      if (response.ok) break
+      if (attempt >= retry.maxAttempts - 1 || !isRetryableHttpStatus(response.status)) {
+        const text = await response.text()
+        const classified = await this.classifyHttpError(response.status, text)
+        yield {
+          kind: 'error',
+          message: classified.message,
+          code: classified.code
+        }
+        return
+      }
+      const retryAfterMs = parseRetryAfterMs(response.headers.get('retry-after'))
+      await sleep(
+        Math.min(retryAfterMs ?? computeBackoffDelay(attempt, retry), retry.maxDelayMs),
+        request.abortSignal
+      )
+    }
+    if (!response) {
+      yield { kind: 'error', message: 'model request produced no response' }
       return
     }
     if (this.config.nonStreaming || response.headers.get('content-type')?.includes('application/json')) {
@@ -173,6 +216,15 @@ export class DeepseekCompatModelClient implements ModelClient {
       headers.Authorization = `Bearer ${this.config.apiKey}`
     }
     return { ...headers, ...(this.config.headers ?? {}) }
+  }
+
+  private retryOptions(): ResolvedRetryOptions {
+    const retry = this.config.retry
+    return {
+      maxAttempts: Math.max(1, Math.floor(retry?.maxAttempts ?? DEFAULT_RETRY_MAX_ATTEMPTS)),
+      baseDelayMs: Math.max(0, Math.floor(retry?.baseDelayMs ?? DEFAULT_RETRY_BASE_DELAY_MS)),
+      maxDelayMs: Math.max(1, Math.floor(retry?.maxDelayMs ?? DEFAULT_RETRY_MAX_DELAY_MS))
+    }
   }
 
   private async classifyHttpError(status: number, text: string): Promise<{ message: string; code: string }> {
@@ -1045,4 +1097,43 @@ function limitHistoryPreservingCompaction(history: TurnItem[], windowSize: numbe
     return windowSize <= 1 ? [item] : [item, ...history.slice(-(windowSize - 1))]
   }
   return limited
+}
+
+function isRetryableHttpStatus(status: number): boolean {
+  return status === 429 || (status >= 500 && status <= 599)
+}
+
+function parseRetryAfterMs(value: string | null): number | undefined {
+  if (!value) return undefined
+  const trimmed = value.trim()
+  const seconds = Number(trimmed)
+  if (Number.isFinite(seconds) && seconds >= 0) {
+    return Math.min(Math.ceil(seconds * 1000), 60_000)
+  }
+  const date = Date.parse(trimmed)
+  if (Number.isFinite(date)) {
+    return Math.max(0, Math.ceil(date - Date.now()))
+  }
+  return undefined
+}
+
+function computeBackoffDelay(attempt: number, options: ResolvedRetryOptions): number {
+  const raw = options.baseDelayMs * Math.pow(2, attempt)
+  const jitter = raw * 0.25 * (Math.random() * 2 - 1)
+  return Math.max(0, Math.min(Math.ceil(raw + jitter), options.maxDelayMs))
+}
+
+function sleep(ms: number, signal: AbortSignal): Promise<void> {
+  if (ms <= 0 || signal.aborted) return Promise.resolve()
+  return new Promise((resolve) => {
+    const timer = setTimeout(resolve, ms)
+    signal.addEventListener(
+      'abort',
+      () => {
+        clearTimeout(timer)
+        resolve()
+      },
+      { once: true }
+    )
+  })
 }

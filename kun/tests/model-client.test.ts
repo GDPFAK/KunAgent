@@ -1168,4 +1168,162 @@ describe('DeepseekCompatModelClient', () => {
     })
     expect(chunks.find((chunk) => chunk.kind === 'completed')).toBeUndefined()
   })
+
+  it('retries on HTTP 429 and succeeds on a later attempt', async () => {
+    const successResponse = {
+      id: 'ok',
+      model: 'deepseek-chat',
+      choices: [{ index: 0, finish_reason: 'stop', message: { role: 'assistant', content: 'done' } }]
+    }
+    let calls = 0
+    const fetchImpl: typeof fetch = async () => {
+      calls += 1
+      if (calls < 3) {
+        return new Response('rate limited', {
+          status: 429,
+          headers: { 'retry-after': '0.01' }
+        })
+      }
+      return new Response(JSON.stringify(successResponse), {
+        status: 200,
+        headers: { 'content-type': 'application/json' }
+      })
+    }
+    const client = new DeepseekCompatModelClient({
+      baseUrl: 'https://example.com/beta',
+      apiKey: 'k',
+      model: 'deepseek-chat',
+      fetchImpl,
+      nonStreaming: true,
+      retry: { maxAttempts: 3, baseDelayMs: 1, maxDelayMs: 10 }
+    })
+    const chunks = []
+    for await (const chunk of client.stream(buildRequest(new AbortController().signal))) {
+      chunks.push(chunk)
+    }
+    expect(calls).toBe(3)
+    expect(chunks.some((c) => c.kind === 'completed')).toBe(true)
+    expect(chunks.some((c) => c.kind === 'error')).toBe(false)
+  })
+
+  it('honours Retry-After header value for backoff', async () => {
+    const successResponse = {
+      id: 'ok',
+      model: 'deepseek-chat',
+      choices: [{ index: 0, finish_reason: 'stop', message: { role: 'assistant', content: 'done' } }]
+    }
+    let calls = 0
+    const fetchImpl: typeof fetch = async () => {
+      calls += 1
+      if (calls === 1) {
+        return new Response('rate limited', {
+          status: 429,
+          headers: { 'retry-after': '2' }
+        })
+      }
+      return new Response(JSON.stringify(successResponse), {
+        status: 200,
+        headers: { 'content-type': 'application/json' }
+      })
+    }
+    const client = new DeepseekCompatModelClient({
+      baseUrl: 'https://example.com/beta',
+      apiKey: 'k',
+      model: 'deepseek-chat',
+      fetchImpl,
+      nonStreaming: true,
+      retry: { maxAttempts: 2, baseDelayMs: 10_000, maxDelayMs: 10_000 }
+    })
+    // Use fake timers to verify the retry-after value is respected.
+    const start = Date.now()
+    const chunks: Array<{ kind: string }> = []
+    for await (const chunk of client.stream(buildRequest(new AbortController().signal))) {
+      chunks.push(chunk)
+    }
+    const elapsed = Date.now() - start
+    // Retry-After: 2 means at least ~2s of delay before second attempt.
+    expect(elapsed).toBeGreaterThanOrEqual(1900)
+    expect(calls).toBe(2)
+    expect(chunks.some((c: any) => c.kind === 'completed')).toBe(true)
+  })
+
+  it('does not retry on non-retryable HTTP errors (e.g. 400)', async () => {
+    let calls = 0
+    const fetchImpl: typeof fetch = async () => {
+      calls += 1
+      return new Response('bad request', { status: 400 })
+    }
+    const client = new DeepseekCompatModelClient({
+      baseUrl: 'https://example.com/beta',
+      apiKey: 'k',
+      model: 'deepseek-chat',
+      fetchImpl,
+      nonStreaming: true,
+      retry: { maxAttempts: 3, baseDelayMs: 1, maxDelayMs: 10 }
+    })
+    const chunks = []
+    for await (const chunk of client.stream(buildRequest(new AbortController().signal))) {
+      chunks.push(chunk)
+    }
+    expect(calls).toBe(1)
+    expect(chunks[0].kind).toBe('error')
+  })
+
+  it('retries on network errors before yielding any chunk', async () => {
+    const successResponse = {
+      id: 'ok',
+      model: 'deepseek-chat',
+      choices: [{ index: 0, finish_reason: 'stop', message: { role: 'assistant', content: 'done' } }]
+    }
+    let calls = 0
+    const fetchImpl: typeof fetch = async () => {
+      calls += 1
+      if (calls === 1) throw new TypeError('network error')
+      return new Response(JSON.stringify(successResponse), {
+        status: 200,
+        headers: { 'content-type': 'application/json' }
+      })
+    }
+    const client = new DeepseekCompatModelClient({
+      baseUrl: 'https://example.com/beta',
+      apiKey: 'k',
+      model: 'deepseek-chat',
+      fetchImpl,
+      nonStreaming: true,
+      retry: { maxAttempts: 3, baseDelayMs: 1, maxDelayMs: 10 }
+    })
+    const chunks = []
+    for await (const chunk of client.stream(buildRequest(new AbortController().signal))) {
+      chunks.push(chunk)
+    }
+    expect(calls).toBe(2)
+    expect(chunks.some((c) => c.kind === 'completed')).toBe(true)
+  })
+
+  it('respects abort signal during retry backoff', async () => {
+    const controller = new AbortController()
+    let calls = 0
+    const fetchImpl: typeof fetch = async () => {
+      calls += 1
+      return new Response('rate limited', { status: 429 })
+    }
+    const client = new DeepseekCompatModelClient({
+      baseUrl: 'https://example.com/beta',
+      apiKey: 'k',
+      model: 'deepseek-chat',
+      fetchImpl,
+      nonStreaming: true,
+      retry: { maxAttempts: 5, baseDelayMs: 10_000, maxDelayMs: 10_000 }
+    })
+    const request = buildRequest(controller.signal)
+    // Abort during the first backoff delay.
+    setTimeout(() => controller.abort(), 10)
+    const chunks = []
+    for await (const chunk of client.stream(request)) {
+      chunks.push(chunk)
+    }
+    expect(calls).toBe(1)
+    // After abort, the loop should stop and yield an error.
+    expect(chunks.some((c) => c.kind === 'error')).toBe(true)
+  })
 })
