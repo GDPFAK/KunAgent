@@ -52,6 +52,8 @@
     "lucide-react": "^0.544.0",
     "openclaw": "file:vendor/openclaw-shim",
     "pdf-lib": "^1.17.1",
+    "pdfjs-dist": "^4.10.38",
+    "pngjs": "^7.0.0",
     "qrcode.react": "^4.2.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
@@ -59,7 +61,6 @@
     "react-markdown": "^10.1.0",
     "rehype-harden": "^1.1.8",
     "remark-gfm": "^4.0.1",
-    "sharp": "^0.34.5",
     "shiki": "^3.23.0",
     "streamdown": "^2.5.0",
     "tesseract.js": "^6.0.1",
@@ -99,7 +100,6 @@
       "electron",
       "esbuild",
       "protobufjs",
-      "sharp",
       "tesseract.js"
     ]
   }
