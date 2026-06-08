@@ -1,36 +1,16 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { z } from 'zod'
-
-// pdfjs-dist v3 uses CommonJS (`build/pdf.js`), which avoids the ESM
-// `await import("./pdf.worker.mjs")` path that fails inside Electron's
-// ASAR. v4+ is ESM-only and triggers "Unable to deserialize cloned
-// data" when the fake worker setup tries to LoopbackPort-postMessage
-// in the main process.
-import pdfjsLib from 'pdfjs-dist/legacy/build/pdf.js'
-const { getDocument } = pdfjsLib as { getDocument: (params: unknown) => { promise: Promise<unknown> } }
-import { PNG } from 'pngjs'
 import { PDFDocument } from 'pdf-lib'
 import { existsSync, appendFileSync } from 'node:fs'
-import { readFile, writeFile, mkdir, unlink, rmdir } from 'node:fs/promises'
+import { readFile, writeFile, mkdir, unlink, readdir, rmdir } from 'node:fs/promises'
 import { basename, dirname, extname, join, sep } from 'node:path'
 import { tmpdir } from 'node:os'
 import { randomUUID } from 'node:crypto'
-import { fork } from 'node:child_process'
+import { fork, execFile, spawn } from 'node:child_process'
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Types
-// ═══════════════════════════════════════════════════════════════════════════
-
-type DOMMatrixLike = {
-  a: number; b: number; c: number; d: number; e: number; f: number
-  invertSelf(): DOMMatrixLike
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
-// Debug logging — writes to /tmp/ocr-debug.log so failures in the packaged
-// Electron app (where stdout is not visible) can be inspected post-mortem.
-// Each call is best-effort: any I/O error swallowed.
+// Debug logging
 // ═══════════════════════════════════════════════════════════════════════════
 
 const DEBUG_LOG = '/tmp/ocr-debug.log'
@@ -59,16 +39,112 @@ const SUPPORTED_IMAGE_EXTENSIONS = new Set([
 ])
 
 // ═══════════════════════════════════════════════════════════════════════════
-// OCR Worker Pool — uses child_process.fork() instead of worker_threads
+// pdftoppm detection — uses system-installed poppler-utils
+// ═══════════════════════════════════════════════════════════════════════════
+
+let _pdftoppmPath: string | null | undefined // undefined = not checked yet
+
+async function findPdftoppm(): Promise<string | null> {
+  if (_pdftoppmPath !== undefined) return _pdftoppmPath
+  return new Promise((resolve) => {
+    execFile('which', ['pdftoppm'], (err, stdout) => {
+      if (err || !stdout.trim()) {
+        _pdftoppmPath = null
+        dlog('pdftoppm: not found')
+        resolve(null)
+      } else {
+        _pdftoppmPath = stdout.trim()
+        dlog('pdftoppm: found', { path: _pdftoppmPath })
+        resolve(_pdftoppmPath)
+      }
+    })
+  })
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// PDF → PNG via pdftoppm (poppler)
+// Returns array of PNG file paths, one per page.
+// ═══════════════════════════════════════════════════════════════════════════
+
+async function renderPdfToPngs(pdfPath: string, dpi: number = PDF_RENDER_DPI): Promise<string[]> {
+  const pdftoppm = await findPdftoppm()
+  if (!pdftoppm) {
+    throw new Error(
+      'pdftoppm not found. Install poppler:\n' +
+      '  macOS:   brew install poppler\n' +
+      '  Ubuntu:  sudo apt install poppler-utils\n' +
+      '  Windows: choco install poppler  (or download from github.com/oschwartz10612/poppler-windows)'
+    )
+  }
+
+  const workDir = join(tmpdir(), `ocr-${randomUUID()}`)
+  await mkdir(workDir, { recursive: true })
+  const prefix = join(workDir, 'page')
+
+  dlog('renderPdfToPngs: starting', { pdfPath, dpi, workDir })
+
+  return new Promise((resolve, reject) => {
+    const child = spawn(pdftoppm, [
+      '-png',
+      '-r', String(dpi),
+      pdfPath,
+      prefix
+    ], { stdio: ['pipe', 'pipe', 'pipe'] })
+
+    let stderr = ''
+    child.stderr?.on('data', (chunk: Buffer) => { stderr += chunk.toString() })
+
+    child.on('exit', async (code) => {
+      dlog('renderPdfToPngs: pdftoppm exited', { code, stderr: stderr.slice(0, 500) })
+
+      if (code !== 0) {
+        await cleanupDir(workDir)
+        reject(new Error(`pdftoppm failed (exit ${code}): ${stderr.slice(0, 300)}`))
+        return
+      }
+
+      try {
+        const files = await readdir(workDir)
+        const pngFiles = files
+          .filter(f => f.endsWith('.png'))
+          .sort()
+          .map(f => join(workDir, f))
+
+        dlog('renderPdfToPngs: done', { pageCount: pngFiles.length })
+
+        if (pngFiles.length === 0) {
+          await cleanupDir(workDir)
+          reject(new Error('pdftoppm produced no output images'))
+          return
+        }
+
+        resolve(pngFiles)
+      } catch (err) {
+        await cleanupDir(workDir)
+        reject(err)
+      }
+    })
+
+    child.on('error', async (err) => {
+      await cleanupDir(workDir)
+      reject(new Error(`Failed to run pdftoppm: ${err.message}`))
+    })
+  })
+}
+
+async function cleanupDir(dir: string): Promise<void> {
+  try {
+    const files = await readdir(dir)
+    await Promise.all(files.map(f => unlink(join(dir, f)).catch(() => undefined)))
+    await rmdir(dir).catch(() => undefined)
+  } catch { /* best-effort */ }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// OCR Worker — one-shot child_process per request
 //
-// tesseract.js internally uses worker_threads.Worker, which fails in
-// Electron's ASAR environment because `new Worker(asarPath)` cannot
-// resolve virtual filesystem paths. Even with asarUnpack, the
-// structured clone of Uint8Array buffers between main thread and
-// worker thread fails with "Unable to deserialize cloned data".
-//
-// Solution: fork a separate Node.js process that loads tesseract.js
-// directly (no ASAR path resolution issues) and communicate via IPC.
+// tesseract.js uses worker_threads internally, which fails in Electron ASAR.
+// Solution: fork a fresh Node.js process for each OCR request.
 // ═══════════════════════════════════════════════════════════════════════════
 
 type OcrRequest = {
@@ -86,10 +162,6 @@ type OcrResponse = {
   data?: unknown
   error?: string
 }
-
-// ═══════════════════════════════════════════════════════════════════════════
-// Worker entry path resolution
-// ═══════════════════════════════════════════════════════════════════════════
 
 function getWorkerEntryPath(): string {
   const entryName = 'ocr-worker-entry.js'
@@ -118,10 +190,6 @@ function getWorkerEntryPath(): string {
   return parentPath
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// Tesseract path resolution (passed to the worker process)
-// ═══════════════════════════════════════════════════════════════════════════
-
 function resolveAsarUnpackedPath(asarPath: string): string {
   if (!asarPath.includes(`${sep}app.asar${sep}`)) return asarPath
   return asarPath.replace(`${sep}app.asar${sep}`, `${sep}app.asar.unpacked${sep}`)
@@ -140,14 +208,6 @@ function buildTesseractOptions(): { workerPath: string; corePath: string; langPa
     langPath: 'https://tessdata.projectnaptha.com/4.0.0'
   }
 }
-
-// ═══════════════════════════════════════════════════════════════════════════
-// One-shot OCR via child_process.spawn
-//
-// Forks a FRESH process for each OCR request. The worker runs tesseract.js
-// (which internally uses worker_threads + WASM), writes the result to
-// stdout, and exits. This avoids long-lived worker instability.
-// ═══════════════════════════════════════════════════════════════════════════
 
 function ocrViaChildProcess(filePath: string, language: string): Promise<unknown> {
   return new Promise((resolve, reject) => {
@@ -191,7 +251,7 @@ function ocrViaChildProcess(filePath: string, language: string): Promise<unknown
         } else {
           reject(new Error(resp.error || 'OCR worker error'))
         }
-      } catch (err) {
+      } catch {
         reject(new Error(`OCR worker returned invalid JSON: ${stdout.slice(0, 200)}`))
       }
     })
@@ -204,10 +264,6 @@ function ocrViaChildProcess(filePath: string, language: string): Promise<unknown
   })
 }
 
-/**
- * Pre-download Tesseract language data by running a tiny OCR.
- * This runs in the background — failures are silently ignored.
- */
 function preloadLanguages(languages: string[]): void {
   const entryPath = getWorkerEntryPath()
   const opts = buildTesseractOptions()
@@ -249,362 +305,46 @@ type OcrPage = {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Minimal Canvas for pdfjs-dist (pure JS — zero native deps)
+// Core OCR engine
 // ═══════════════════════════════════════════════════════════════════════════
 
-class NodePath2D {
-  private _cmds: string
-  private _paths: NodePath2D[]
-  constructor(arg?: string | NodePath2D) {
-    if (arg instanceof NodePath2D) {
-      this._cmds = arg._cmds
-      this._paths = [...arg._paths, arg]
-    } else {
-      this._cmds = arg ?? ''
-      this._paths = []
-    }
-  }
-  addPath(_other: NodePath2D, _transform?: unknown): void { /* noop */ }
-  moveTo(_x: number, _y: number): void {}
-  lineTo(_x: number, _y: number): void {}
-  rect(_x: number, _y: number, _w: number, _h: number): void {}
-  arc(_x: number, _y: number, _r: number, _sa: number, _ea: number, _ccw?: boolean): void {}
-  closePath(): void {}
-}
-
-;(globalThis as { Path2D?: unknown }).Path2D = NodePath2D
-
-class NodeCanvas {
-  width: number
-  height: number
-  _ctx: NodeContext | null = null
-
-  constructor(w: number, h: number) {
-    this.width = Math.max(1, w) | 0
-    this.height = Math.max(1, h) | 0
-  }
-
-  getContext(type: string) {
-    if (type !== '2d') return null
-    if (!this._ctx) this._ctx = new NodeContext(this)
-    return this._ctx
-  }
-
-  toRGBA(): Uint8ClampedArray {
-    return this._ctx ? this._ctx._pixels : new Uint8ClampedArray(0)
-  }
-
-  toPNG(): Buffer {
-    const png = new PNG({ width: this.width, height: this.height })
-    if (this._ctx) {
-      png.data = Buffer.from(this._ctx._pixels)
-    }
-    return PNG.sync.write(png)
-  }
-}
-
-class NodeContext {
-  canvas: NodeCanvas
-  _pixels: Uint8ClampedArray
-  _transform: [number, number, number, number, number, number]
-  _saveStack: Array<[number, number, number, number, number, number]>
-
-  constructor(canvas: NodeCanvas) {
-    this.canvas = canvas
-    this._pixels = new Uint8ClampedArray(canvas.width * canvas.height * 4).fill(255)
-    this._transform = [1, 0, 0, 1, 0, 0]
-    this._saveStack = []
-  }
-
-  save(): void { this._saveStack.push([...this._transform]) }
-  restore(): void {
-    const s = this._saveStack.pop()
-    if (s) this._transform = s
-  }
-  scale(sx: number, sy: number): void { this._transform[0] *= sx; this._transform[3] *= sy }
-  rotate(_angle: number): void { /* noop */ }
-  translate(tx: number, ty: number): void { this._transform[4] += tx; this._transform[5] += ty }
-
-  transform(a: number, b: number, c: number, d: number, e: number, f: number): void {
-    const m = this._transform
-    this._transform = [
-      m[0] * a + m[1] * c,
-      m[0] * b + m[1] * d,
-      m[2] * a + m[3] * c,
-      m[2] * b + m[3] * d,
-      m[4] * a + m[5] * c + e,
-      m[4] * b + m[5] * d + f
-    ]
-  }
-  setTransform(a: number, b: number, c: number, d: number, e: number, f: number): void {
-    this._transform = [a, b, c, d, e, f]
-  }
-  getTransform(): DOMMatrixLike {
-    const m = this._transform
-    // Return a DOMMatrix-compatible object. pdfjs-dist calls
-    // ctx.getTransform().invertSelf() so we need to provide that method.
-    return {
-      a: m[0], b: m[1], c: m[2], d: m[3], e: m[4], f: m[5],
-      invertSelf(): DOMMatrixLike {
-        const det = m[0] * m[3] - m[1] * m[2]
-        if (Math.abs(det) < 1e-10) return this // singular
-        const invDet = 1 / det
-        return {
-          a: m[3] * invDet, b: -m[1] * invDet,
-          c: -m[2] * invDet, d: m[0] * invDet,
-          e: (m[2] * m[5] - m[3] * m[4]) * invDet,
-          f: (m[1] * m[4] - m[0] * m[5]) * invDet,
-          invertSelf: this.invertSelf
-        }
-      }
-    }
-  }
-  resetTransform(): void { this._transform = [1, 0, 0, 1, 0, 0] }
-
-  beginPath(): void {}
-  closePath(): void {}
-  moveTo(_x: number, _y: number): void {}
-  lineTo(_x: number, _y: number): void {}
-  rect(_x: number, _y: number, _w: number, _h: number): void {}
-  arc(_x: number, _y: number, _r: number, _sa: number, _ea: number, _ccw?: boolean): void {}
-  arcTo(_x1: number, _y1: number, _x2: number, _y2: number, _r: number): void {}
-  bezierCurveTo(_cp1x: number, _cp1y: number, _cp2x: number, _cp2y: number, _x: number, _y: number): void {}
-  quadraticCurveTo(_cpx: number, _cpy: number, _x: number, _y: number): void {}
-  ellipse(_x: number, _y: number, _rx: number, _ry: number, _rot: number, _sa: number, _ea: number, _ccw?: boolean): void {}
-
-  clip(): void {}
-  fill(): void {}
-  stroke(): void {}
-  fillRect(_x: number, _y: number, _w: number, _h: number): void {}
-  strokeRect(_x: number, _y: number, _w: number, _h: number): void {}
-  clearRect(_x: number, _y: number, _w: number, _h: number): void {}
-
-  fillText(_text: string, _x: number, _y: number, _maxWidth?: number): void {}
-  strokeText(_text: string, _x: number, _y: number, _maxWidth?: number): void {}
-  measureText(text: string): TextMetrics {
-    return { width: text.length * 8 } as TextMetrics
-  }
-
-  createLinearGradient(): CanvasGradient { return { addColorStop: () => {} } as unknown as CanvasGradient }
-  createRadialGradient(): CanvasGradient { return { addColorStop: () => {} } as unknown as CanvasGradient }
-
-  putImageData(imageData: ImageData, x: number, y: number, dirtyX?: number, dirtyY?: number, dirtyW?: number, dirtyH?: number): void {
-    const src = imageData.data
-    const sw = imageData.width
-    const sh = imageData.height
-    const sx = dirtyX ?? 0
-    const sy = dirtyY ?? 0
-    const dw = dirtyW ?? sw
-    const dh = dirtyH ?? sh
-    const dx = x | 0
-    const dy = y | 0
-    const cw = this.canvas.width
-
-    for (let row = 0; row < dh && row < sh; row++) {
-      for (let col = 0; col < dw && col < sw; col++) {
-        const si = ((sy + row) * sw + (sx + col)) * 4
-        const di = ((dy + row) * cw + (dx + col)) * 4
-        if (di >= 0 && di < this._pixels.length - 3 && si >= 0 && si < src.length - 3) {
-          this._pixels[di] = src[si]
-          this._pixels[di + 1] = src[si + 1]
-          this._pixels[di + 2] = src[si + 2]
-          this._pixels[di + 3] = src[si + 3]
-        }
-      }
-    }
-  }
-
-  drawImage(img: any, sx: number, sy: number, sw?: number, sh?: number, dx?: number, dy?: number, dw?: number, dh?: number): void {
-    if (!img || !img.data) return
-    const src: Uint8ClampedArray = img.data
-    const iw = img.width || 1
-    const ih = img.height || 1
-
-    let SX: number, SY: number, SW: number, SH: number, DX: number, DY: number, DW: number, DH: number
-    if (typeof sw === 'number') {
-      SX = sx; SY = sy; SW = sw; SH = sh!
-      DX = dx!; DY = dy!; DW = dw!; DH = dh!
-    } else {
-      SX = 0; SY = 0; SW = iw; SH = ih
-      DX = sx; DY = sy; DW = sw ?? iw; DH = sh ?? ih
-    }
-
-    const cw = this.canvas.width
-    for (let row = 0; row < DH && row < SH; row++) {
-      for (let col = 0; col < DW && col < SW; col++) {
-        const si = ((SY + Math.floor(row * SH / DH)) * iw + (SX + Math.floor(col * SW / DW))) * 4
-        const di = ((DY + row) * cw + (DX + col)) * 4
-        if (di >= 0 && di < this._pixels.length - 3 && si >= 0 && si < src.length - 3) {
-          this._pixels[di] = src[si]
-          this._pixels[di + 1] = src[si + 1]
-          this._pixels[di + 2] = src[si + 2]
-          this._pixels[di + 3] = src[si + 3]
-        }
-      }
-    }
-  }
-
-  getImageData(_x: number, _y: number, w: number, h: number): ImageData {
-    return {
-      data: new Uint8ClampedArray(w * h * 4).fill(255),
-      width: w, height: h, colorSpace: 'srgb'
-    } as ImageData
-  }
-
-  createImageData(w: number, h: number): ImageData {
-    return {
-      data: new Uint8ClampedArray(w * h * 4).fill(255),
-      width: w, height: h, colorSpace: 'srgb'
-    } as ImageData
-  }
-}
-
-/**
- * pdfjs-dist's BaseCanvasFactory.create() calls this._createCanvas(w, h)
- * then does canvas.getContext("2d"). We implement _createCanvas to return
- * our NodeCanvas, which has getContext(). The create/reset/destroy methods
- * are inherited from BaseCanvasFactory.
- *
- * We also provide a plain-object fallback (pdfCanvasFactory) for legacy
- * code paths that use the object-based canvasFactory option.
- */
-const pdfCanvasFactory = {
-  create(w: number, h: number) {
-    const c = new NodeCanvas(w, h)
-    return { canvas: c, context: c.getContext('2d')! }
-  },
-  reset(ac: { canvas: NodeCanvas }, w: number, h: number) { ac.canvas.width = w; ac.canvas.height = h },
-  destroy(ac: { canvas: NodeCanvas; context: unknown }) { ac.canvas = null as unknown as NodeCanvas; ac.context = null as unknown }
-}
-
-class PdfCanvasFactory {
-  constructor(_opts?: { ownerDocument?: unknown; enableHWA?: boolean }) {
-    // pdfjs-dist calls `new CanvasFactory({ ownerDocument, enableHWA })`.
-    // We accept but ignore these — NodeCanvas works headless.
-  }
-
-  /**
-   * Called by BaseCanvasFactory.create() — must return an object with
-   * a getContext("2d") method. pdfjs-dist then calls
-   * canvas.getContext("2d") on the result.
-   */
-  _createCanvas(w: number, h: number): NodeCanvas {
-    return new NodeCanvas(w, h)
-  }
-
-  create(w: number, h: number) {
-    const c = this._createCanvas(w, h)
-    return { canvas: c, context: c.getContext('2d')! }
-  }
-
-  reset(ac: { canvas: NodeCanvas }, w: number, h: number) {
-    ac.canvas.width = w
-    ac.canvas.height = h
-  }
-
-  destroy(ac: { canvas: NodeCanvas; context: unknown }) {
-    ac.canvas = null as unknown as NodeCanvas
-    ac.context = null as unknown
-  }
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
-// Core OCR engine — delegates to forked worker process
-// ═══════════════════════════════════════════════════════════════════════════
-
-/**
- * Run OCR on a single image file via the forked worker process.
- * Returns the raw tesseract.js recognition data.
- */
-async function ocrFileViaWorker(filePath: string, language: string): Promise<unknown> {
-  dlog('ocrFileViaWorker', { filePath, language })
+async function ocrFile(filePath: string, language: string): Promise<unknown> {
+  dlog('ocrFile', { filePath, language })
   return ocrViaChildProcess(filePath, language)
 }
 
 async function runOcrOnImage(inputPath: string, language: string): Promise<unknown> {
-  const result = await ocrFileViaWorker(inputPath, language)
+  const result = await ocrFile(inputPath, language)
   return flattenOcrResult([result])
-}
-
-/**
- * Render a single PDF page to a temporary PNG file.
- */
-async function renderPdfPageToPng(
-  pdf: any,
-  pageIndex: number,
-  scale: number,
-  workDir: string
-): Promise<string | null> {
-  if (pageIndex >= pdf.numPages) return null
-
-  const page = await pdf.getPage(pageIndex + 1)
-  const viewport = page.getViewport({ scale })
-  // pdfCanvasFactory.create() returns { canvas: NodeCanvas, context: NodeContext }
-  const { canvas: nodeCanvas, context: ctx } = pdfCanvasFactory.create(viewport.width, viewport.height)
-
-  await page.render({
-    canvasContext: ctx,
-    viewport,
-    canvasFactory: pdfCanvasFactory
-  }).promise
-
-  const tmpPath = join(workDir, `page-${pageIndex}.png`)
-  const pngBytes = nodeCanvas.toPNG()
-  await writeFile(tmpPath, pngBytes)
-  return tmpPath
 }
 
 async function runOcrOnPdf(pdfPath: string, language: string): Promise<unknown> {
   dlog('runOcrOnPdf:start', { pdfPath, language })
-  const pdfData = new Uint8Array(await readFile(pdfPath))
 
-  let pdf: any
-  try {
-    pdf = await getDocument({
-      data: pdfData,
-      // pdfjs-dist v3 uses `canvasFactory` (lowercase, instance) not
-      // `CanvasFactory` (uppercase, class). Passing the wrong key means
-      // pdfjs falls back to DefaultCanvasFactory which tries
-      // require("canvas") → crash.
-      canvasFactory: pdfCanvasFactory,
-      standardFontDataUrl: 'about:blank',
-      disableFontFace: true,
-      useSystemFonts: false,
-      verbosity: 0
-    }).promise
-    dlog('runOcrOnPdf:pdf-loaded', { numPages: pdf.numPages })
-  } catch (err) {
-    dlog('runOcrOnPdf:getDocument-failed', err)
-    throw err
-  }
+  // Step 1: PDF → PNG via pdftoppm (proven, reliable)
+  const pngFiles = await renderPdfToPngs(pdfPath, PDF_RENDER_DPI)
+  dlog('runOcrOnPdf:rendered', { pageCount: pngFiles.length })
 
-  const pageCount = pdf.numPages
-  const scale = PDF_RENDER_DPI / 72
-  const workDir = join(tmpdir(), `ocr-${randomUUID()}`)
-  await mkdir(workDir, { recursive: true })
-
-  const tmpFiles: string[] = []
+  // Step 2: OCR each page via tesseract.js (in separate processes)
   const pageResults: unknown[] = []
-
   try {
-    for (let i = 0; i < pageCount; i++) {
-      dlog('runOcrOnPdf:rendering-page', { pageIndex: i })
-      const tmpFile = await renderPdfPageToPng(pdf, i, scale, workDir)
-      if (!tmpFile) break
-      tmpFiles.push(tmpFile)
-      dlog('runOcrOnPdf:page-rendered', { pageIndex: i, tmpFile })
-
-      const result = await ocrFileViaWorker(tmpFile, language)
+    for (let i = 0; i < pngFiles.length; i++) {
+      dlog('runOcrOnPdf:ocr-page', { pageIndex: i, file: pngFiles[i] })
+      const result = await ocrFile(pngFiles[i], language)
       pageResults.push(result)
-      dlog('runOcrOnPdf:page-ocr-done', { pageIndex: i })
+      dlog('runOcrOnPdf:page-done', { pageIndex: i })
     }
   } finally {
-    await Promise.all(tmpFiles.map((f) => unlink(f).catch(() => undefined)))
-    await rmdir(workDir).catch(() => undefined)
+    // Cleanup temp PNG files
+    await Promise.all(pngFiles.map(f => unlink(f).catch(() => undefined)))
+    // Cleanup work dir
+    if (pngFiles.length > 0) {
+      await cleanupDir(dirname(pngFiles[0]))
+    }
   }
 
   if (pageResults.length === 0) {
-    throw new Error('Could not render any pages from the PDF. The file may be corrupted or encrypted.')
+    throw new Error('Could not render any pages from the PDF.')
   }
 
   return flattenOcrResult(pageResults)
@@ -791,7 +531,7 @@ export async function runOcrMcpServerFromArgv(argv: string[]): Promise<boolean> 
   if (!argv.includes('--gui-ocr-mcp-server')) return false
 
   const server = new McpServer(
-    { name: 'deepseek-gui-ocr', version: '0.5.0' },
+    { name: 'deepseek-gui-ocr', version: '0.6.0' },
     { capabilities: { logging: {} } }
   )
 
@@ -802,27 +542,31 @@ export async function runOcrMcpServerFromArgv(argv: string[]): Promise<boolean> 
 
   server.registerTool('gui_ocr_check', {
     description:
-      'Check the built-in OCR engine status. Always ready — the engine ' +
-      '(tesseract.js + pdfjs-dist) is bundled with DeepSeek GUI and ' +
-      'requires zero system configuration. English is pre-installed; ' +
+      'Check the built-in OCR engine status. Shows pdftoppm availability ' +
+      'and tesseract.js language cache status. English is pre-installed; ' +
       'other languages auto-download on first use.'
   }, async () => {
+    const pdftoppm = await findPdftoppm()
     const cached = await detectCachedLanguages()
+    const pdftoppmStatus = pdftoppm ? `ready (${pdftoppm})` : 'NOT FOUND — install poppler'
+
     return textResult(
       [
-        'Built-in OCR engine — ready.',
+        'Built-in OCR engine — status:',
         '',
+        `PDF renderer (pdftoppm): ${pdftoppmStatus}`,
+        `OCR engine (tesseract.js WASM): ready`,
         `Pre-cached languages: ${cached.length ? cached.join(', ') : 'eng (bundled)'}`,
         `All supported languages (${ALL_TESSERACT_LANGUAGES.length}): ${ALL_TESSERACT_LANGUAGES.join(', ')}`,
         '',
-        'Use gui_ocr_languages for the full list of available language codes.',
-        'Use gui_ocr_pdf to OCR a PDF, gui_ocr_image to OCR an image.',
+        pdftoppm ? '' : '⚠ Install poppler for PDF OCR:\n  macOS: brew install poppler\n  Ubuntu: sudo apt install poppler-utils',
         '',
-        'Language data for non-English languages auto-downloads on first use ',
-        'and is cached permanently. No system packages required.'
-      ].join('\n'),
+        'Use gui_ocr_pdf to OCR a PDF, gui_ocr_image to OCR an image.',
+        'Language data for non-English languages auto-downloads on first use.'
+      ].filter(Boolean).join('\n'),
       {
-        engine: 'tesseract.js (WASM) + pdfjs-dist (pure JS)',
+        engine: 'tesseract.js (WASM)',
+        pdfRenderer: pdftoppm ? 'pdftoppm (poppler)' : 'not installed',
         ready: true,
         bundledLanguage: 'eng',
         supportedLanguageCount: ALL_TESSERACT_LANGUAGES.length,
@@ -858,9 +602,7 @@ export async function runOcrMcpServerFromArgv(argv: string[]): Promise<boolean> 
   server.registerTool('gui_ocr_preload', {
     description:
       'Pre-download Tesseract OCR language data for faster subsequent OCR. ' +
-      'Languages are cached permanently after download. Common codes: ' +
-      '"eng" (English), "chi_sim" (Chinese Simplified), "chi_tra" (Chinese Traditional), ' +
-      '"jpn" (Japanese), "kor" (Korean). Combine multiple with "+".',
+      'Languages are cached permanently after download.',
     inputSchema: {
       language: z.string().min(1).describe(
         'Language code(s) to pre-download. Combine with "+", e.g. "eng+chi_sim+jpn".'
@@ -885,10 +627,10 @@ export async function runOcrMcpServerFromArgv(argv: string[]): Promise<boolean> 
 
   server.registerTool('gui_ocr_pdf', {
     description:
-      'Run OCR on a PDF file using the built-in engine. Extracts text from ' +
-      'scanned/image-based PDFs. Optionally creates a searchable output PDF ' +
-      'with an invisible selectable text layer. Supports 100+ languages. ' +
-      'Zero system dependencies required.',
+      'Run OCR on a PDF file. Uses pdftoppm (poppler) to render PDF pages ' +
+      'to images, then tesseract.js to recognize text. Optionally creates ' +
+      'a searchable output PDF with an invisible selectable text layer. ' +
+      'Supports 100+ languages.',
     inputSchema: {
       input_path: z.string().min(1).describe('Absolute path to the input PDF file'),
       output_path: z.string().optional().describe(
@@ -917,6 +659,17 @@ export async function runOcrMcpServerFromArgv(argv: string[]): Promise<boolean> 
       const ext = extname(inputPath).toLowerCase()
       if (ext !== '.pdf') {
         return errorResult(`Input must be a .pdf file, got "${ext}". Use gui_ocr_image for images.`)
+      }
+
+      // Check pdftoppm availability
+      const pdftoppm = await findPdftoppm()
+      if (!pdftoppm) {
+        return errorResult(
+          'pdftoppm not found. Install poppler for PDF OCR:\n' +
+          '  macOS:   brew install poppler\n' +
+          '  Ubuntu:  sudo apt install poppler-utils\n' +
+          '  Windows: choco install poppler'
+        )
       }
 
       const language = args.language || 'eng'

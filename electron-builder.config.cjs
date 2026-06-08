@@ -94,12 +94,6 @@ module.exports = {
     '**/node_modules/regenerator-runtime/**/*',
     '**/node_modules/wasm-feature-detect/**/*',
     '**/node_modules/zlibjs/**/*',
-    // pdfjs-dist uses dynamic `import("./pdf.worker.mjs")` for its fake
-    // worker. ESM dynamic-import from ASAR is unreliable in Electron
-    // (returns ports that can't structured-clone), surfacing as the
-    // misleading "Unable to deserialize cloned data" error. Unpacking
-    // forces pdf.mjs and its sibling worker file onto the real fs.
-    '**/node_modules/pdfjs-dist/**/*',
   ],
   npmRebuild: true,
   directories: {
