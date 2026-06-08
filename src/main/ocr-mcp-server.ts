@@ -20,11 +20,12 @@ const { getDocument } = pdfjsLib as {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Debug logging
+// Debug logging — controlled by OCR_DEBUG_LOG environment variable
 // ═══════════════════════════════════════════════════════════════════════════
 
-const DEBUG_LOG = '/tmp/ocr-debug.log'
+const DEBUG_LOG = process.env.OCR_DEBUG_LOG
 function dlog(msg: string, data?: unknown): void {
+  if (!DEBUG_LOG) return
   try {
     const ts = new Date().toISOString()
     const line = data !== undefined
