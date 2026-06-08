@@ -46,6 +46,7 @@
     "@opendataloader/pdf": "^2.4.7",
     "@tencent-weixin/openclaw-weixin": "2.4.3",
     "better-sqlite3": "^12.10.0",
+    "canvas": "^3.2.3",
     "electron-store": "^10.1.0",
     "electron-updater": "^6.8.3",
     "html-to-docx": "^1.8.0",
@@ -53,6 +54,7 @@
     "lucide-react": "^0.544.0",
     "openclaw": "file:vendor/openclaw-shim",
     "pdf-lib": "^1.17.1",
+    "pdfjs-dist": "^3.11.174",
     "qrcode.react": "^4.2.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
@@ -95,11 +97,7 @@
   },
   "pnpm": {
     "onlyBuiltDependencies": [
-      "better-sqlite3",
-      "electron",
-      "esbuild",
-      "protobufjs",
-      "tesseract.js"
+      "canvas"
     ],
     "ignoredOptionalDependencies": [
       "canvas",

@@ -94,6 +94,10 @@ module.exports = {
     '**/node_modules/regenerator-runtime/**/*',
     '**/node_modules/wasm-feature-detect/**/*',
     '**/node_modules/zlibjs/**/*',
+    // canvas (node-canvas) — native .node binary must be on real fs
+    '**/node_modules/.pnpm/canvas*/**/*',
+    // pdfjs-dist — standard_fonts data must be accessible for PDF rendering
+    '**/node_modules/pdfjs-dist/**/*',
   ],
   npmRebuild: true,
   directories: {
@@ -113,11 +117,6 @@ module.exports = {
     '!**/README*',
     '!**/CHANGELOG*',
     '!**/node_modules/openclaw/**/*',
-    // pdfjs-dist@3 declares `canvas` as optionalDependencies. pnpm pulled
-    // it in transitively, but we never load it (we use our own pure-JS
-    // NodeCanvas). Excluding it avoids node-gyp rebuild failures during
-    // electron-builder packaging.
-    '!**/node_modules/canvas/**/*',
     '!**/node_modules/path2d-polyfill/**/*'
   ],
   artifactName: `DeepSeek-GUI-${artifactVersion}-\${os}-\${arch}.\${ext}`,

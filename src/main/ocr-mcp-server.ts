@@ -3,11 +3,26 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { z } from 'zod'
 import { PDFDocument } from 'pdf-lib'
 import { existsSync, appendFileSync } from 'node:fs'
-import { readFile, writeFile, mkdir, unlink, readdir, rmdir } from 'node:fs/promises'
+import { readFile, writeFile, mkdir, unlink, rmdir } from 'node:fs/promises'
 import { basename, dirname, extname, join, sep } from 'node:path'
 import { tmpdir } from 'node:os'
 import { randomUUID } from 'node:crypto'
-import { fork, execFile, spawn } from 'node:child_process'
+import { fork } from 'node:child_process'
+
+// ═══════════════════════════════════════════════════════════════════════════
+// PDF rendering — pdfjs-dist + node-canvas
+//
+// Uses the real `canvas` (node-canvas) package for proper pixel-level
+// PDF rendering. This replaces the previous custom NodeCanvas which
+// produced blank images. The `canvas` native module is bundled via
+// asarUnpack so it loads from the real filesystem in Electron.
+// ═══════════════════════════════════════════════════════════════════════════
+
+import { createCanvas } from 'canvas'
+import pdfjsLib from 'pdfjs-dist/legacy/build/pdf.js'
+const { getDocument } = pdfjsLib as {
+  getDocument: (params: unknown) => { promise: Promise<unknown> }
+}
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Debug logging
@@ -39,105 +54,24 @@ const SUPPORTED_IMAGE_EXTENSIONS = new Set([
 ])
 
 // ═══════════════════════════════════════════════════════════════════════════
-// pdftoppm detection — uses system-installed poppler-utils
+// Font data path resolution for pdfjs-dist
+//
+// pdfjs-dist needs standard font data (LiberationSans .ttf files) to
+// render text in PDFs. We resolve the path from node_modules, handling
+// both development and packaged (ASAR) environments.
 // ═══════════════════════════════════════════════════════════════════════════
 
-let _pdftoppmPath: string | null | undefined // undefined = not checked yet
-
-async function findPdftoppm(): Promise<string | null> {
-  if (_pdftoppmPath !== undefined) return _pdftoppmPath
-  return new Promise((resolve) => {
-    execFile('which', ['pdftoppm'], (err, stdout) => {
-      if (err || !stdout.trim()) {
-        _pdftoppmPath = null
-        dlog('pdftoppm: not found')
-        resolve(null)
-      } else {
-        _pdftoppmPath = stdout.trim()
-        dlog('pdftoppm: found', { path: _pdftoppmPath })
-        resolve(_pdftoppmPath)
-      }
-    })
-  })
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
-// PDF → PNG via pdftoppm (poppler)
-// Returns array of PNG file paths, one per page.
-// ═══════════════════════════════════════════════════════════════════════════
-
-async function renderPdfToPngs(pdfPath: string, dpi: number = PDF_RENDER_DPI): Promise<string[]> {
-  const pdftoppm = await findPdftoppm()
-  if (!pdftoppm) {
-    throw new Error(
-      'pdftoppm not found. Install poppler:\n' +
-      '  macOS:   brew install poppler\n' +
-      '  Ubuntu:  sudo apt install poppler-utils\n' +
-      '  Windows: choco install poppler  (or download from github.com/oschwartz10612/poppler-windows)'
-    )
-  }
-
-  const workDir = join(tmpdir(), `ocr-${randomUUID()}`)
-  await mkdir(workDir, { recursive: true })
-  const prefix = join(workDir, 'page')
-
-  dlog('renderPdfToPngs: starting', { pdfPath, dpi, workDir })
-
-  return new Promise((resolve, reject) => {
-    const child = spawn(pdftoppm, [
-      '-png',
-      '-r', String(dpi),
-      pdfPath,
-      prefix
-    ], { stdio: ['pipe', 'pipe', 'pipe'] })
-
-    let stderr = ''
-    child.stderr?.on('data', (chunk: Buffer) => { stderr += chunk.toString() })
-
-    child.on('exit', async (code) => {
-      dlog('renderPdfToPngs: pdftoppm exited', { code, stderr: stderr.slice(0, 500) })
-
-      if (code !== 0) {
-        await cleanupDir(workDir)
-        reject(new Error(`pdftoppm failed (exit ${code}): ${stderr.slice(0, 300)}`))
-        return
-      }
-
-      try {
-        const files = await readdir(workDir)
-        const pngFiles = files
-          .filter(f => f.endsWith('.png'))
-          .sort()
-          .map(f => join(workDir, f))
-
-        dlog('renderPdfToPngs: done', { pageCount: pngFiles.length })
-
-        if (pngFiles.length === 0) {
-          await cleanupDir(workDir)
-          reject(new Error('pdftoppm produced no output images'))
-          return
-        }
-
-        resolve(pngFiles)
-      } catch (err) {
-        await cleanupDir(workDir)
-        reject(err)
-      }
-    })
-
-    child.on('error', async (err) => {
-      await cleanupDir(workDir)
-      reject(new Error(`Failed to run pdftoppm: ${err.message}`))
-    })
-  })
-}
-
-async function cleanupDir(dir: string): Promise<void> {
+function getStandardFontDataUrl(): string {
+  // In packaged app, pdfjs-dist is in app.asar/node_modules/
+  // Font data is at pdfjs-dist/standard_fonts/
   try {
-    const files = await readdir(dir)
-    await Promise.all(files.map(f => unlink(join(dir, f)).catch(() => undefined)))
-    await rmdir(dir).catch(() => undefined)
-  } catch { /* best-effort */ }
+    const pdfjsDir = dirname(require.resolve('pdfjs-dist/legacy/build/pdf.js'))
+    const fontDir = join(pdfjsDir, '..', '..', 'standard_fonts')
+    // Ensure trailing slash for pdfjs-dist
+    return fontDir + sep
+  } catch {
+    return ''
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -318,33 +252,80 @@ async function runOcrOnImage(inputPath: string, language: string): Promise<unkno
   return flattenOcrResult([result])
 }
 
+/**
+ * Render a single PDF page to a PNG file using pdfjs-dist + node-canvas.
+ */
+async function renderPdfPageToPng(
+  pdf: any,
+  pageIndex: number,
+  dpi: number,
+  workDir: string
+): Promise<string | null> {
+  if (pageIndex >= pdf.numPages) return null
+
+  const page = await pdf.getPage(pageIndex + 1)
+  const scale = dpi / PDF_POINTS_PER_INCH
+  const viewport = page.getViewport({ scale })
+
+  const canvas = createCanvas(viewport.width, viewport.height)
+  const ctx = canvas.getContext('2d')
+
+  await page.render({
+    canvasContext: ctx,
+    viewport
+  }).promise
+
+  const tmpPath = join(workDir, `page-${pageIndex}.png`)
+  const pngBuf = canvas.toBuffer('image/png')
+  await writeFile(tmpPath, pngBuf)
+  return tmpPath
+}
+
 async function runOcrOnPdf(pdfPath: string, language: string): Promise<unknown> {
   dlog('runOcrOnPdf:start', { pdfPath, language })
 
-  // Step 1: PDF → PNG via pdftoppm (proven, reliable)
-  const pngFiles = await renderPdfToPngs(pdfPath, PDF_RENDER_DPI)
-  dlog('runOcrOnPdf:rendered', { pageCount: pngFiles.length })
+  const pdfData = new Uint8Array(await readFile(pdfPath))
+  const fontDataUrl = getStandardFontDataUrl()
+  dlog('runOcrOnPdf:fontDataUrl', { fontDataUrl })
 
-  // Step 2: OCR each page via tesseract.js (in separate processes)
-  const pageResults: unknown[] = []
+  let pdf: any
   try {
-    for (let i = 0; i < pngFiles.length; i++) {
-      dlog('runOcrOnPdf:ocr-page', { pageIndex: i, file: pngFiles[i] })
-      const result = await ocrFile(pngFiles[i], language)
+    pdf = await getDocument({
+      data: pdfData,
+      standardFontDataUrl: fontDataUrl,
+      verbosity: 0
+    }).promise
+    dlog('runOcrOnPdf:loaded', { numPages: pdf.numPages })
+  } catch (err) {
+    dlog('runOcrOnPdf:getDocument-failed', err)
+    throw err
+  }
+
+  const workDir = join(tmpdir(), `ocr-${randomUUID()}`)
+  await mkdir(workDir, { recursive: true })
+
+  const tmpFiles: string[] = []
+  const pageResults: unknown[] = []
+
+  try {
+    for (let i = 0; i < pdf.numPages; i++) {
+      dlog('runOcrOnPdf:rendering-page', { pageIndex: i })
+      const tmpFile = await renderPdfPageToPng(pdf, i, PDF_RENDER_DPI, workDir)
+      if (!tmpFile) break
+      tmpFiles.push(tmpFile)
+      dlog('runOcrOnPdf:page-rendered', { pageIndex: i, tmpFile })
+
+      const result = await ocrFile(tmpFile, language)
       pageResults.push(result)
-      dlog('runOcrOnPdf:page-done', { pageIndex: i })
+      dlog('runOcrOnPdf:page-ocr-done', { pageIndex: i })
     }
   } finally {
-    // Cleanup temp PNG files
-    await Promise.all(pngFiles.map(f => unlink(f).catch(() => undefined)))
-    // Cleanup work dir
-    if (pngFiles.length > 0) {
-      await cleanupDir(dirname(pngFiles[0]))
-    }
+    await Promise.all(tmpFiles.map((f) => unlink(f).catch(() => undefined)))
+    await rmdir(workDir).catch(() => undefined)
   }
 
   if (pageResults.length === 0) {
-    throw new Error('Could not render any pages from the PDF.')
+    throw new Error('Could not render any pages from the PDF. The file may be corrupted or encrypted.')
   }
 
   return flattenOcrResult(pageResults)
@@ -371,7 +352,7 @@ function flattenOcrResult(pageResults: unknown[]): unknown {
     }
   })
 
-  const mergedData = {
+  return {
     text: pageResults.map((r: any) => r.text ?? '').join('\n\n'),
     confidence: Math.round(
       pageResults.reduce((s: number, r: any) => s + (r.confidence ?? 0), 0) / pageResults.length
@@ -379,7 +360,6 @@ function flattenOcrResult(pageResults: unknown[]): unknown {
     blocks: pageResults.flatMap((r: any) => r.blocks ?? []),
     words: flatWords
   }
-  return mergedData
 }
 
 function buildPageData(result: any): OcrPage[] {
@@ -531,7 +511,7 @@ export async function runOcrMcpServerFromArgv(argv: string[]): Promise<boolean> 
   if (!argv.includes('--gui-ocr-mcp-server')) return false
 
   const server = new McpServer(
-    { name: 'deepseek-gui-ocr', version: '0.6.0' },
+    { name: 'deepseek-gui-ocr', version: '0.7.0' },
     { capabilities: { logging: {} } }
   )
 
@@ -542,31 +522,26 @@ export async function runOcrMcpServerFromArgv(argv: string[]): Promise<boolean> 
 
   server.registerTool('gui_ocr_check', {
     description:
-      'Check the built-in OCR engine status. Shows pdftoppm availability ' +
-      'and tesseract.js language cache status. English is pre-installed; ' +
-      'other languages auto-download on first use.'
+      'Check the built-in OCR engine status. The engine (pdfjs-dist + ' +
+      'canvas + tesseract.js) is fully bundled — zero system dependencies. ' +
+      'English is pre-installed; other languages auto-download on first use.'
   }, async () => {
-    const pdftoppm = await findPdftoppm()
     const cached = await detectCachedLanguages()
-    const pdftoppmStatus = pdftoppm ? `ready (${pdftoppm})` : 'NOT FOUND — install poppler'
 
     return textResult(
       [
-        'Built-in OCR engine — status:',
+        'Built-in OCR engine — ready.',
         '',
-        `PDF renderer (pdftoppm): ${pdftoppmStatus}`,
-        `OCR engine (tesseract.js WASM): ready`,
+        `PDF renderer: pdfjs-dist + node-canvas (bundled)`,
+        `OCR engine: tesseract.js WASM (bundled)`,
         `Pre-cached languages: ${cached.length ? cached.join(', ') : 'eng (bundled)'}`,
-        `All supported languages (${ALL_TESSERACT_LANGUAGES.length}): ${ALL_TESSERACT_LANGUAGES.join(', ')}`,
+        `All supported languages (${ALL_TESSERACT_LANGUAGES.length})`,
         '',
-        pdftoppm ? '' : '⚠ Install poppler for PDF OCR:\n  macOS: brew install poppler\n  Ubuntu: sudo apt install poppler-utils',
-        '',
-        'Use gui_ocr_pdf to OCR a PDF, gui_ocr_image to OCR an image.',
-        'Language data for non-English languages auto-downloads on first use.'
-      ].filter(Boolean).join('\n'),
+        'Zero system dependencies — works out of the box.',
+        'Use gui_ocr_pdf to OCR a PDF, gui_ocr_image to OCR an image.'
+      ].join('\n'),
       {
-        engine: 'tesseract.js (WASM)',
-        pdfRenderer: pdftoppm ? 'pdftoppm (poppler)' : 'not installed',
+        engine: 'pdfjs-dist + canvas + tesseract.js (all bundled)',
         ready: true,
         bundledLanguage: 'eng',
         supportedLanguageCount: ALL_TESSERACT_LANGUAGES.length,
@@ -627,10 +602,10 @@ export async function runOcrMcpServerFromArgv(argv: string[]): Promise<boolean> 
 
   server.registerTool('gui_ocr_pdf', {
     description:
-      'Run OCR on a PDF file. Uses pdftoppm (poppler) to render PDF pages ' +
-      'to images, then tesseract.js to recognize text. Optionally creates ' +
-      'a searchable output PDF with an invisible selectable text layer. ' +
-      'Supports 100+ languages.',
+      'Run OCR on a PDF file. Uses the built-in pdfjs-dist renderer + ' +
+      'tesseract.js OCR engine. Optionally creates a searchable output PDF ' +
+      'with an invisible selectable text layer. Supports 100+ languages. ' +
+      'Zero system dependencies required.',
     inputSchema: {
       input_path: z.string().min(1).describe('Absolute path to the input PDF file'),
       output_path: z.string().optional().describe(
@@ -659,17 +634,6 @@ export async function runOcrMcpServerFromArgv(argv: string[]): Promise<boolean> 
       const ext = extname(inputPath).toLowerCase()
       if (ext !== '.pdf') {
         return errorResult(`Input must be a .pdf file, got "${ext}". Use gui_ocr_image for images.`)
-      }
-
-      // Check pdftoppm availability
-      const pdftoppm = await findPdftoppm()
-      if (!pdftoppm) {
-        return errorResult(
-          'pdftoppm not found. Install poppler for PDF OCR:\n' +
-          '  macOS:   brew install poppler\n' +
-          '  Ubuntu:  sudo apt install poppler-utils\n' +
-          '  Windows: choco install poppler'
-        )
       }
 
       const language = args.language || 'eng'
