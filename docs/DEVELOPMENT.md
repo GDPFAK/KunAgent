@@ -137,6 +137,28 @@ Merge contribution changes into `develop` only after:
 
 `master` is reserved for stable releases. After maintainers decide the current `develop` state is ready to publish, they merge `develop` into `master`.
 
+## Release Automation
+
+Stable releases are published by GitHub Actions when a same-repository PR from `develop` into `master` is merged.
+
+The release workflow:
+
+- computes the next `vX.Y.Z` patch tag from the latest three-part semver tag
+- reuses a tag that already points at the merge commit when a workflow is rerun
+- builds signed and notarized macOS arm64/x64 packages, a Windows x64 installer, and a Linux x64 AppImage
+- uploads release assets and update metadata to GitHub Releases and the R2 `stable` channel
+- promotes R2 `stable/latest` only after all platform uploads succeed
+
+Repository maintainers must configure these GitHub Actions secrets before the first automated release:
+
+- R2: `R2_BUCKET`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_PUBLIC_BASE_URL`, and either `R2_ACCOUNT_ID` or `R2_ENDPOINT`
+- Optional R2 override: `R2_RELEASE_PREFIX`
+- macOS signing: `MAC_CODESIGN_P12_BASE64`, `CSC_KEY_PASSWORD`, `APPLE_API_KEY_BASE64`, `APPLE_API_KEY_ID`, `APPLE_API_ISSUER`
+
+The repository Actions settings must allow `GITHUB_TOKEN` to write repository contents so the workflow can create tags and publish releases.
+
+The local `npm run release:mac` and `npm run release:win` commands remain available as manual fallback tools.
+
 ## Suggested Branch Naming
 
 Examples:

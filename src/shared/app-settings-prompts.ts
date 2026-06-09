@@ -204,6 +204,18 @@ export function buildScheduleRuntimePrompt(
   return `${SCHEDULE_MANAGED_INSTRUCTIONS_HEADING}\n\n${instructions.join('\n\n')}\n\n---\n${SCHEDULE_CURRENT_USER_REQUEST_HEADING}\n${prompt}`
 }
 
+export const CODE_MANAGED_INSTRUCTIONS_HEADING = '[Code managed instructions]'
+export const CODE_CURRENT_USER_REQUEST_HEADING = '[Current user request]'
+
+export function buildCodeRuntimePrompt(
+  settings: Pick<AppSettingsV1, 'codePromptPrefix'>,
+  prompt: string
+): string {
+  const prefix = (settings.codePromptPrefix ?? '').trim()
+  if (!prefix) return prompt
+  return `${CODE_MANAGED_INSTRUCTIONS_HEADING}\n\n${prefix}\n\n---\n${CODE_CURRENT_USER_REQUEST_HEADING}\n${prompt}`
+}
+
 export function unwrapClawRuntimePromptForDisplay(text: string): string {
   const markerIndex = text.lastIndexOf(CLAW_CURRENT_USER_REQUEST_HEADING)
   if (markerIndex < 0) return text

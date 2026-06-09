@@ -140,6 +140,13 @@ type Props = {
   hideBtwCommand?: boolean
 }
 
+type SkillCommand = NonNullable<Props['skillCommands']>[number]
+
+const EMPTY_MODEL_GROUPS: ModelProviderModelGroup[] = []
+const EMPTY_ATTACHMENTS: AttachmentReference[] = []
+const EMPTY_FILE_REFERENCES: ComposerFileReference[] = []
+const EMPTY_SKILL_COMMANDS: SkillCommand[] = []
+
 type ComposerTransferItem = {
   kind?: string
   type?: string
@@ -456,7 +463,7 @@ export function FloatingComposer({
   hasActiveThread,
   composerModel,
   composerPickList,
-  composerModelGroups = [],
+  composerModelGroups = EMPTY_MODEL_GROUPS,
   composerReasoningEffort,
   onComposerModelChange,
   onComposerReasoningEffortChange,
@@ -464,13 +471,13 @@ export function FloatingComposer({
   modelPickerMode = 'select',
   queuedMessages,
   onRemoveQueuedMessage,
-  attachments = [],
+  attachments = EMPTY_ATTACHMENTS,
   attachmentUploadEnabled = false,
   attachmentUploadBusy = false,
   attachmentUploadError = null,
   fileReferenceEnabled = false,
-  fileReferences = [],
-  skillCommands = [],
+  fileReferences = EMPTY_FILE_REFERENCES,
+  skillCommands = EMPTY_SKILL_COMMANDS,
   onPickAttachments,
   onPasteClipboardImage,
   onRemoveAttachment,
@@ -811,7 +818,7 @@ export function FloatingComposer({
 
   useEffect(() => {
     if (!showFileMentionMenu || !activeFileMention || !effectiveWorkspaceRoot) {
-      setFileMentionSuggestions([])
+      setFileMentionSuggestions((current) => (current.length === 0 ? current : []))
       setFileMentionLoading(false)
       return
     }
@@ -1174,17 +1181,59 @@ export function FloatingComposer({
   }
 
   const handleComposerDragOver = (event: ReactDragEvent<HTMLDivElement>): void => {
-    if (!canPickAttachment || !imageTransferHasImages(event.dataTransfer)) return
+    const dataTransferTypes = Array.from(event.dataTransfer.types ?? [])
+    const canAcceptImages = canPickAttachment && imageTransferHasImages(event.dataTransfer)
+    if (!dataTransferTypes.includes('Files') && !canAcceptImages) return
     event.preventDefault()
     event.dataTransfer.dropEffect = 'copy'
   }
 
+  const insertTextAtComposerCursor = (text: string): void => {
+    if (!text) return
+    const textarea = draft.textareaRef.current
+    const currentValue = input
+    const selectionStart = textarea?.selectionStart ?? composerCursor ?? currentValue.length
+    const selectionEnd = textarea?.selectionEnd ?? selectionStart
+    const before = currentValue.slice(0, selectionStart)
+    const after = currentValue.slice(selectionEnd)
+    const leadingPad = before.length > 0 && !/\s$/.test(before) ? ' ' : ''
+    const trailingPad = after.length > 0 && !/^\s/.test(after) ? ' ' : ''
+    const insertion = `${leadingPad}${text}${trailingPad}`
+    const nextInput = `${before}${insertion}${after}`
+    const nextCursor = before.length + insertion.length - trailingPad.length
+    setInput(nextInput)
+    window.requestAnimationFrame(() => {
+      const el = draft.textareaRef.current
+      if (!el) return
+      el.focus()
+      el.setSelectionRange(nextCursor, nextCursor)
+      setComposerCursor(nextCursor)
+    })
+  }
+
   const handleComposerDrop = (event: ReactDragEvent<HTMLDivElement>): void => {
-    if (!canPickAttachment || !onPickAttachments) return
-    const files = imageFilesFromTransfer(event.dataTransfer)
-    if (files.length === 0) return
+    const imageFiles = canPickAttachment ? imageFilesFromTransfer(event.dataTransfer) : []
+    const rawFiles = Array.from(event.dataTransfer.files ?? [])
+    const isImageLike = (file: File): boolean =>
+      isImageMimeType(file.type) || Boolean(imageMimeTypeFromFileName(file.name))
+    const pathFiles = rawFiles.filter((file) => !isImageLike(file))
+    if (imageFiles.length === 0 && pathFiles.length === 0) return
     event.preventDefault()
-    onPickAttachments(files)
+    if (imageFiles.length > 0 && onPickAttachments) {
+      onPickAttachments(imageFiles)
+    }
+    if (pathFiles.length > 0) {
+      const paths: string[] = []
+      for (const file of pathFiles) {
+        try {
+          const path = window.dsGui.getPathForFile(file)
+          if (path) paths.push(path)
+        } catch {
+          // ignore files we cannot resolve a filesystem path for
+        }
+      }
+      if (paths.length > 0) insertTextAtComposerCursor(paths.join(' '))
+    }
     draft.focusComposer()
   }
 
@@ -1543,9 +1592,9 @@ export function FloatingComposer({
           <textarea
             ref={draft.textareaRef}
             rows={1}
-            className={`ds-no-drag block min-w-0 resize-none break-words bg-transparent px-1 py-0.5 text-[15px] leading-[1.45] text-ds-ink placeholder:text-ds-faint focus:outline-none [overflow-wrap:anywhere] ${
+            className={`ds-no-drag block min-w-0 resize-none break-words bg-transparent px-1 py-2.5 text-[15px] leading-[1.45] text-ds-ink placeholder:text-ds-faint focus:outline-none [overflow-wrap:anywhere] ${
               canCompose ? '' : 'opacity-80'
-            } ${compact ? 'text-[14px]' : 'min-h-[40px]'}`}
+            } ${compact ? 'text-[14px] py-2' : 'min-h-[40px]'}`}
             placeholder={placeholder}
             value={input}
             disabled={!canCompose}

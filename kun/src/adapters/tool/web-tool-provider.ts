@@ -211,14 +211,45 @@ class FetchWebProvider implements WebProvider {
     try {
       const response = await fetch(request.url, { signal: controller.signal })
       if (!response.ok) throw new Error(`HTTP ${response.status}`)
+
+      // Fast-fail if content-length is known and exceeds limit
       const contentLength = response.headers.get('content-length')
       if (contentLength && Number(contentLength) > request.maxBytes) {
         throw new Error(`content exceeds ${request.maxBytes} byte limit`)
       }
-      const buffer = Buffer.from(await response.arrayBuffer())
-      if (buffer.length > request.maxBytes) {
-        throw new Error(`content exceeds ${request.maxBytes} byte limit`)
+
+      // Stream response body with size limit
+      const reader = response.body?.getReader()
+      if (!reader) throw new Error('response body is not readable')
+
+      const chunks: Uint8Array[] = []
+      let totalBytes = 0
+      let truncated = false
+
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+
+        const remaining = request.maxBytes - totalBytes
+        if (remaining <= 0) {
+          truncated = true
+          reader.cancel()
+          break
+        }
+
+        if (value.length > remaining) {
+          chunks.push(value.subarray(0, remaining))
+          totalBytes += remaining
+          truncated = true
+          reader.cancel()
+          break
+        }
+
+        chunks.push(value)
+        totalBytes += value.length
       }
+
+      const buffer = Buffer.concat(chunks)
       const contentType = response.headers.get('content-type') ?? undefined
       const raw = buffer.toString('utf8')
       const extracted = extractReadableText(raw, contentType)
@@ -231,8 +262,8 @@ class FetchWebProvider implements WebProvider {
         contentType,
         text: extracted.text,
         retrievedAt: this.nowIso(),
-        byteCount: buffer.length,
-        truncated: false
+        byteCount: totalBytes,
+        truncated
       }
     } finally {
       clearTimeout(timeout)

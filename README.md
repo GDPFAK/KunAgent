@@ -375,8 +375,8 @@ npm run build           # 生产构建
 npm run dist:mac        # macOS 安装包
 npm run dist:win        # Windows 安装包（在 Windows 上运行）
 npm run dist:linux      # Linux AppImage
-npm run release:mac     # 在 macOS 上构建并上传 macOS release 资源
-npm run release:win     # 在 Windows 上构建并上传 Windows release 资源
+npm run release:mac     # 手动兜底：构建并上传 macOS release 资源
+npm run release:win     # 手动兜底：构建并上传 Windows release 资源
 ```
 
 更多开发流程请看 [DEVELOPMENT.zh-CN.md](./docs/DEVELOPMENT.zh-CN.md)。
@@ -408,6 +408,10 @@ Kun 的设计站在先行项目的肩膀上：
 - **OpenHanako**：Markdown live 编辑、写作空间、选中文本 inline agent 等 Write 模式交互和实现方案给了本项目重要参考。
 - **[DeepSeek](https://github.com/deepseek-ai)**：提供模型与 API。
 - 所有为 DeepSeek GUI 提交 issue、建议、代码和文档的贡献者。
+
+<a href="https://github.com/XingYu-Zhong/DeepSeek-GUI/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=XingYu-Zhong/DeepSeek-GUI" />
+</a>
 
 > [!NOTE]
 > 本项目与 DeepSeek Inc. 无隶属关系。

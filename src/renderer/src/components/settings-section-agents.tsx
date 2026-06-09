@@ -456,6 +456,19 @@ export function AgentsSettingsSection({ ctx }: { ctx: Record<string, any> }): Re
                       />
                     }
                   />
+                  <SettingRow
+                    title={t('codePromptPrefix')}
+                    description={t('codePromptPrefixDesc')}
+                    wideControl
+                    control={
+                      <textarea
+                        value={form?.codePromptPrefix ?? ''}
+                        onChange={(e) => update({ codePromptPrefix: e.target.value })}
+                        placeholder={t('codePromptPrefixPlaceholder')}
+                        className="min-h-[110px] w-full resize-y rounded-xl border border-ds-border bg-ds-main/60 px-3 py-3 text-[14px] leading-6 text-ds-ink outline-none focus:border-accent/40 focus:ring-1 focus:ring-accent/25"
+                      />
+                    }
+                  />
                   <div className="px-3 py-4">
                     <AdvancedSettingsDisclosure
                       title={t('kunAssistantAdvanced')}

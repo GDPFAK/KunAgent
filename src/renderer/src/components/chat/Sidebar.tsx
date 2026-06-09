@@ -193,11 +193,31 @@ export function Sidebar({
           t={t}
         />
       ) : activeView === 'schedule' ? (
-        <div className="ds-no-drag flex min-h-0 flex-1 flex-col px-2 pt-1">
-          <div className="px-1 text-[13px] font-normal text-ds-faint">
-            {t('schedule')}
-          </div>
-        </div>
+        <SidebarProjectsSection
+          threads={threads}
+          activeView="chat"
+          activeThreadId={activeThreadId}
+          runtimeReady={runtimeReady}
+          searchQuery={threadSearch}
+          showArchived={showArchivedThreads}
+          workspaceRoot={workspaceRoot}
+          workspaceRoots={codeWorkspaceRoots}
+          busy={busy}
+          watchTurnCompletion={watchTurnCompletion}
+          unreadThreadIds={unreadThreadIds}
+          locale={i18n.language}
+          onPickWorkspace={() => void chooseWorkspace()}
+          onRemoveWorkspace={deleteWorkspace}
+          onCreateThreadInWorkspace={onNewChatInWorkspace}
+          onSelectThread={onSelectThread}
+          onRenameThread={onRenameThread}
+          onArchiveThread={onArchiveThread}
+          onDeleteThread={onDeleteThread}
+          onRestoreThread={onRestoreThread}
+          onSearchQueryChange={onThreadSearchChange}
+          onShowArchivedChange={onShowArchivedThreadsChange}
+          t={t}
+        />
       ) : (
       <SidebarProjectsSection
         threads={threads}

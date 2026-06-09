@@ -1,6 +1,7 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { basename, dirname, join } from 'node:path'
+import { atomicWriteFile } from '../../kun/src/adapters/file/atomic-write.js'
 import {
   applyKunRuntimePatch,
   kunSettingsEnvelope,
@@ -18,6 +19,7 @@ import {
   mergeScheduleSettings,
   mergeWriteSettings,
   normalizeAppBehaviorSettings,
+  normalizeKeyboardShortcuts,
   migrateLegacyAppSettings,
   normalizeAppSettings,
   type AppSettingsPatch,
@@ -31,6 +33,8 @@ export type { AppSettingsV1 }
 const DEFAULT_WORKSPACE_ROOT = join(homedir(), '.deepseekgui', 'default_workspace')
 const DEFAULT_CLAW_CHANNELS_ROOT = join(homedir(), '.deepseekgui', 'claw')
 const DEFAULT_WRITE_WORKSPACE_ROOT_ABSOLUTE = expandHomePath(DEFAULT_WRITE_WORKSPACE_ROOT)
+const SETTINGS_FILE_NAME = 'deepseek-gui-settings.json'
+const COMPATIBLE_USER_DATA_DIR_NAMES = ['deepseek-gui', 'DeepSeek GUI'] as const
 const WELCOME_MARKDOWN = `# Welcome to Write
 
 This is your default writing workspace.
@@ -194,9 +198,11 @@ const defaultSettings = (): AppSettingsV1 => ({
     turnComplete: true
   },
   appBehavior: normalizeAppBehaviorSettings(),
+  keyboardShortcuts: normalizeKeyboardShortcuts(),
   guiUpdate: {
     channel: DEFAULT_GUI_UPDATE_CHANNEL
   },
+  codePromptPrefix: '',
   write: defaultWriteSettings(),
   claw: defaultClawSettings(),
   schedule: defaultScheduleSettings()
@@ -218,10 +224,12 @@ function buildMergedSettings(parsed: Partial<AppSettingsV1>): AppSettingsV1 {
       ...defaults.appBehavior,
       ...migrated.appBehavior
     }),
+    keyboardShortcuts: normalizeKeyboardShortcuts(migrated.keyboardShortcuts),
     write: mergeWriteSettings(defaults.write, migrated.write),
     claw: mergeClawSettings(defaults.claw, migrated.claw),
     schedule: mergeScheduleSettings(defaults.schedule, migrated.schedule),
-    guiUpdate: { ...defaults.guiUpdate, ...migrated.guiUpdate }
+    guiUpdate: { ...defaults.guiUpdate, ...migrated.guiUpdate },
+    codePromptPrefix: typeof migrated.codePromptPrefix === 'string' ? migrated.codePromptPrefix : ''
   }
 }
 
@@ -251,27 +259,66 @@ async function writeInvalidSettingsBackup(path: string, raw: string): Promise<st
   }
 }
 
+function compatibleSettingsPaths(currentPath: string): string[] {
+  const currentUserDataDir = dirname(currentPath)
+  const currentDirName = basename(currentUserDataDir)
+  const parentDir = dirname(currentUserDataDir)
+  return COMPATIBLE_USER_DATA_DIR_NAMES
+    .filter((dirName) => dirName !== currentDirName)
+    .map((dirName) => join(parentDir, dirName, SETTINGS_FILE_NAME))
+}
+
+async function readSettingsFileWithCompatibility(
+  currentPath: string
+): Promise<{ raw: string, sourcePath: string } | null> {
+  try {
+    return {
+      raw: await readFile(currentPath, 'utf8'),
+      sourcePath: currentPath
+    }
+  } catch (error) {
+    if (!isErrnoException(error) || error.code !== 'ENOENT') throw error
+  }
+
+  for (const candidatePath of compatibleSettingsPaths(currentPath)) {
+    try {
+      return {
+        raw: await readFile(candidatePath, 'utf8'),
+        sourcePath: candidatePath
+      }
+    } catch (error) {
+      if (isErrnoException(error) && error.code === 'ENOENT') continue
+      throw error
+    }
+  }
+
+  return null
+}
+
 export class JsonSettingsStore {
   private path: string
   private cache: AppSettingsV1 | null = null
 
   constructor(userDataPath: string) {
-    this.path = join(userDataPath, 'deepseek-gui-settings.json')
+    this.path = join(userDataPath, SETTINGS_FILE_NAME)
   }
 
   async load(): Promise<AppSettingsV1> {
     if (this.cache) return this.cache
 
     let raw = ''
+    let sourcePath = this.path
     try {
-      raw = await readFile(this.path, 'utf8')
-    } catch (error) {
-      if (isErrnoException(error) && error.code === 'ENOENT') {
+      const loaded = await readSettingsFileWithCompatibility(this.path)
+      if (!loaded) {
         this.cache = await loadDefaultSettings()
         return this.cache
       }
+      raw = loaded.raw
+      sourcePath = loaded.sourcePath
+    } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
-      throw new Error(`Failed to read settings file ${this.path}: ${message}`, { cause: error })
+      throw new Error(`Failed to read settings file ${sourcePath}: ${message}`, { cause: error })
     }
 
     let parsed: Partial<AppSettingsV1>
@@ -279,7 +326,7 @@ export class JsonSettingsStore {
       parsed = JSON.parse(raw) as Partial<AppSettingsV1>
     } catch (error) {
       if (error instanceof SyntaxError) {
-        const backupPath = await writeInvalidSettingsBackup(this.path, raw)
+        const backupPath = await writeInvalidSettingsBackup(sourcePath, raw)
         const defaults = await loadDefaultSettings()
         await this.save(defaults)
         if (backupPath) {
@@ -288,13 +335,13 @@ export class JsonSettingsStore {
           )
         } else {
           console.warn(
-            `[deepseek-gui] Invalid settings JSON was replaced with defaults. Backup could not be written for ${this.path}.`
+            `[deepseek-gui] Invalid settings JSON was replaced with defaults. Backup could not be written for ${sourcePath}.`
           )
         }
         return defaults
       }
       const message = error instanceof Error ? error.message : String(error)
-      throw new Error(`Failed to parse settings file ${this.path}: ${message}`, { cause: error })
+      throw new Error(`Failed to parse settings file ${sourcePath}: ${message}`, { cause: error })
     }
 
     const normalized = normalizeStoredSettings(buildMergedSettings(parsed))
@@ -302,6 +349,9 @@ export class JsonSettingsStore {
     await ensureWriteWorkspaceRootsExist(normalized)
     await ensureClawChannelWorkspaceRootsExist(normalized)
     this.cache = normalized
+    if (sourcePath !== this.path) {
+      await this.save(normalized)
+    }
     return this.cache
   }
 
@@ -312,7 +362,7 @@ export class JsonSettingsStore {
     await ensureClawChannelWorkspaceRootsExist(normalized)
     this.cache = normalized
     await mkdir(dirname(this.path), { recursive: true })
-    await writeFile(this.path, serializeSettingsForDisk(normalized), 'utf8')
+    await atomicWriteFile(this.path, serializeSettingsForDisk(normalized))
   }
 
   async patch(partial: AppSettingsPatch): Promise<AppSettingsV1> {
@@ -327,6 +377,12 @@ export class JsonSettingsStore {
       appBehavior: normalizeAppBehaviorSettings({
         ...cur.appBehavior,
         ...(partial.appBehavior ?? {})
+      }),
+      keyboardShortcuts: normalizeKeyboardShortcuts({
+        bindings: {
+          ...cur.keyboardShortcuts.bindings,
+          ...(partial.keyboardShortcuts?.bindings ?? {})
+        }
       }),
       write: mergeWriteSettings(cur.write, partial.write),
       claw: mergeClawSettings(cur.claw, partial.claw),

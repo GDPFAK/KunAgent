@@ -1,11 +1,12 @@
 import { useEffect, useRef, type ReactElement } from 'react'
-import { ArrowRight, FileText, Loader2, Save, X } from 'lucide-react'
+import { ArrowRight, FileText, Loader2, Save, Sparkles, X } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { useShallow } from 'zustand/react/shallow'
 import { SDD_IMAGE_RELATIVE_DIR } from '@shared/sdd'
 import { useSddDraftStore } from '../../sdd/sdd-draft-store'
-import { saveActiveSddDraftToDisk } from '../../sdd/sdd-draft-actions'
+import { saveActiveSddDraftToDisk, syncActiveSddDraftFromDisk } from '../../sdd/sdd-draft-actions'
 import { useWriteWorkspaceStore } from '../../write/write-workspace-store'
+import { startWriteWorkspaceFileWatch } from '../../write/write-file-watch'
 import { WriteMarkdownEditor } from '../write/WriteMarkdownEditor'
 import { SidebarTitlebarToggleButton } from '../sidebar/SidebarPrimitives'
 
@@ -13,7 +14,9 @@ const SDD_AUTOSAVE_MS = 650
 
 type Props = {
   leftSidebarCollapsed: boolean
+  assistantOpen: boolean
   onToggleLeftSidebar: () => void
+  onToggleAssistant: () => void
   onNext: () => void
   onClose: () => void
   nextDisabled: boolean
@@ -27,9 +30,36 @@ function statusKey(saveStatus: string, operationStatus: string): string {
   return 'sddStatusSaved'
 }
 
+export function SddAssistantToggleButton({
+  assistantOpen,
+  onToggleAssistant,
+  label
+}: {
+  assistantOpen: boolean
+  onToggleAssistant: () => void
+  label: string
+}): ReactElement {
+  return (
+    <button
+      type="button"
+      onClick={onToggleAssistant}
+      className={`ds-sidebar-toggle-button ${
+        assistantOpen ? 'border-ds-border-strong bg-white/70 text-ds-ink dark:bg-white/10' : ''
+      }`}
+      title={label}
+      aria-label={label}
+      aria-pressed={assistantOpen}
+    >
+      <Sparkles className="h-4 w-4" strokeWidth={1.85} />
+    </button>
+  )
+}
+
 export function SddDraftEditorView({
   leftSidebarCollapsed,
+  assistantOpen,
   onToggleLeftSidebar,
+  onToggleAssistant,
   onNext,
   onClose,
   nextDisabled
@@ -99,6 +129,36 @@ export function SddDraftEditorView({
     if (saveTimerRef.current) window.clearTimeout(saveTimerRef.current)
     void saveActiveSddDraftToDisk()
   }, [])
+
+  const activeDraftId = activeDraft?.id
+  const activeDraftWorkspaceRoot = activeDraft?.workspaceRoot
+  const activeDraftRelativePath = activeDraft?.relativePath
+  const activeDraftAbsolutePath = activeDraft?.absolutePath
+
+  useEffect(() => {
+    if (!activeDraftId || !activeDraftWorkspaceRoot || !activeDraftRelativePath) return
+    if (
+      typeof window.dsGui?.watchWorkspaceFile !== 'function' ||
+      typeof window.dsGui?.unwatchWorkspaceFile !== 'function' ||
+      typeof window.dsGui?.onWorkspaceFileChanged !== 'function'
+    ) {
+      return
+    }
+
+    return startWriteWorkspaceFileWatch({
+      api: window.dsGui,
+      workspaceRoot: activeDraftWorkspaceRoot,
+      path: activeDraftAbsolutePath ?? activeDraftRelativePath,
+      kind: 'text',
+      onTextSnapshot: (snapshot) => {
+        void syncActiveSddDraftFromDisk(snapshot)
+      },
+      onImageChanged: () => undefined,
+      onError: (message) => {
+        useSddDraftStore.getState().setSaveStatus('error', message)
+      }
+    })
+  }, [activeDraftAbsolutePath, activeDraftId, activeDraftRelativePath, activeDraftWorkspaceRoot])
 
   if (!activeDraft) {
     return (
@@ -175,6 +235,11 @@ export function SddDraftEditorView({
               >
                 <Save className="h-4 w-4" strokeWidth={1.85} />
               </button>
+              <SddAssistantToggleButton
+                assistantOpen={assistantOpen}
+                onToggleAssistant={onToggleAssistant}
+                label={t('sddAssistant')}
+              />
               <button
                 type="button"
                 onClick={onNext}

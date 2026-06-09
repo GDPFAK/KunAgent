@@ -34,6 +34,7 @@ import {
 } from '../../shared/app-settings'
 import { DESKTOP_COMMANDS } from '../../shared/ds-gui-api'
 import { GUI_UPDATE_CHANNELS } from '../../shared/gui-update'
+import { KEYBOARD_SHORTCUT_COMMANDS } from '../../shared/keyboard-shortcuts'
 import { WRITE_EXPORT_FORMATS } from '../../shared/write-export'
 
 const MAX_BODY_BYTES = 2_000_000
@@ -173,11 +174,11 @@ const modelProviderPatchSchema = z.object({
   apiKey: z.string().max(MAX_BODY_BYTES).optional(),
   baseUrl: z.string().trim().max(MAX_URL_LENGTH).optional(),
   providers: z.array(z.object({
-    id: z.string().trim().min(1).max(64),
-    name: z.string().trim().min(1).max(80),
-    apiKey: z.string().max(MAX_BODY_BYTES),
-    baseUrl: z.string().trim().max(MAX_URL_LENGTH),
-    models: z.array(z.string().trim().min(1).max(128)).max(200)
+    id: z.string().trim().min(1).max(64).optional(),
+    name: z.string().trim().min(1).max(80).optional(),
+    apiKey: z.string().max(MAX_BODY_BYTES).optional(),
+    baseUrl: z.string().trim().max(MAX_URL_LENGTH).optional(),
+    models: z.array(z.string().trim().min(1).max(128)).max(200).optional()
   }).strict()).max(50).optional()
 }).strict()
 
@@ -254,6 +255,18 @@ const appBehaviorPatchSchema = z.object({
   openAtLogin: z.boolean().optional(),
   startMinimized: z.boolean().optional(),
   closeToTray: z.boolean().optional()
+}).strict()
+
+const keyboardShortcutCommandIds = KEYBOARD_SHORTCUT_COMMANDS.map((command) => command.id) as [
+  typeof KEYBOARD_SHORTCUT_COMMANDS[number]['id'],
+  ...Array<typeof KEYBOARD_SHORTCUT_COMMANDS[number]['id']>
+]
+
+const keyboardShortcutsPatchSchema = z.object({
+  bindings: z.partialRecord(
+    z.enum(keyboardShortcutCommandIds),
+    z.array(z.string().trim().max(64)).max(4)
+  ).optional()
 }).strict()
 
 const writeInlineCompletionPatchSchema = z.object({
@@ -478,12 +491,14 @@ const settingsPatchObjectSchema = z.object({
   log: logPatchSchema.optional(),
   notifications: notificationsPatchSchema.optional(),
   appBehavior: appBehaviorPatchSchema.optional(),
+  keyboardShortcuts: keyboardShortcutsPatchSchema.optional(),
   write: writeSettingsPatchSchema.optional(),
   claw: clawSettingsPatchSchema.optional(),
   schedule: scheduleSettingsPatchSchema.optional(),
   guiUpdate: z.object({
     channel: z.enum(GUI_UPDATE_CHANNELS).optional()
-  }).strict().optional()
+  }).strict().optional(),
+  codePromptPrefix: z.string().max(MAX_CHANNEL_TEXT_LENGTH).optional()
 }).strict()
 
 export const settingsPatchSchema = z.preprocess(stripLegacySettingsPatchKeys, settingsPatchObjectSchema)

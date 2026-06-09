@@ -392,8 +392,8 @@ npm run build           # production build
 npm run dist:mac        # macOS packages
 npm run dist:win        # Windows installer (run on Windows)
 npm run dist:linux      # Linux AppImage
-npm run release:mac     # build and upload macOS release assets on macOS
-npm run release:win     # build and upload Windows release assets on Windows
+npm run release:mac     # manual fallback for macOS release assets
+npm run release:win     # manual fallback for Windows release assets
 ```
 
 For the full development workflow, see [DEVELOPMENT.md](./docs/DEVELOPMENT.md).
@@ -425,6 +425,10 @@ We are also grateful to:
 - **OpenHanako**: its Markdown live editing, writing-space, and selection inline-agent patterns heavily informed Write mode.
 - **[DeepSeek](https://github.com/deepseek-ai)**: for the models and API.
 - Everyone who contributes issues, ideas, code, and documentation to DeepSeek GUI.
+
+<a href="https://github.com/XingYu-Zhong/DeepSeek-GUI/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=XingYu-Zhong/DeepSeek-GUI" />
+</a>
 
 > [!NOTE]
 > This project is not affiliated with DeepSeek Inc.

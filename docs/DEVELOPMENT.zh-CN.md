@@ -137,6 +137,28 @@ PR 描述建议至少包含：
 
 `master` 仅用于稳定发布。维护者确认 `develop` 中的改动适合发布后，再将 `develop` 合入 `master`。
 
+## 自动发布
+
+当同仓库内从 `develop` 指向 `master` 的 PR 被合并后，GitHub Actions 会自动发布稳定版本。
+
+发布 workflow 会：
+
+- 基于最新三段式 semver tag 自动生成下一个 `vX.Y.Z` patch tag
+- 如果 rerun 时当前 merge commit 已经有 tag，则复用该 tag
+- 构建已签名并公证的 macOS arm64/x64 包、Windows x64 安装器、Linux x64 AppImage
+- 将发布产物和更新元数据上传到 GitHub Releases 与 R2 `stable` 渠道
+- 只有在全部平台上传成功后，才会 promote R2 `stable/latest`
+
+首次自动发布前，维护者需要配置这些 GitHub Actions secrets：
+
+- R2：`R2_BUCKET`、`R2_ACCESS_KEY_ID`、`R2_SECRET_ACCESS_KEY`、`R2_PUBLIC_BASE_URL`，以及 `R2_ACCOUNT_ID` 或 `R2_ENDPOINT`
+- 可选 R2 覆盖项：`R2_RELEASE_PREFIX`
+- macOS 签名：`MAC_CODESIGN_P12_BASE64`、`CSC_KEY_PASSWORD`、`APPLE_API_KEY_BASE64`、`APPLE_API_KEY_ID`、`APPLE_API_ISSUER`
+
+仓库的 Actions 设置还需要允许 `GITHUB_TOKEN` 写入 repository contents，这样 workflow 才能创建 tag 并发布 Release。
+
+本地 `npm run release:mac` 和 `npm run release:win` 命令保留为手动兜底工具。
+
 ## 分支命名建议
 
 示例：

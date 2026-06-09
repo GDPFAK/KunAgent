@@ -3,6 +3,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it, vi } from 'vitest'
 import {
   defaultClawSettings,
+  defaultKeyboardShortcuts,
   defaultKunRuntimeSettings,
   defaultModelProviderSettings,
   defaultScheduleSettings,
@@ -62,10 +63,12 @@ function buildSettings(): AppSettingsV1 {
     log: { enabled: true, retentionDays: 7 },
     notifications: { turnComplete: true },
     appBehavior: { openAtLogin: false, startMinimized: false, closeToTray: false },
+    keyboardShortcuts: defaultKeyboardShortcuts(),
     write: defaultWriteSettings(),
     claw: defaultClawSettings(),
     schedule: defaultScheduleSettings(),
-    guiUpdate: { channel: 'stable' }
+    guiUpdate: { channel: 'stable' },
+    codePromptPrefix: ''
   }
   settings.claw.enabled = true
   settings.claw.im.workspaceRoot = '/tmp/claw'

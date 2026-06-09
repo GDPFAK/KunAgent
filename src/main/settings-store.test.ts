@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, readdir, stat, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -135,6 +135,31 @@ describe('JsonSettingsStore', () => {
     expect(loaded.provider.baseUrl).toBe('https://runtime.example/v1')
     expect(loaded.agents.kun.apiKey).toBe('')
     expect(loaded.agents.kun.baseUrl).toBe('')
+  })
+
+  it('loads settings from the legacy lowercase userData directory and writes them into the current path', async () => {
+    const supportRoot = await mkdtemp(join(tmpdir(), 'ds-gui-settings-compat-'))
+    const legacyUserDataDir = join(supportRoot, 'deepseek-gui')
+    const currentUserDataDir = join(supportRoot, 'DeepSeek GUI')
+    const currentSettingsPath = join(currentUserDataDir, 'deepseek-gui-settings.json')
+
+    await mkdir(legacyUserDataDir, { recursive: true })
+    await writeFile(
+      join(legacyUserDataDir, 'deepseek-gui-settings.json'),
+      JSON.stringify({
+        version: 1,
+        provider: {
+          apiKey: 'sk-legacy-provider'
+        }
+      }),
+      'utf8'
+    )
+
+    const store = new JsonSettingsStore(currentUserDataDir)
+    const loaded = await store.load()
+
+    expect(loaded.provider.apiKey).toBe('sk-legacy-provider')
+    expect(await readFile(currentSettingsPath, 'utf8')).toContain('sk-legacy-provider')
   })
 
   it('creates the configured code workspace on load', async () => {
@@ -351,5 +376,28 @@ describe('JsonSettingsStore', () => {
 
     expect(channel?.threadId).toBe('reasonix-channel')
     expect(conversation?.localThreadId).toBe('reasonix-conversation')
+  })
+
+  it('saves settings atomically (no .tmp file left on success)', async () => {
+    const userDataDir = await mkdtemp(join(tmpdir(), 'ds-gui-settings-atomic-'))
+
+    try {
+      const store = new JsonSettingsStore(userDataDir)
+      const loaded = await store.load()
+      await store.save(loaded)
+
+      // Final file is present and non-empty.
+      const finalContents = await readFile(
+        join(userDataDir, 'deepseek-gui-settings.json'),
+        'utf8'
+      )
+      expect(finalContents.length).toBeGreaterThan(0)
+
+      // No .tmp leftover from the atomic write.
+      const entries = await readdir(userDataDir)
+      expect(entries.filter((entry) => entry.includes('.tmp'))).toEqual([])
+    } finally {
+      await rm(userDataDir, { recursive: true, force: true })
+    }
   })
 })

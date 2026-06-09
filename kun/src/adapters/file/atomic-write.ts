@@ -22,11 +22,19 @@ export async function atomicWriteFile(
   const tmp = `${path}.${process.pid}.${Date.now()}.${randomUUID()}.tmp`
   try {
     await writeFile(tmp, contents, 'utf-8')
-    await renameWithRetry(tmp, path, options.renameRetry)
+    try {
+      await renameWithRetry(tmp, path, options.renameRetry)
+    } catch (error) {
+      if (!shouldFallbackToDirectWrite(error)) {
+        throw error
+      }
+      await writeFile(path, contents, 'utf-8')
+    }
   } catch (error) {
     await rm(tmp, { force: true }).catch(() => undefined)
     throw error
   }
+  await rm(tmp, { force: true }).catch(() => undefined)
 }
 
 async function renameWithRetry(
@@ -52,6 +60,10 @@ async function renameWithRetry(
 
 function isRetryableRenameError(error: unknown): boolean {
   return RETRYABLE_RENAME_ERROR_CODES.has(String((error as { code?: unknown })?.code ?? ''))
+}
+
+function shouldFallbackToDirectWrite(error: unknown): boolean {
+  return process.platform === 'win32' && isRetryableRenameError(error)
 }
 
 function delay(ms: number): Promise<void> {
