@@ -52,10 +52,11 @@ import {
   GeneralSettingsSection,
   ImageGenerationSettingsSection,
   KeyboardShortcutsSettingsSection,
+  UpdatesSettingsSection,
   WriteSettingsSection
 } from './settings-sections'
 
-type SettingsCategory = 'general' | 'write' | 'imageGeneration' | 'agents' | 'shortcuts' | 'claw'
+type SettingsCategory = 'general' | 'write' | 'imageGeneration' | 'agents' | 'shortcuts' | 'claw' | 'updates'
 type SaveStatus = 'idle' | 'saving' | 'saved' | 'error'
 type SettingsPatch = AppSettingsPatch
 type SkillRootOption = {
@@ -231,6 +232,10 @@ export function SettingsView(): ReactElement {
       setCategory('shortcuts')
       return
     }
+    if (settingsSection === 'updates') {
+      setCategory('updates')
+      return
+    }
     setCategory('agents')
   }, [settingsSection])
 
@@ -242,12 +247,13 @@ export function SettingsView(): ReactElement {
       settingsSection === 'imageGeneration' ||
       settingsSection === 'claw' ||
       settingsSection === 'shortcuts' ||
+      settingsSection === 'updates' ||
       category !== 'agents'
     ) {
       return
     }
     const refs: Record<
-      Exclude<SettingsRouteSection, 'general' | 'write' | 'imageGeneration' | 'claw' | 'shortcuts'>,
+      Exclude<SettingsRouteSection, 'general' | 'write' | 'imageGeneration' | 'claw' | 'shortcuts' | 'updates'>,
       HTMLDivElement | null
     > = {
       agents: agentsSectionRef.current,
@@ -847,6 +853,7 @@ export function SettingsView(): ReactElement {
           {category === 'agents' ? <AgentsSettingsSection ctx={settingsSectionContext} /> : null}
           {category === 'shortcuts' ? <KeyboardShortcutsSettingsSection ctx={settingsSectionContext} /> : null}
           {category === 'claw' ? <ClawSettingsSection ctx={settingsSectionContext} /> : null}
+          {category === 'updates' ? <UpdatesSettingsSection ctx={settingsSectionContext} /> : null}
         </div>
       </div>
       {writeDebugModalOpen ? (

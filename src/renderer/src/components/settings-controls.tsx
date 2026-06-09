@@ -167,13 +167,13 @@ export function Toggle({
       onClick={() => {
         if (!disabled) onChange(!checked)
       }}
-      className={`relative h-7 w-12 shrink-0 rounded-full transition ${
+      className={`relative h-7 w-12 shrink-0 rounded-full transition-colors duration-200 ease-out ${
         checked ? 'bg-emerald-500' : 'bg-ds-faint'
-      } ${disabled ? 'cursor-not-allowed opacity-60' : ''}`}
+      } ${disabled ? 'cursor-not-allowed opacity-60' : 'active:scale-[0.98]'}`}
     >
       <span
-        className={`absolute top-0.5 h-6 w-6 rounded-full bg-white shadow transition ${
-          checked ? 'left-6' : 'left-0.5'
+        className={`absolute left-0.5 top-0.5 h-6 w-6 rounded-full bg-white shadow transition-transform duration-200 ease-out ${
+          checked ? 'translate-x-5' : 'translate-x-0'
         }`}
       />
     </button>

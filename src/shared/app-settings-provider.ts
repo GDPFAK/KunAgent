@@ -30,10 +30,7 @@ export function normalizeModelProviderSettings(
 ): ModelProviderSettingsV1 {
   const defaults = defaultModelProviderSettings()
   const apiKey = typeof input?.apiKey === 'string' ? input.apiKey.trim() : defaults.apiKey
-  const baseUrl =
-    typeof input?.baseUrl === 'string' && input.baseUrl.trim()
-      ? normalizeDeepseekBaseUrl(input.baseUrl)
-      : defaults.baseUrl
+  const baseUrl = normalizeModelProviderBaseUrl(input?.baseUrl, defaults.baseUrl)
   const rawProviders = Array.isArray(input?.providers) ? input.providers : []
   const providersById = new Map<string, ModelProviderProfileV1>()
   const defaultProvider = defaultModelProviderProfile(apiKey, baseUrl)
@@ -133,7 +130,7 @@ function defaultModelProviderProfile(apiKey: string, baseUrl: string): ModelProv
     id: DEFAULT_MODEL_PROVIDER_ID,
     name: DEFAULT_MODEL_PROVIDER_NAME,
     apiKey: apiKey.trim(),
-    baseUrl: normalizeDeepseekBaseUrl(baseUrl),
+    baseUrl: normalizeModelProviderBaseUrl(baseUrl),
     endpointFormat: DEFAULT_MODEL_ENDPOINT_FORMAT,
     models: DEFAULT_COMPOSER_MODEL_IDS.filter((id) => id !== 'auto')
   }
@@ -145,10 +142,7 @@ function normalizeModelProviderProfile(
   const id = normalizeModelProviderId(input?.id)
   if (!id) return null
   const name = typeof input?.name === 'string' && input.name.trim() ? input.name.trim() : id
-  const baseUrl =
-    typeof input?.baseUrl === 'string' && input.baseUrl.trim()
-      ? normalizeDeepseekBaseUrl(input.baseUrl)
-      : DEFAULT_DEEPSEEK_BASE_URL
+  const baseUrl = normalizeModelProviderBaseUrl(input?.baseUrl)
   const models = normalizeProviderModels(input?.models)
   return {
     id,
@@ -158,6 +152,12 @@ function normalizeModelProviderProfile(
     endpointFormat: normalizeModelEndpointFormat(input?.endpointFormat),
     models
   }
+}
+
+function normalizeModelProviderBaseUrl(value: unknown, fallback = DEFAULT_DEEPSEEK_BASE_URL): string {
+  if (typeof value !== 'string') return fallback
+  const trimmed = value.trim()
+  return trimmed ? normalizeDeepseekBaseUrl(trimmed) : ''
 }
 
 function normalizeProviderModels(models: unknown): string[] {

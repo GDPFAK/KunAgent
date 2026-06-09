@@ -81,6 +81,7 @@ export type SettingsRouteSection =
   | 'mcp'
   | 'shortcuts'
   | 'claw'
+  | 'updates'
 export type AppRoute = 'chat' | 'write' | 'settings' | 'plugins' | 'claw' | 'schedule'
 export type PluginHostRoute = 'chat' | 'claw'
 

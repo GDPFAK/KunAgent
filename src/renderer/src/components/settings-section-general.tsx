@@ -9,10 +9,8 @@ import {
   WRITE_INLINE_COMPLETION_MODEL_IDS,
   isKunRuntimeInsecure
 } from '@shared/app-settings'
-import type { GuiUpdateChannel } from '@shared/gui-update'
 import type { SkillRootId } from '../lib/skill-root-preference'
 import { FolderOpen, Loader2, PencilLine, RefreshCw, Settings } from 'lucide-react'
-import { GuiUpdateControl } from './settings-gui-update'
 import {
   InlineNoticeView,
   SecretInput,
@@ -44,16 +42,6 @@ export function GeneralSettingsSection({ ctx }: { ctx: Record<string, any> }): R
     pickWorkspace,
     resetWorkspaceToDefault,
     workspacePickerError,
-    guiUpdateInfo,
-    checkingGuiUpdate,
-    downloadingGuiUpdate,
-    installingGuiUpdate,
-    guiUpdateDownloaded,
-    guiUpdateProgress,
-    guiUpdateError,
-    checkGuiUpdate,
-    downloadGuiUpdate,
-    installGuiUpdate,
     logPath,
     logDirOpenError,
     setLogDirOpenError,
@@ -98,6 +86,15 @@ export function GeneralSettingsSection({ ctx }: { ctx: Record<string, any> }): R
   const openAtLoginSupported = platform === 'win32' || platform === 'darwin'
   const startMinimizedSupported = platform === 'win32'
   const desktopBehavior = form.appBehavior
+  const fontScaleOptions: AppSettingsV1['uiFontScale'][] = ['small', 'medium', 'large']
+  const selectedFontScaleIndex = fontScaleOptions.indexOf(form.uiFontScale)
+  const fontScaleIndex = selectedFontScaleIndex >= 0 ? selectedFontScaleIndex : 0
+  const currentFontScale = fontScaleOptions[fontScaleIndex]
+  const fontScaleLabel = (scale: AppSettingsV1['uiFontScale']): string => {
+    if (scale === 'large') return t('fontScaleLarge')
+    if (scale === 'medium') return t('fontScaleMedium')
+    return t('fontScaleSmall')
+  }
 
   return (
             <>
@@ -178,19 +175,29 @@ export function GeneralSettingsSection({ ctx }: { ctx: Record<string, any> }): R
                   title={t('fontScale')}
                   description={t('fontScaleDesc')}
                   control={
-                    <select
-                      className={selectControlClass}
-                      value={form.uiFontScale}
-                      onChange={(e) =>
-                        update({
-                          uiFontScale: e.target.value as AppSettingsV1['uiFontScale']
-                        })
-                      }
-                    >
-                      <option value="small">{t('fontScaleSmall')}</option>
-                      <option value="medium">{t('fontScaleMedium')}</option>
-                      <option value="large">{t('fontScaleLarge')}</option>
-                    </select>
+                    <div className="w-full min-w-0 md:max-w-md">
+                      <div className="flex items-center justify-between text-[12px] font-medium text-ds-faint">
+                        {fontScaleOptions.map((scale) => (
+                          <span key={scale}>{fontScaleLabel(scale)}</span>
+                        ))}
+                      </div>
+                      <input
+                        type="range"
+                        min={0}
+                        max={fontScaleOptions.length - 1}
+                        step={1}
+                        value={fontScaleIndex}
+                        aria-label={t('fontScale')}
+                        className="mt-2 w-full accent-accent"
+                        onChange={(e) => {
+                          const nextScale = fontScaleOptions[Number(e.target.value)] ?? 'medium'
+                          update({ uiFontScale: nextScale })
+                        }}
+                      />
+                      <div className="mt-1.5 text-[13px] font-medium text-ds-muted">
+                        {t('fontScaleCurrent', { value: fontScaleLabel(currentFontScale) })}
+                      </div>
+                    </div>
                   }
                 />
                 <SettingRow
@@ -285,46 +292,6 @@ export function GeneralSettingsSection({ ctx }: { ctx: Record<string, any> }): R
                     <Toggle
                       checked={desktopBehavior.closeToTray}
                       onChange={(v) => update({ appBehavior: { closeToTray: v } })}
-                    />
-                  }
-                />
-              </SettingsCard>
-
-              <SettingsCard title={t('guiUpdate')} className="mt-6">
-                <SettingRow
-                  title={t('guiUpdateChannel')}
-                  description={t('guiUpdateChannelDesc')}
-                  control={
-                    <select
-                      className={selectControlClass}
-                      value={form.guiUpdate.channel}
-                      onChange={(e) =>
-                        update({
-                          guiUpdate: { channel: e.target.value as GuiUpdateChannel }
-                        })
-                      }
-                    >
-                      <option value="frontier">{t('guiUpdateChannelFrontier')}</option>
-                      <option value="stable">{t('guiUpdateChannelStable')}</option>
-                    </select>
-                  }
-                />
-                <SettingRow
-                  title={t('guiUpdate')}
-                  description={t('guiUpdateDesc')}
-                  control={
-                    <GuiUpdateControl
-                      info={guiUpdateInfo}
-                      checking={checkingGuiUpdate}
-                      downloading={downloadingGuiUpdate}
-                      installing={installingGuiUpdate}
-                      downloaded={guiUpdateDownloaded}
-                      progress={guiUpdateProgress}
-                      error={guiUpdateError}
-                      onCheck={checkGuiUpdate}
-                      onDownload={downloadGuiUpdate}
-                      onInstall={installGuiUpdate}
-                      t={t}
                     />
                   }
                 />

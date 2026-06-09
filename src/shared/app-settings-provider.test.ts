@@ -1,11 +1,14 @@
 import { describe, expect, it } from 'vitest'
 import {
+  DEFAULT_DEEPSEEK_BASE_URL,
   defaultClawSettings,
   defaultKeyboardShortcuts,
   defaultKunRuntimeSettings,
   defaultModelProviderSettings,
   defaultScheduleSettings,
   defaultWriteSettings,
+  normalizeModelProviderSettings,
+  resolveModelProviderBaseUrl,
   resolveKunRuntimeSettings,
   type AppSettingsV1
 } from './app-settings'
@@ -57,5 +60,30 @@ describe('model provider settings', () => {
     expect(runtime.apiKey).toBe('sk-custom')
     expect(runtime.baseUrl).toBe('https://custom.example/v1')
     expect(runtime.endpointFormat).toBe('messages')
+  })
+
+  it('preserves a cleared default base URL while resolving the official runtime endpoint', () => {
+    const state = settings()
+    const normalized = normalizeModelProviderSettings({
+      ...state.provider,
+      baseUrl: '',
+      providers: state.provider.providers.map((provider) =>
+        provider.id === 'deepseek'
+          ? { ...provider, baseUrl: '' }
+          : provider
+      )
+    })
+
+    expect(normalized.baseUrl).toBe('')
+    expect(normalized.providers.find((provider) => provider.id === 'deepseek')?.baseUrl).toBe('')
+    expect(resolveModelProviderBaseUrl({ ...state, provider: normalized })).toBe(DEFAULT_DEEPSEEK_BASE_URL)
+  })
+
+  it('keeps deprecated DeepSeek models out of the default provider list', () => {
+    const defaultModels = defaultModelProviderSettings().providers[0].models
+
+    expect(defaultModels).toEqual(['deepseek-v4-pro', 'deepseek-v4-flash'])
+    expect(defaultModels).not.toContain('deepseek-chat')
+    expect(defaultModels).not.toContain('deepseek-reasoner')
   })
 })

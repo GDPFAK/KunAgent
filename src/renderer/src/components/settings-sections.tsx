@@ -4,3 +4,4 @@ export { ImageGenerationSettingsSection } from './settings-section-image-generat
 export { AgentsSettingsSection } from './settings-section-agents'
 export { ClawSettingsSection } from './settings-section-claw'
 export { KeyboardShortcutsSettingsSection } from './settings-section-shortcuts'
+export { UpdatesSettingsSection } from './settings-section-updates'
