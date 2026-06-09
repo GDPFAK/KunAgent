@@ -1,8 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { defaultKunRuntimeSettings } from '@shared/app-settings'
-import { AgentsSettingsSection } from './settings-section-agents'
+import {
+  DEFAULT_MODEL_PROVIDER_ID,
+  defaultKunRuntimeSettings,
+  defaultModelProviderSettings
+} from '@shared/app-settings'
+import { AgentsSettingsSection, modelProvidersSettingsPatch } from './settings-section-agents'
 
 const labels: Record<string, string> = {
   agentsQuickBase: 'Base',
@@ -293,6 +297,51 @@ function baseCtx(): Record<string, unknown> {
 }
 
 describe('AgentsSettingsSection Kun diagnostics smoke', () => {
+  it('builds a single patch when adding and selecting a model provider', () => {
+    const provider = defaultModelProviderSettings()
+    const customProvider = {
+      id: 'custom-provider-2',
+      name: 'Custom Provider',
+      apiKey: '',
+      baseUrl: 'https://api.example.com/v1',
+      models: []
+    }
+
+    const patch = modelProvidersSettingsPatch({
+      provider,
+      providers: [...provider.providers, customProvider],
+      kun: { providerId: customProvider.id }
+    })
+
+    expect(patch.provider?.providers).toEqual([...provider.providers, customProvider])
+    expect(patch.agents?.kun?.providerId).toBe(customProvider.id)
+  })
+
+  it('builds a single patch when removing the active model provider', () => {
+    const provider = defaultModelProviderSettings()
+
+    const patch = modelProvidersSettingsPatch({
+      provider: {
+        ...provider,
+        providers: [
+          ...provider.providers,
+          {
+            id: 'custom-provider-2',
+            name: 'Custom Provider',
+            apiKey: '',
+            baseUrl: 'https://api.example.com/v1',
+            models: []
+          }
+        ]
+      },
+      providers: provider.providers,
+      kun: { providerId: DEFAULT_MODEL_PROVIDER_ID }
+    })
+
+    expect(patch.provider?.providers).toEqual(provider.providers)
+    expect(patch.agents?.kun?.providerId).toBe(DEFAULT_MODEL_PROVIDER_ID)
+  })
+
   it('keeps advanced agent controls behind collapsed disclosures', () => {
     const html = renderToStaticMarkup(createElement(AgentsSettingsSection, { ctx: baseCtx() }))
 

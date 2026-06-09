@@ -1,5 +1,12 @@
 import { useEffect, useState, type ReactElement, type ReactNode } from 'react'
-import type { ApprovalPolicy, AppSettingsV1, ModelProviderProfileV1, SandboxMode } from '@shared/app-settings'
+import type {
+  ApprovalPolicy,
+  AppSettingsPatch,
+  AppSettingsV1,
+  ModelProviderProfileV1,
+  ModelProviderSettingsV1,
+  SandboxMode
+} from '@shared/app-settings'
 import {
   DEFAULT_MODEL_PROVIDER_ID,
   DEFAULT_WRITE_INLINE_COMPLETION_BASE_URL,
@@ -56,6 +63,22 @@ const EMPTY_TOKEN_ECONOMY_SAVINGS_STATE: TokenEconomySavingsState = {
   loading: false,
   loaded: false,
   summary: null
+}
+
+export function modelProvidersSettingsPatch(input: {
+  provider: ModelProviderSettingsV1
+  providers: ModelProviderProfileV1[]
+  kun?: Partial<AppSettingsV1['agents']['kun']>
+}): AppSettingsPatch {
+  const defaultProvider = input.providers.find((item) => item.id === DEFAULT_MODEL_PROVIDER_ID)
+  return {
+    provider: {
+      apiKey: defaultProvider?.apiKey ?? input.provider.apiKey,
+      baseUrl: defaultProvider?.baseUrl ?? input.provider.baseUrl,
+      providers: input.providers
+    },
+    ...(input.kun ? { agents: { kun: input.kun } } : {})
+  }
 }
 
 type ModelContextProfileSummary = {
@@ -391,15 +414,15 @@ export function AgentsSettingsSection({ ctx }: { ctx: Record<string, any> }): Re
   const modelProviders = provider.providers as ModelProviderProfileV1[]
   const activeProviderId = kun.providerId?.trim() || DEFAULT_MODEL_PROVIDER_ID
   const activeProvider = modelProviders.find((item) => item.id === activeProviderId) ?? modelProviders[0]
-  const updateModelProviders = (providers: ModelProviderProfileV1[]): void => {
-    const defaultProvider = providers.find((item) => item.id === DEFAULT_MODEL_PROVIDER_ID)
-    update({
-      provider: {
-        apiKey: defaultProvider?.apiKey ?? provider.apiKey,
-        baseUrl: defaultProvider?.baseUrl ?? provider.baseUrl,
-        providers
-      }
-    })
+  const updateModelProviders = (
+    providers: ModelProviderProfileV1[],
+    kunPatch?: Partial<AppSettingsV1['agents']['kun']>
+  ): void => {
+    update(modelProvidersSettingsPatch({
+      provider,
+      providers,
+      kun: kunPatch
+    }))
   }
   const updateModelProvider = (id: string, patch: Partial<ModelProviderProfileV1>): void => {
     updateModelProviders(modelProviders.map((item) => item.id === id ? { ...item, ...patch } : item))
@@ -420,16 +443,15 @@ export function AgentsSettingsSection({ ctx }: { ctx: Record<string, any> }): Re
       baseUrl: 'https://api.example.com/v1',
       models: []
     }
-    updateModelProviders([...modelProviders, nextProvider])
-    updateKun({ providerId: id })
+    updateModelProviders([...modelProviders, nextProvider], { providerId: id })
   }
   const removeModelProvider = (id: string): void => {
     if (id === DEFAULT_MODEL_PROVIDER_ID) return
     const nextProviders = modelProviders.filter((item) => item.id !== id)
-    updateModelProviders(nextProviders)
-    if (activeProviderId === id) {
-      updateKun({ providerId: DEFAULT_MODEL_PROVIDER_ID })
-    }
+    updateModelProviders(
+      nextProviders,
+      activeProviderId === id ? { providerId: DEFAULT_MODEL_PROVIDER_ID } : undefined
+    )
   }
 
   return (
