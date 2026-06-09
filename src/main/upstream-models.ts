@@ -2,7 +2,6 @@ import { readFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import {
-  getModelProviderProfile,
   getModelProviderSettings,
   listModelProviderModelIds,
   resolveKunRuntimeSettings,
@@ -33,7 +32,6 @@ export async function fetchUpstreamModelIds(
     return modelListOrError(configuredModelIds, configuredGroups, 'Missing API key; cannot query upstream /v1/models.')
   }
   const runtime = resolveKunRuntimeSettings(settings)
-  const activeProvider = getModelProviderProfile(settings, runtime.providerId)
   const url = upstreamOpenAiModelsUrl(runtime.baseUrl)
   try {
     const res = await fetch(url, {
@@ -76,14 +74,7 @@ export async function fetchUpstreamModelIds(
     return {
       ok: true,
       modelIds: sorted,
-      modelGroups: mergeModelGroups([
-        ...configuredGroups,
-        {
-          providerId: activeProvider.id,
-          label: activeProvider.name,
-          modelIds: [...ids]
-        }
-      ])
+      modelGroups: mergeModelGroups(configuredGroups)
     }
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e)

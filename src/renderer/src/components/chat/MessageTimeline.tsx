@@ -1,6 +1,7 @@
 import type { ReactElement, RefObject } from 'react'
-import { Fragment, memo, useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { ChevronDown } from 'lucide-react'
 import type { ChatBlock, RuntimeConnectionStatus } from '../../agent/types'
 import { useChatStore } from '../../store/chat-store'
 import { useTimelineStores } from './use-timeline-stores'
@@ -149,8 +150,19 @@ export function MessageTimeline({
     return () => window.clearInterval(id)
   }, [busy, currentTurnUserId])
 
+  const [showScrollButton, setShowScrollButton] = useState(false)
+  const handleScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
+    const el = e.currentTarget
+    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 160
+    setShowScrollButton(!atBottom)
+  }, [])
+  const scrollToBottom = useCallback(() => {
+    endRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [])
+
   return (
-    <div ref={containerRef} className="ds-no-drag flex min-h-0 flex-1 flex-col overflow-y-auto overflow-x-hidden">
+    <div className="relative flex min-h-0 flex-1">
+      <div ref={containerRef} onScroll={handleScroll} className="ds-no-drag flex min-h-0 flex-1 flex-col overflow-y-auto overflow-x-hidden">
       <div className="ds-message-timeline-content ds-chat-column-inset mx-auto flex w-full min-w-0 max-w-4xl flex-col gap-8 pb-10 pt-8">
         {!hasContent || !activeThreadId ? (
           <MessageTimelineEmptyHero
@@ -268,6 +280,17 @@ export function MessageTimeline({
         ) : null}
         <div ref={endRef} aria-hidden className="h-px w-full shrink-0" />
       </div>
+    </div>
+      {hasContent && showScrollButton ? (
+        <button
+          type="button"
+          onClick={scrollToBottom}
+          className="absolute bottom-6 right-6 z-10 flex h-10 w-10 items-center justify-center rounded-full bg-ds-card shadow-lg ring-1 ring-ds-border transition hover:bg-ds-hover active:scale-95"
+          aria-label="回到底部"
+        >
+          <ChevronDown className="h-5 w-5 text-ds-ink" strokeWidth={2} />
+        </button>
+      ) : null}
     </div>
   )
 }
