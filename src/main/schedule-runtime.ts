@@ -194,6 +194,30 @@ export class ScheduleRuntime {
     return saved
   }
 
+  async createThreadFromInput(input: {
+    title: string
+    prompt: string
+    workspaceRoot?: string
+    model?: string
+    reasoningEffort?: ScheduleReasoningEffort
+    mode?: ScheduleRunMode
+  }): Promise<ScheduleRunResult> {
+    const settings = await this.deps.store.load()
+    const prompt = input.prompt.trim()
+    if (!prompt) return { ok: false, message: 'Prompt is empty.' }
+    return this.runPrompt(settings, {
+      prompt,
+      title: input.title.trim() || 'New thread',
+      workspaceRoot: input.workspaceRoot?.trim() || this.resolveDefaultWorkspaceRoot(settings),
+      model: input.model?.trim() || settings.schedule.model || DEFAULT_SCHEDULE_MODEL,
+      reasoningEffort: normalizeScheduleReasoningEffort(input.reasoningEffort),
+      mode: input.mode ?? settings.schedule.mode,
+      waitForResult: false,
+      responseTimeoutMs: TASK_RESPONSE_TIMEOUT_MS,
+      promptKind: 'direct'
+    })
+  }
+
   async updateTaskById(taskId: string, patch: Partial<ScheduledTaskV1>): Promise<ScheduledTaskV1 | null> {
     const settings = await this.deps.store.load()
     const task = settings.schedule.tasks.find((item) => item.id === taskId)
@@ -439,12 +463,12 @@ export class ScheduleRuntime {
     if (!create.ok) return { ok: false, message: runtimeErrorMessage(create, 'Failed to create thread.') }
     const thread = JSON.parse(create.body) as ThreadRecordJson
 
+    const isDirectPrompt = options.promptKind === 'direct'
     const turnBody: Record<string, unknown> = {
-      prompt: buildScheduleRuntimePrompt(settings, options.prompt),
+      prompt: isDirectPrompt ? options.prompt : buildScheduleRuntimePrompt(settings, options.prompt),
       mode: options.mode,
-      // Scheduled turns are headless — nobody can answer a user_input
-      // prompt, and a turn that asks one hangs until the response timeout.
-      disableUserInput: true
+      // Scheduled turns are headless; nobody can answer a user_input prompt.
+      ...(!isDirectPrompt ? { disableUserInput: true } : {})
     }
     if (model) turnBody.model = model
     if (options.reasoningEffort) {
@@ -624,6 +648,39 @@ export class ScheduleRuntime {
           return
         }
         writeJson(res, 200, { ok: true, task: updated })
+        return
+      }
+
+      if (url.pathname === '/schedule/internal/thread/create') {
+        const input = nestedRecord(payload.input)
+        if (!input || Object.keys(input).length === 0) {
+          writeJson(res, 400, { ok: false, message: 'Missing thread input.' })
+          return
+        }
+        const prompt = asString(input.prompt)
+        if (!prompt) {
+          writeJson(res, 400, { ok: false, message: 'Missing prompt.' })
+          return
+        }
+        const result = await this.createThreadFromInput({
+          title: asString(input.title),
+          prompt,
+          workspaceRoot: asString(input.workspaceRoot) || undefined,
+          model: asString(input.model) || undefined,
+          reasoningEffort: (asString(input.reasoningEffort) as ScheduleReasoningEffort) || undefined,
+          mode: (asString(input.mode) as ScheduleRunMode) || undefined
+        })
+        if (!result.ok) {
+          writeJson(res, 500, { ok: false, message: result.message })
+          return
+        }
+        writeJson(res, 200, {
+          ok: true,
+          threadId: result.threadId,
+          turnId: result.turnId,
+          title: asString(input.title) || 'New thread',
+          message: result.message ?? 'Started'
+        })
         return
       }
 

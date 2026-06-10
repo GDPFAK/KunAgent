@@ -65,6 +65,7 @@ export type RunPromptOptions = {
   mode: ScheduleRunMode
   waitForResult: boolean
   responseTimeoutMs: number
+  promptKind?: 'schedule' | 'direct'
 }
 
 export const SCHEDULER_INTERVAL_MS = 30_000

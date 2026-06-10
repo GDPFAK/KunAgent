@@ -148,6 +148,42 @@ export async function runClawScheduleMcpServerFromArgv(argv: string[]): Promise<
   registerCreateTool('claw_schedule_create')
   registerCreateTool('gui_schedule_create')
 
+  server.registerTool('gui_thread_create', {
+    description: 'Create a new DeepSeek GUI thread and immediately start its first agent turn.',
+    inputSchema: {
+      title: z.string().min(1).describe('Short thread title shown in the GUI'),
+      prompt: z.string().min(1).describe('The first prompt/instruction the agent should run in the new thread'),
+      mode: z.enum(['agent', 'plan']).optional().describe('Execution mode; defaults to the GUI schedule default mode'),
+      model: z.string().optional().describe('Optional model id, e.g. auto / deepseek-v4-pro / deepseek-v4-flash'),
+      workspace_root: z.string().optional().describe('Optional workspace directory override'),
+      reasoning_effort: z.enum(['off', 'low', 'medium', 'high', 'max']).optional().describe('Optional reasoning strength')
+    }
+  }, async (args) => {
+    try {
+      const result = await postJson(options, '/schedule/internal/thread/create', {
+        input: {
+          title: args.title,
+          prompt: args.prompt,
+          workspaceRoot: args.workspace_root,
+          model: args.model,
+          reasoningEffort: args.reasoning_effort,
+          mode: args.mode
+        }
+      })
+      return textResult(
+        `Thread created: ${typeof result.title === 'string' ? result.title : args.title}`,
+        {
+          thread_id: result.threadId,
+          turn_id: result.turnId,
+          title: typeof result.title === 'string' ? result.title : args.title,
+          message: result.message
+        }
+      )
+    } catch (error) {
+      return errorResult(`Failed to create thread: ${error instanceof Error ? error.message : String(error)}`)
+    }
+  })
+
   const registerUpdateTool = (name: string): void => {
     server.registerTool(name, {
       description: name.startsWith('claw_')
