@@ -240,7 +240,7 @@ html {
 
 .ds-windows-titlebar {
   position: relative;
-  z-index: 80;
+  z-index: 100;
   display: flex;
   height: var(--ds-windows-titlebar-height, 40px);
   min-height: var(--ds-windows-titlebar-height, 40px);

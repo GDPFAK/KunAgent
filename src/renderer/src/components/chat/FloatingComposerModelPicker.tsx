@@ -87,6 +87,7 @@ export function FloatingComposerModelPicker({
   const providerRowRefs = useRef<Map<string, HTMLButtonElement>>(new Map())
   const [menuOpen, setMenuOpen] = useState(false)
   const [activeProviderId, setActiveProviderId] = useState<string | null>(null)
+  const [modelFilter, setModelFilter] = useState<'all' | 'free' | 'paid'>('all')
   const [menuPlacement, setMenuPlacement] = useState<FloatingMenuPlacement | null>(null)
   const [submenuPlacement, setSubmenuPlacement] = useState<FloatingSubmenuPlacement | null>(null)
   const modelOptions = useMemo(() => {
@@ -164,6 +165,7 @@ export function FloatingComposerModelPicker({
     if (!menuOpen) {
       setMenuPlacement(null)
       setSubmenuPlacement(null)
+      setModelFilter('all')
       return
     }
 
@@ -343,10 +345,42 @@ export function FloatingComposerModelPicker({
             style={submenuStyle}
             className="fixed z-[1001] overflow-y-auto rounded-xl border border-ds-border bg-white p-1.5 text-[13px] text-ds-muted shadow-[0_18px_48px_rgba(15,23,42,0.16)] dark:bg-ds-card"
           >
-            <div className="px-2.5 pb-1 pt-1 text-[11px] font-bold uppercase tracking-[0.08em] text-ds-faint">
-              {t('composerModel')}
+            <div className="flex items-center justify-between px-2.5 pb-1 pt-1">
+              <div className="text-[11px] font-bold uppercase tracking-[0.08em] text-ds-faint">
+                {t('composerModel')}
+              </div>
+              <div className="flex gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => setModelFilter(modelFilter === 'free' ? 'all' : 'free')}
+                  className={`rounded-full px-2.5 py-1 text-[11px] font-bold tracking-wide transition ${
+                    modelFilter === 'free'
+                      ? 'bg-green-500 text-white shadow-sm ring-1 ring-green-400 hover:bg-green-600'
+                      : 'bg-ds-surface-subtle text-ds-muted hover:bg-green-100 hover:text-green-700 dark:hover:bg-green-900/30 dark:hover:text-green-400'
+                  }`}
+                >
+                  免费
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setModelFilter(modelFilter === 'paid' ? 'all' : 'paid')}
+                  className={`rounded-full px-2.5 py-1 text-[11px] font-bold tracking-wide transition ${
+                    modelFilter === 'paid'
+                      ? 'bg-amber-500 text-white shadow-sm ring-1 ring-amber-400 hover:bg-amber-600'
+                      : 'bg-ds-surface-subtle text-ds-muted hover:bg-amber-100 hover:text-amber-700 dark:hover:bg-amber-900/30 dark:hover:text-amber-400'
+                  }`}
+                >
+                  付费
+                </button>
+              </div>
             </div>
-            {activeProviderGroup.modelIds.map((id) => (
+            {activeProviderGroup.modelIds
+              .filter((id) => {
+                if (modelFilter === 'free') return id.includes('-free')
+                if (modelFilter === 'paid') return !id.includes('-free')
+                return true
+              })
+              .map((id) => (
               <PickerRow
                 key={`${activeProviderGroup.providerId}:${id}`}
                 selected={currentModel === id}
