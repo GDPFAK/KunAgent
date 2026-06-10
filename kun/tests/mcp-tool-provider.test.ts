@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest'
 import { CapabilityRegistry } from '../src/adapters/tool/capability-registry.js'
 import { LocalToolHost } from '../src/adapters/tool/local-tool-host.js'
 import {
+  buildMcpStdioEnvironment,
   buildMcpToolProviders,
+  formatMcpConnectionError,
   isMcpServerTrusted,
   normalizeMcpToolName,
   type McpClientLike
@@ -56,6 +58,65 @@ function fakeClient(): McpClientLike {
 describe('MCP tool provider', () => {
   it('normalizes stable MCP tool names', () => {
     expect(normalizeMcpToolName('GitHub Server', 'Search Issues')).toBe('mcp_github_server_search_issues')
+  })
+
+  it('adds common GUI app command paths to stdio MCP environments', () => {
+    const env = buildMcpStdioEnvironment({ NODE_ENV: 'test' }, {
+      platform: 'darwin',
+      baseEnv: {
+        PATH: '/usr/bin:/opt/homebrew/bin',
+        HOME: '/Users/alice'
+      }
+    })
+
+    expect(env.NODE_ENV).toBe('test')
+    expect(env.PATH?.split(':')).toEqual([
+      '/usr/bin',
+      '/opt/homebrew/bin',
+      '/usr/local/bin',
+      '/opt/local/bin',
+      '/Users/alice/.volta/bin',
+      '/Users/alice/.local/bin',
+      '/Users/alice/.bun/bin'
+    ])
+  })
+
+  it('keeps explicitly configured stdio MCP PATH values ahead of common paths', () => {
+    const env = buildMcpStdioEnvironment({ Path: 'C:\\Tools' }, {
+      platform: 'win32',
+      baseEnv: {
+        APPDATA: 'C:\\Users\\alice\\AppData\\Roaming',
+        ProgramFiles: 'C:\\Program Files',
+        PATH: 'C:\\Windows\\System32'
+      }
+    })
+
+    expect(env.Path?.split(';')).toEqual([
+      'C:\\Tools',
+      'C:\\Users\\alice\\AppData\\Roaming\\npm',
+      'C:\\Program Files\\nodejs'
+    ])
+  })
+
+  it('formats missing stdio MCP commands with an actionable PATH hint', () => {
+    const server = KunCapabilitiesConfig.parse({
+      mcp: {
+        enabled: true,
+        servers: {
+          filesystem: {
+            transport: 'stdio',
+            command: 'npx',
+            trustScope: 'user'
+          }
+        }
+      }
+    }).mcp.servers.filesystem
+    const error = Object.assign(new Error('spawn npx ENOENT'), {
+      code: 'ENOENT',
+      path: 'npx'
+    })
+
+    expect(formatMcpConnectionError(error, server)).toContain('Could not find "npx" on PATH')
   })
 
   it('evaluates workspace trust scopes', () => {
@@ -287,6 +348,36 @@ describe('MCP tool provider', () => {
       status: 'error',
       lastError: 'connect failed'
     })
+  })
+
+  it('records actionable diagnostics when stdio MCP commands are missing', async () => {
+    const config = KunCapabilitiesConfig.parse({
+      mcp: {
+        enabled: true,
+        servers: {
+          filesystem: {
+            transport: 'stdio',
+            command: 'npx',
+            trustScope: 'user'
+          }
+        }
+      }
+    })
+    const built = await buildMcpToolProviders(config.mcp, {
+      clientFactory: async () => {
+        throw Object.assign(new Error('spawn npx ENOENT'), {
+          code: 'ENOENT',
+          path: 'npx'
+        })
+      }
+    })
+
+    expect(built.providers).toEqual([])
+    expect(built.diagnostics[0]).toMatchObject({
+      id: 'filesystem',
+      status: 'error'
+    })
+    expect(built.diagnostics[0]?.lastError).toContain('Could not find "npx" on PATH')
   })
 
   it('passes MCP timeouts and abort signals to discovery and execution', async () => {

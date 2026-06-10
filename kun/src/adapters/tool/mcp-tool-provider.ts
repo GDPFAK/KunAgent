@@ -1,5 +1,6 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { createHash } from 'node:crypto'
+import { posix, win32 } from 'node:path'
 import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js'
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
@@ -86,6 +87,11 @@ export type McpToolProviderOptions = {
 }
 
 const DEFAULT_MCP_STARTUP_CONNECT_TIMEOUT_MS = 10_000
+
+export type McpStdioEnvironmentOptions = {
+  platform?: NodeJS.Platform
+  baseEnv?: NodeJS.ProcessEnv
+}
 
 type McpConnectionState = {
   serverId: string
@@ -184,7 +190,12 @@ export async function buildMcpToolProviders(
     }
     if (outcome.status === 'error') {
       diagnostics.push(
-        serverDiagnostic({ serverId: outcome.serverId, server: outcome.server }, 'error', 0, errorMessage(outcome.error))
+        serverDiagnostic(
+          { serverId: outcome.serverId, server: outcome.server },
+          'error',
+          0,
+          formatMcpConnectionError(outcome.error, outcome.server)
+        )
       )
       continue
     }
@@ -290,7 +301,7 @@ function createTransport(server: McpServerConfig): Transport {
       return new StdioClientTransport({
         command: server.command ?? '',
         args: server.args,
-        env: server.env,
+        env: buildMcpStdioEnvironment(server.env),
         stderr: 'pipe'
       })
     case 'streamable-http':
@@ -511,4 +522,128 @@ function normalizePathForTrust(value: string): string {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
+}
+
+export function buildMcpStdioEnvironment(
+  serverEnv: Record<string, string> = {},
+  options: McpStdioEnvironmentOptions = {}
+): Record<string, string> {
+  const platform = options.platform ?? process.platform
+  const baseEnv = options.baseEnv ?? process.env
+  const pathKey = findPathKey(serverEnv) ?? findPathKey(baseEnv) ?? 'PATH'
+  const configuredPath = readEnvPath(serverEnv)
+  const inheritedPath = readEnvPath(baseEnv)
+  const pathValue = mergePathEntries(
+    [configuredPath ?? inheritedPath ?? '', ...commonMcpCommandPathEntries(platform, baseEnv)],
+    pathDelimiter(platform)
+  )
+  return {
+    ...serverEnv,
+    ...(pathValue ? { [pathKey]: pathValue } : {})
+  }
+}
+
+export function formatMcpConnectionError(error: unknown, server: McpServerConfig): string {
+  const message = errorMessage(error)
+  if (server.transport !== 'stdio' || !isMissingExecutableError(error, message)) return message
+  const command = missingExecutableCommand(error) ?? server.command ?? 'configured command'
+  const hint = isBareCommand(command)
+    ? missingBareCommandHint(command)
+    : `Could not find MCP command "${command}". Check that the configured executable path exists.`
+  return `${message}. ${hint}`
+}
+
+function commonMcpCommandPathEntries(
+  platform: NodeJS.Platform,
+  env: NodeJS.ProcessEnv
+): string[] {
+  if (platform === 'darwin') {
+    return [
+      '/opt/homebrew/bin',
+      '/usr/local/bin',
+      '/opt/local/bin',
+      homePath(env, '.volta/bin'),
+      homePath(env, '.local/bin'),
+      homePath(env, '.bun/bin')
+    ].filter((entry): entry is string => Boolean(entry))
+  }
+  if (platform === 'linux') {
+    return [
+      '/home/linuxbrew/.linuxbrew/bin',
+      '/usr/local/bin',
+      '/usr/bin',
+      homePath(env, '.volta/bin'),
+      homePath(env, '.local/bin'),
+      homePath(env, '.bun/bin')
+    ].filter((entry): entry is string => Boolean(entry))
+  }
+  if (platform === 'win32') {
+    return [
+      env.APPDATA ? win32.join(env.APPDATA, 'npm') : '',
+      env.ProgramFiles ? win32.join(env.ProgramFiles, 'nodejs') : '',
+      env['ProgramFiles(x86)'] ? win32.join(env['ProgramFiles(x86)'], 'nodejs') : ''
+    ].filter((entry): entry is string => Boolean(entry))
+  }
+  return []
+}
+
+function findPathKey(env: Record<string, string | undefined>): string | undefined {
+  return Object.keys(env).find((key) => key.toLowerCase() === 'path')
+}
+
+function readEnvPath(env: Record<string, string | undefined>): string | undefined {
+  const key = findPathKey(env)
+  const value = key ? env[key] : undefined
+  return value && value.trim() ? value : undefined
+}
+
+function mergePathEntries(values: string[], delimiter: string): string {
+  const seen = new Set<string>()
+  const entries: string[] = []
+  for (const value of values) {
+    for (const entry of value.split(delimiter)) {
+      const trimmed = entry.trim()
+      if (!trimmed) continue
+      const key = trimmed.toLowerCase()
+      if (seen.has(key)) continue
+      seen.add(key)
+      entries.push(trimmed)
+    }
+  }
+  return entries.join(delimiter)
+}
+
+function pathDelimiter(platform: NodeJS.Platform): string {
+  return platform === 'win32' ? ';' : ':'
+}
+
+function homePath(env: NodeJS.ProcessEnv, relativePath: string): string {
+  return env.HOME ? posix.join(env.HOME, relativePath) : ''
+}
+
+function isMissingExecutableError(error: unknown, message: string): boolean {
+  const code = typeof error === 'object' && error !== null && 'code' in error
+    ? String((error as { code?: unknown }).code ?? '')
+    : ''
+  return code === 'ENOENT' || /\bspawn\s+\S+\s+ENOENT\b/i.test(message)
+}
+
+function missingExecutableCommand(error: unknown): string | undefined {
+  if (!error || typeof error !== 'object') return undefined
+  const path = (error as { path?: unknown }).path
+  return typeof path === 'string' && path.trim() ? path.trim() : undefined
+}
+
+function isBareCommand(command: string): boolean {
+  return Boolean(command.trim()) && !command.includes('/') && !command.includes('\\')
+}
+
+function missingBareCommandHint(command: string): string {
+  if (process.platform === 'win32') {
+    return `Could not find "${command}" on PATH while starting the MCP server. Make sure Node/npm is installed and available to DeepSeek GUI, or set the MCP command to an absolute path.`
+  }
+  if (process.platform === 'darwin') {
+    return `Could not find "${command}" on PATH while starting the MCP server. If DeepSeek GUI was launched from Finder or the desktop, make sure Node/npm is installed and available to GUI apps, or set the MCP command to an absolute path such as /opt/homebrew/bin/${command}.`
+  }
+  return `Could not find "${command}" on PATH while starting the MCP server. Make sure Node/npm is installed and available to DeepSeek GUI, or set the MCP command to an absolute path such as /usr/local/bin/${command}.`
 }
