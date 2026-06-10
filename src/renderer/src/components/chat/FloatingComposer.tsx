@@ -467,6 +467,22 @@ export function formatGoalElapsedSeconds(seconds: number): string {
     : `${hours}h ${remainingMinutes}m`
 }
 
+export function shouldShowGoalFloater({
+  compact,
+  hasActiveGoal,
+  slashQuery,
+  goalPanelOpen,
+  composerMenuOpen
+}: {
+  compact: boolean
+  hasActiveGoal: boolean
+  slashQuery: string | null
+  goalPanelOpen: boolean
+  composerMenuOpen: boolean
+}): boolean {
+  return !compact && hasActiveGoal && slashQuery == null && !goalPanelOpen && !composerMenuOpen
+}
+
 export function FloatingComposer({
   variant = 'default',
   workspaceRootOverride,
@@ -840,6 +856,13 @@ export function FloatingComposer({
       : t(`goalStatusShort.${activeThreadGoal.status}`)
     : ''
   const goalMenuChecked = activeThreadGoal?.status === 'active'
+  const showGoalFloater = shouldShowGoalFloater({
+    compact,
+    hasActiveGoal: Boolean(activeThreadGoal),
+    slashQuery,
+    goalPanelOpen,
+    composerMenuOpen
+  })
 
   useEffect(() => {
     setSelectedCommandIndex(0)
@@ -1323,7 +1346,7 @@ export function FloatingComposer({
       />
 
       <div className="relative">
-        {!compact && activeThreadGoal && slashQuery == null && !goalPanelOpen && !composerMenuOpen ? (
+        {showGoalFloater && activeThreadGoal ? (
           <div className="pointer-events-none absolute inset-x-3 bottom-full z-20 mb-2 flex justify-center">
             <div className="pointer-events-auto flex min-h-11 w-full max-w-[46rem] items-center gap-2 rounded-full border border-ds-border bg-ds-card/95 px-3 py-1.5 text-ds-muted shadow-[0_12px_34px_rgba(15,23,42,0.10)] backdrop-blur-xl dark:bg-ds-card/90">
               <Target className="h-3.5 w-3.5 shrink-0 text-ds-faint" strokeWidth={1.9} />

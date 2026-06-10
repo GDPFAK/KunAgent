@@ -3,7 +3,7 @@ import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import type { ChatBlock, NormalizedThread, ToolBlock } from '../../agent/types'
 import { useChatStore } from '../../store/chat-store'
-import { MessageTimeline, summarizeToolBlock } from './MessageTimeline'
+import { MessageTimeline, goalTimelinePaddingClass, liveTurnProgressClass, summarizeToolBlock } from './MessageTimeline'
 import { MessageBubble } from './message-timeline-bubbles'
 import { ProcessSectionRow } from './message-timeline-process'
 
@@ -453,5 +453,16 @@ describe('MessageTimeline Kun runtime metadata smoke', () => {
     expect(html).toContain('Read')
     expect(html).toContain('/tmp/project/src/app.ts')
     expect(html).not.toContain('running timeline detail should stay collapsed')
+  })
+
+  it('adds extra bottom padding only for chat timelines with an active goal banner', () => {
+    expect(goalTimelinePaddingClass('chat', true)).toBe('pb-32 md:pb-40')
+    expect(goalTimelinePaddingClass('chat', false)).toBe('pb-10')
+    expect(goalTimelinePaddingClass('claw', true)).toBe('pb-10')
+  })
+
+  it('pushes the live progress row above the goal banner when a goal is active', () => {
+    expect(liveTurnProgressClass(true)).toContain('mb-16 md:mb-20')
+    expect(liveTurnProgressClass(false)).not.toContain('mb-16 md:mb-20')
   })
 })

@@ -9,7 +9,8 @@ import {
   imageTransferHasImages,
   parseCompactCommand,
   parseGoalCommand,
-  parseReviewCommand
+  parseReviewCommand,
+  shouldShowGoalFloater
 } from './FloatingComposer'
 import {
   FloatingComposerModelPicker,
@@ -88,6 +89,48 @@ describe('FloatingComposer goal helpers', () => {
     expect(formatGoalElapsedSeconds(60)).toBe('1m')
     expect(formatGoalElapsedSeconds(125)).toBe('2m 5s')
     expect(formatGoalElapsedSeconds(3720)).toBe('1h 2m')
+  })
+
+  it('shows the goal banner only when no other composer overlay is active', () => {
+    expect(shouldShowGoalFloater({
+      compact: false,
+      hasActiveGoal: true,
+      slashQuery: null,
+      goalPanelOpen: false,
+      composerMenuOpen: false
+    })).toBe(true)
+
+    expect(shouldShowGoalFloater({
+      compact: true,
+      hasActiveGoal: true,
+      slashQuery: null,
+      goalPanelOpen: false,
+      composerMenuOpen: false
+    })).toBe(false)
+
+    expect(shouldShowGoalFloater({
+      compact: false,
+      hasActiveGoal: true,
+      slashQuery: 'goal',
+      goalPanelOpen: false,
+      composerMenuOpen: false
+    })).toBe(false)
+
+    expect(shouldShowGoalFloater({
+      compact: false,
+      hasActiveGoal: true,
+      slashQuery: null,
+      goalPanelOpen: true,
+      composerMenuOpen: false
+    })).toBe(false)
+
+    expect(shouldShowGoalFloater({
+      compact: false,
+      hasActiveGoal: false,
+      slashQuery: null,
+      goalPanelOpen: false,
+      composerMenuOpen: false
+    })).toBe(false)
   })
 })
 

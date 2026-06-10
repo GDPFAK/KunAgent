@@ -46,6 +46,16 @@ type Props = {
 const TURN_PAGE_SIZE = 18
 const AUTO_COLLAPSE_THRESHOLD = 24
 
+export function goalTimelinePaddingClass(route: 'chat' | 'claw', hasActiveGoal: boolean): string {
+  return route === 'chat' && hasActiveGoal ? 'pb-32 md:pb-40' : 'pb-10'
+}
+
+export function liveTurnProgressClass(hasActiveGoal: boolean): string {
+  return hasActiveGoal
+    ? 'flex w-fit max-w-full items-center gap-2 py-0.5 text-[14px] font-medium text-ds-muted mb-16 md:mb-20'
+    : 'flex w-fit max-w-full items-center gap-2 py-0.5 text-[14px] font-medium text-ds-muted'
+}
+
 function blockScrollStamp(block: ChatBlock | undefined): string {
   if (!block) return ''
   switch (block.kind) {
@@ -94,6 +104,7 @@ export function MessageTimeline({
     turnDurationByUserId,
     turnReasoningFirstAtByUserId,
     turnReasoningLastAtByUserId,
+    activeThreadGoal,
     activeThread
   } = useTimelineStores(activeThreadId)
 
@@ -152,7 +163,9 @@ export function MessageTimeline({
 
   return (
     <div ref={containerRef} className="ds-no-drag flex min-h-0 flex-1 flex-col overflow-y-auto overflow-x-hidden">
-      <div className="ds-message-timeline-content ds-chat-column-inset mx-auto flex w-full min-w-0 max-w-4xl flex-col gap-8 pb-10 pt-8">
+      <div className={`ds-message-timeline-content ds-chat-column-inset mx-auto flex w-full min-w-0 max-w-4xl flex-col gap-8 pt-8 ${
+        goalTimelinePaddingClass(heroRoute, Boolean(activeThreadGoal))
+      }`}>
         {!hasContent || !activeThreadId ? (
           <MessageTimelineEmptyHero
             route={heroRoute}
@@ -299,6 +312,7 @@ function MessageTurn({
   viewportRef: RefObject<HTMLDivElement | null>
 }): ReactElement {
   const workspaceRoot = useChatStore((s) => s.workspaceRoot)
+  const activeThreadGoal = useChatStore((s) => s.activeThreadGoal)
   // Inline Review Plan card: surfaced under a turn that produced a
   // successful `create_plan` result so the user can open/build the plan
   // without leaving the conversation.
@@ -391,7 +405,7 @@ function MessageTurn({
         <ReviewSummaryCard key={review.id} review={review} />
       ))}
 
-      {isProcessing ? <LiveTurnProgressRow /> : null}
+      {isProcessing ? <LiveTurnProgressRow hasActiveGoal={Boolean(activeThreadGoal)} /> : null}
 
       {!isProcessing && devPreviewCard ? devPreviewCard : null}
 
@@ -412,11 +426,11 @@ function MessageTurn({
   )
 }
 
-function LiveTurnProgressRow(): ReactElement {
+function LiveTurnProgressRow({ hasActiveGoal }: { hasActiveGoal: boolean }): ReactElement {
   const { t } = useTranslation('common')
 
   return (
-    <div className="flex w-fit max-w-full items-center gap-2 py-0.5 text-[14px] font-medium text-ds-muted">
+    <div className={liveTurnProgressClass(hasActiveGoal)}>
       <span className="ds-work-logo-slot ds-work-logo-slot-sm mr-0.5">
         <AnimatedWorkLogo active phase="trail" size="sm" />
       </span>
