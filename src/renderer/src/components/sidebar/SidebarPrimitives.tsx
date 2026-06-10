@@ -51,7 +51,7 @@ export function SidebarFrame({
   return (
     <aside
       className={cx(
-        'ds-drag ds-sidebar-shell relative flex h-full w-full shrink-0 flex-col overflow-hidden px-4 pb-3',
+        'ds-no-drag ds-sidebar-shell relative flex h-full w-full shrink-0 flex-col overflow-hidden px-4 pb-3',
         className
       )}
     >
