@@ -604,7 +604,7 @@ describe('FloatingComposer capability controls', () => {
       })
     )
 
-    expect(html).toContain('V4 Pro')
+    expect(html).toContain('V4-Pro')
     expect(html).toContain('Ultra')
     expect(html).toContain('Model and reasoning settings')
     expect(html).not.toContain('>Auto<')
@@ -626,7 +626,7 @@ describe('FloatingComposer capability controls', () => {
       })
     )
 
-    expect(html).toContain('V4 Flash')
+    expect(html).toContain('V4-Flash')
     expect(html).toContain('High')
     expect(html).toContain('Model and reasoning settings')
     expect(html).toContain('aria-haspopup="menu"')
