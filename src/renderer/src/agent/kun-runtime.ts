@@ -567,6 +567,7 @@ export class KunRuntimeProvider implements AgentProvider {
     name: string
     mimeType?: string
     dataBase64: string
+    localFilePath?: string
     textFallback?: CoreAttachmentTextFallbackJson
     threadId?: string
     workspace?: string

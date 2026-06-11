@@ -60,6 +60,7 @@ export type ClipboardImageReadResult =
   | {
       ok: true
       name: string
+      localFilePath: string
       mimeType: string
       dataBase64: string
       byteSize: number

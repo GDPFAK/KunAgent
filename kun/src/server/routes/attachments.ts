@@ -18,6 +18,7 @@ export async function uploadAttachment(
       name: parsed.data.name,
       mimeType: parsed.data.mimeType,
       data: Buffer.from(parsed.data.dataBase64, 'base64'),
+      localFilePath: parsed.data.localFilePath,
       textFallback: parsed.data.textFallback,
       threadId: parsed.data.threadId,
       workspace: parsed.data.workspace

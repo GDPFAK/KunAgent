@@ -419,6 +419,7 @@ describe('KunRuntimeProvider', () => {
               mimeType: 'image/png',
               byteSize: 3,
               hash: 'hash',
+              localFilePath: '/tmp/picked/shot.png',
               createdAt: 't0',
               updatedAt: 't0'
             }
@@ -436,6 +437,7 @@ describe('KunRuntimeProvider', () => {
               mimeType: 'image/png',
               byteSize: 3,
               hash: 'hash',
+              localFilePath: '/tmp/picked/shot.png',
               createdAt: 't0',
               updatedAt: 't0'
             },
@@ -465,6 +467,7 @@ describe('KunRuntimeProvider', () => {
       name: 'shot.png',
       mimeType: 'image/png',
       dataBase64: 'abc',
+      localFilePath: '/tmp/picked/shot.png',
       textFallback: {
         dataBase64: 'xyz',
         mimeType: 'image/webp',
@@ -474,7 +477,7 @@ describe('KunRuntimeProvider', () => {
         wasCompressed: true
       },
       threadId: 'thr_1'
-    })).resolves.toMatchObject({ id: 'att_1', name: 'shot.png' })
+    })).resolves.toMatchObject({ id: 'att_1', name: 'shot.png', localFilePath: '/tmp/picked/shot.png' })
     await expect(provider.getAttachmentContent('att_1', { threadId: 'thr_1' })).resolves.toMatchObject({
       attachment: { id: 'att_1', mimeType: 'image/png' },
       dataBase64: 'abc'
@@ -486,6 +489,7 @@ describe('KunRuntimeProvider', () => {
         name: 'shot.png',
         mimeType: 'image/png',
         dataBase64: 'abc',
+        localFilePath: '/tmp/picked/shot.png',
         textFallback: {
           dataBase64: 'xyz',
           mimeType: 'image/webp',

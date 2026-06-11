@@ -46,6 +46,7 @@ export type CoreAttachmentMetadataJson = {
   hash: string
   width?: number
   height?: number
+  localFilePath?: string
   textFallback?: CoreAttachmentTextFallbackJson
   threadIds?: string[]
   workspaces?: string[]

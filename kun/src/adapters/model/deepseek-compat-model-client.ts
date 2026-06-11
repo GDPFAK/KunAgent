@@ -1869,6 +1869,7 @@ function formatAttachmentTextFallback(
   return [
     '[Attached image as base64 text]',
     `Name: ${attachment.name}`,
+    `FilePath: ${attachment.localFilePath ?? 'unknown'}`,
     `MIME: ${attachment.mimeType}`,
     `Dimensions: ${formatAttachmentDimensions(attachment)}`,
     `Bytes: ${attachment.byteSize}`,

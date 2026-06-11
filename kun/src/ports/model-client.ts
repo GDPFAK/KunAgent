@@ -81,6 +81,7 @@ export type ModelTextAttachmentFallback = {
   byteSize: number
   width?: number
   height?: number
+  localFilePath?: string
   wasCompressed?: boolean
 }
 

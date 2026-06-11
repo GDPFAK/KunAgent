@@ -767,7 +767,10 @@ export function Workbench(): ReactElement {
     if (route !== 'chat') setComposerFileReferences([])
   }, [route])
 
-  const handlePickAttachments = async (files: File[]): Promise<void> => {
+  const handlePickAttachments = async (
+    files: File[],
+    options: { localFilePaths?: string[] } = {}
+  ): Promise<void> => {
     if (!files.length || !attachmentUploadEnabled) return
     const provider = getProvider()
     if (typeof provider.uploadAttachment !== 'function') {
@@ -784,13 +787,17 @@ export function Workbench(): ReactElement {
         return
       }
       const uploaded: AttachmentReference[] = []
-      for (const file of files) {
+      for (const [index, file] of files.entries()) {
         if (!file.type.startsWith('image/')) continue
         const prepared = await prepareImageAttachmentUpload(file, attachmentCapabilities)
+        const localFilePath =
+          options.localFilePaths?.[index] ||
+          (typeof window.dsGui?.getPathForFile === 'function' ? window.dsGui.getPathForFile(file) : '')
         const attachment = await provider.uploadAttachment({
           name: file.name || 'image',
           mimeType: prepared.mimeType,
           dataBase64: prepared.dataBase64,
+          ...(localFilePath ? { localFilePath } : {}),
           textFallback: prepared.textFallback,
           ...(activeThreadId ? { threadId: activeThreadId } : {}),
           ...(workspace ? { workspace } : {})
@@ -836,7 +843,7 @@ export function Workbench(): ReactElement {
       setAttachmentUploadError(image.message)
       return
     }
-    await handlePickAttachments([clipboardImageToFile(image)])
+    await handlePickAttachments([clipboardImageToFile(image)], { localFilePaths: [image.localFilePath] })
   }
 
   const sendWritePrompt = (value: string): void => {

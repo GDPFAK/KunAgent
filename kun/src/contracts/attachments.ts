@@ -18,6 +18,7 @@ export const AttachmentMetadata = z.object({
   hash: z.string().min(1),
   width: z.number().int().positive().optional(),
   height: z.number().int().positive().optional(),
+  localFilePath: z.string().min(1).optional(),
   textFallback: AttachmentTextFallback.optional(),
   threadIds: z.array(z.string().min(1)).default([]),
   workspaces: z.array(z.string().min(1)).default([]),
@@ -30,6 +31,7 @@ export const AttachmentUploadRequest = z.object({
   name: z.string().min(1),
   mimeType: z.string().min(1).optional(),
   dataBase64: z.string().min(1),
+  localFilePath: z.string().min(1).optional(),
   textFallback: AttachmentTextFallback.optional(),
   threadId: z.string().min(1).optional(),
   workspace: z.string().min(1).optional()

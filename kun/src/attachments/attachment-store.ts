@@ -14,6 +14,7 @@ export interface AttachmentStore {
     name: string
     data: Buffer
     mimeType?: string
+    localFilePath?: string
     textFallback?: AttachmentTextFallback
     threadId?: string
     workspace?: string
@@ -40,6 +41,7 @@ export class FileAttachmentStore implements AttachmentStore {
     name: string
     data: Buffer
     mimeType?: string
+    localFilePath?: string
     textFallback?: AttachmentTextFallback
     threadId?: string
     workspace?: string
@@ -64,6 +66,7 @@ export class FileAttachmentStore implements AttachmentStore {
     if (existing) {
       const next = mergeScope({
         ...existing,
+        ...(input.localFilePath ? { localFilePath: input.localFilePath } : {}),
         ...(input.textFallback ? { textFallback: input.textFallback } : {}),
         updatedAt: now
       }, input)
@@ -79,6 +82,7 @@ export class FileAttachmentStore implements AttachmentStore {
       hash,
       ...(image.width ? { width: image.width } : {}),
       ...(image.height ? { height: image.height } : {}),
+      ...(input.localFilePath ? { localFilePath: input.localFilePath } : {}),
       ...(input.textFallback ? { textFallback: input.textFallback } : {}),
       threadIds: [],
       workspaces: [],

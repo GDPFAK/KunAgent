@@ -33,6 +33,7 @@ describe('Attachment store and multimodal input', () => {
       name: 'shot.png',
       data,
       mimeType: 'image/png',
+      localFilePath: '/tmp/picked/shot.png',
       threadId: 'thr_1',
       workspace: '/tmp/ws'
     })
@@ -43,7 +44,13 @@ describe('Attachment store and multimodal input', () => {
     })
 
     expect(second.id).toBe(first.id)
-    expect(first).toMatchObject({ mimeType: 'image/png', width: 2, height: 3, byteSize: data.byteLength })
+    expect(first).toMatchObject({
+      mimeType: 'image/png',
+      width: 2,
+      height: 3,
+      byteSize: data.byteLength,
+      localFilePath: '/tmp/picked/shot.png'
+    })
     await expect(store.resolveContent(first.id, { threadId: 'thr_2' })).rejects.toThrow(/not authorized/)
     await expect(store.resolveContent(first.id, { workspace: '/tmp/ws' })).resolves.toMatchObject({ id: first.id })
   })
@@ -113,6 +120,7 @@ describe('Attachment store and multimodal input', () => {
           name: 'shot.png',
           mimeType: 'image/png',
           dataBase64: png(1, 1).toString('base64'),
+          localFilePath: '/tmp/picked/shot.png',
           threadId: 'thr_1',
           textFallback: {
             dataBase64: 'abcd',
@@ -137,6 +145,7 @@ describe('Attachment store and multimodal input', () => {
     expect(metadata.status).toBe(200)
     expect(await readJson(metadata)).toMatchObject({
       attachment: {
+        localFilePath: '/tmp/picked/shot.png',
         textFallback: {
           dataBase64: 'abcd',
           mimeType: 'image/png'
@@ -167,6 +176,7 @@ describe('Attachment store and multimodal input', () => {
     const attachment = await store.create({
       name: 'shot.png',
       data: png(1, 1),
+      localFilePath: '/tmp/picked/shot.png',
       threadId: 'thr_1',
       workspace: '/tmp/ws'
     })
@@ -210,6 +220,7 @@ describe('Attachment store and multimodal input', () => {
       id: attachment.id,
       mimeType: 'image/png',
       dataBase64: expect.any(String),
+      localFilePath: '/tmp/picked/shot.png',
       wasCompressed: false
     })
   })
@@ -219,6 +230,7 @@ describe('Attachment store and multimodal input', () => {
     const attachment = await store.create({
       name: 'shot.png',
       data: png(1, 1),
+      localFilePath: '/tmp/picked/shot.png',
       threadId: 'thr_1',
       workspace: '/tmp/ws'
     })
@@ -252,6 +264,7 @@ describe('Attachment store and multimodal input', () => {
       id: attachment.id,
       mimeType: 'image/png',
       dataBase64: expect.any(String),
+      localFilePath: '/tmp/picked/shot.png',
       wasCompressed: false
     })
     const preSend = (await h.sessionStore.loadEventsSince(h.threadId, 0))
@@ -392,6 +405,7 @@ describe('Attachment store and multimodal input', () => {
         byteSize: 3,
         width: 1280,
         height: 720,
+        localFilePath: '/tmp/picked/shot.png',
         wasCompressed: true
       }],
       tools: [],
@@ -402,6 +416,7 @@ describe('Attachment store and multimodal input', () => {
 
     expect(body?.messages?.[0]?.content).toContain('describe')
     expect(body?.messages?.[0]?.content).toContain('[Attached image as base64 text]')
+    expect(body?.messages?.[0]?.content).toContain('FilePath: /tmp/picked/shot.png')
     expect(body?.messages?.[0]?.content).toContain('MIME: image/webp')
     expect(body?.messages?.[0]?.content).toContain('Dimensions: 1280x720')
     expect(body?.messages?.[0]?.content).toContain('```base64\nYWJj\n```')

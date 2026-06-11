@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { mkdir, mkdtemp, readFile, realpath, readdir, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, realpath, readdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 
@@ -45,6 +45,7 @@ describe('workspace-service boundary checks', () => {
     await mkdir(workspaceRoot, { recursive: true })
     await writeFile(join(workspaceRoot, 'inside.txt'), 'inside', 'utf8')
     await writeFile(outsideFile, 'outside', 'utf8')
+    await rm('/tmp/kun', { recursive: true, force: true })
   })
 
   it('allows files inside the selected workspace', async () => {
@@ -178,7 +179,7 @@ describe('workspace-service boundary checks', () => {
     await expect(readFile(result.path)).resolves.toEqual(Buffer.from('fake-png-bytes'))
   })
 
-  it('reads clipboard images as PNG base64 without writing workspace files', async () => {
+  it('reads clipboard images as PNG base64 and saves a temp file', async () => {
     vi.mocked(clipboard.readImage).mockReturnValue({
       isEmpty: () => false,
       toPNG: () => Buffer.from('clipboard-png-bytes'),
@@ -190,11 +191,13 @@ describe('workspace-service boundary checks', () => {
     expect(result.ok).toBe(true)
     if (!result.ok) return
     expect(result.name).toMatch(/^pasted-image-.+\.png$/)
+    expect(result.localFilePath).toMatch(/^\/tmp\/kun\/\d+\.png$/)
     expect(result.mimeType).toBe('image/png')
     expect(result.dataBase64).toBe(Buffer.from('clipboard-png-bytes').toString('base64'))
     expect(result.byteSize).toBe(Buffer.byteLength('clipboard-png-bytes'))
     expect(result.width).toBe(12)
     expect(result.height).toBe(8)
+    await expect(readFile(result.localFilePath)).resolves.toEqual(Buffer.from('clipboard-png-bytes'))
   })
 
   it('saves SDD pasted clipboard images into .kunsdd/img with draft-relative markdown', async () => {

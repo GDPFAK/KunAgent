@@ -1819,6 +1819,7 @@ function buildTextAttachmentFallback(
       byteSize: fallback.byteSize,
       ...(fallback.width ? { width: fallback.width } : {}),
       ...(fallback.height ? { height: fallback.height } : {}),
+      ...(attachment.localFilePath ? { localFilePath: attachment.localFilePath } : {}),
       ...(fallback.wasCompressed !== undefined ? { wasCompressed: fallback.wasCompressed } : {})
     }
   }
@@ -1837,6 +1838,7 @@ function buildTextAttachmentFallback(
     byteSize: attachment.byteSize,
     ...(attachment.width ? { width: attachment.width } : {}),
     ...(attachment.height ? { height: attachment.height } : {}),
+    ...(attachment.localFilePath ? { localFilePath: attachment.localFilePath } : {}),
     wasCompressed: false
   }
 }

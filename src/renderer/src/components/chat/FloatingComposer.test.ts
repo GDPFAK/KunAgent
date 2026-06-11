@@ -271,7 +271,7 @@ describe('FloatingComposer image transfer helpers', () => {
     expect(imageTransferHasImages(source)).toBe(true)
   })
 
-  it('handles pasted image files through the attachment picker', () => {
+  it('routes pasted image files through the clipboard bridge when available', () => {
     const screenshot = new File([new Uint8Array([1])], 'shot.png', { type: 'image/png' })
     const preventDefault = vi.fn()
     const onPickAttachments = vi.fn()
@@ -292,8 +292,30 @@ describe('FloatingComposer image transfer helpers', () => {
 
     expect(handled).toBe(true)
     expect(preventDefault).toHaveBeenCalledTimes(1)
+    expect(onPickAttachments).not.toHaveBeenCalled()
+    expect(onPasteClipboardImage).toHaveBeenCalledWith({ silentNoImage: false })
+  })
+
+  it('still uses the attachment picker for pasted image files when the clipboard bridge is unavailable', () => {
+    const screenshot = new File([new Uint8Array([1])], 'shot.png', { type: 'image/png' })
+    const preventDefault = vi.fn()
+    const onPickAttachments = vi.fn()
+    const handled = handleComposerImagePaste({
+      canPickAttachment: true,
+      clipboardData: {
+        getData: () => '',
+        items: {
+          length: 1,
+          0: { kind: 'file', type: 'image/png', getAsFile: () => screenshot }
+        }
+      },
+      preventDefault,
+      onPickAttachments
+    })
+
+    expect(handled).toBe(true)
+    expect(preventDefault).toHaveBeenCalledTimes(1)
     expect(onPickAttachments).toHaveBeenCalledWith([screenshot])
-    expect(onPasteClipboardImage).not.toHaveBeenCalled()
   })
 
   it('does not intercept ordinary text paste', () => {
