@@ -27,25 +27,23 @@ function makeBridge(): {
   return { bridge, calls, controller, messageId }
 }
 
-function makeSubscriber(events: Array<Record<string, unknown>>): {
+function makeSubscriber(events: Array<Record<string, unknown>>, onEvent: (event: Record<string, unknown>) => void): {
   subscribe: (signal: AbortSignal) => { close: () => void }
   delivered: () => Array<Record<string, unknown>>
 } {
   const delivered: Array<Record<string, unknown>> = []
-  let listener: ((event: Record<string, unknown>) => void) | null = null
   let closed = false
   const subscribe = (signal: AbortSignal) => {
-    const onAbort = () => { closed = true; listener = null }
+    const onAbort = () => { closed = true }
     signal.addEventListener('abort', onAbort, { once: true })
-    listener = (event) => { if (closed) return; delivered.push(event) }
     queueMicrotask(() => {
       for (const event of events) {
         if (closed) return
         delivered.push(event)
-        listener?.(event)
+        onEvent(event)
       }
     })
-    return { close: () => { closed = true; listener = null } }
+    return { close: () => { closed = true } }
   }
   return { subscribe, delivered: () => delivered }
 }
@@ -61,12 +59,15 @@ describe('FeishuStreamer', () => {
       replyOptions: { replyTo: 'om_in_1' },
       logger: vi.fn()
     })
-    const sub = makeSubscriber([
-      { kind: 'assistant_text_delta', turnId: 'turn_1', item: { delta: '你' } },
-      { kind: 'assistant_text_delta', turnId: 'turn_1', item: { delta: '好' } },
-      { kind: 'assistant_text_delta', turnId: 'turn_1', item: { delta: '!' } },
-      { kind: 'turn_completed', turnId: 'turn_1' }
-    ])
+    const sub = makeSubscriber(
+      [
+        { kind: 'assistant_text_delta', turnId: 'turn_1', item: { delta: '你' } },
+        { kind: 'assistant_text_delta', turnId: 'turn_1', item: { delta: '好' } },
+        { kind: 'assistant_text_delta', turnId: 'turn_1', item: { delta: '!' } },
+        { kind: 'turn_completed', turnId: 'turn_1' }
+      ],
+      (event) => streamer.onSseEvent(event)
+    )
 
     const result = await streamer.start({ subscribe: sub.subscribe })
 
