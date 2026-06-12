@@ -383,105 +383,6 @@ export class ClawRuntime {
     }
   }
 
-  private async startRuntimeTurnAndReturn(
-    settings: AppSettingsV1,
-    input: {
-      prompt: string
-      sender: string
-      title: string
-      workspaceRoot: string
-      source: 'task' | 'im'
-      channel?: ClawImChannelV1
-      conversation?: ClawImConversationV1
-      remoteSession?: Pick<ClawImRemoteSessionV1, 'chatId' | 'messageId' | 'threadId' | 'senderId' | 'senderName'>
-    }
-  ): Promise<{ ok: boolean; status: number; body: string; threadId?: string; turnId?: string; message: string }> {
-    void input.sender
-    const existingThreadId = input.conversation?.localThreadId.trim() || input.channel?.threadId.trim() || ''
-    const model = normalizeTaskModel(input.channel?.model ?? '') ?? (settings.agents.kun.model.trim() || DEFAULT_CLAW_MODEL)
-    const createThread = async (): Promise<ThreadRecordJson | null> => {
-      const body: Record<string, unknown> = {
-        workspace: input.workspaceRoot,
-        model,
-        mode: settings.claw.im.mode
-      }
-      if (input.source === 'im') {
-        body.approvalPolicy = CLAW_IM_APPROVAL_POLICY
-        body.sandboxMode = CLAW_IM_SANDBOX_MODE
-      }
-      const create = await this.deps.runtimeRequest(settings, '/v1/threads', {
-        method: 'POST',
-        body: JSON.stringify(body)
-      })
-      if (!create.ok) return null
-      return JSON.parse(create.body) as ThreadRecordJson
-    }
-    let thread: ThreadRecordJson | null = existingThreadId ? { id: existingThreadId } : await createThread()
-    if (!thread) return { ok: false, status: 500, body: '', message: 'Failed to create thread.' }
-    if (!existingThreadId && input.title.trim()) {
-      void this.deps.runtimeRequest(settings, `/v1/threads/${encodeURIComponent(thread.id)}`, {
-        method: 'PATCH',
-        body: JSON.stringify({ title: input.title.trim() })
-      })
-    }
-    const displayText = parseClawUserPromptForDisplay(input.prompt).text
-    const turnBody: Record<string, unknown> = {
-      prompt: input.prompt,
-      mode: settings.claw.im.mode
-    }
-    if (displayText && displayText !== input.prompt) turnBody.displayText = displayText
-    if (model) turnBody.model = model
-    if (input.source === 'im') {
-      turnBody.disableUserInput = true
-      turnBody.approvalPolicy = CLAW_IM_APPROVAL_POLICY
-      turnBody.sandboxMode = CLAW_IM_SANDBOX_MODE
-    }
-    const turn = await this.startRuntimeTurn(settings, thread.id, turnBody)
-    if (!turn.ok && existingThreadId && isMissingThreadResult(turn)) {
-      thread = await createThread()
-      if (!thread) return { ok: false, status: 500, body: '', message: 'Failed to create thread.' }
-      const retry = await this.startRuntimeTurn(settings, thread.id, turnBody)
-      if (!retry.ok) return { ok: false, status: retry.status, body: retry.body, message: runtimeErrorMessage(retry, 'Failed to start turn.') }
-      const retryParsed = parseJsonObject(retry.body)
-      const retryTurnId = asString(retryParsed?.turnId) || asString(nestedRecord(retryParsed?.turn).id)
-      if (!retryTurnId) return { ok: false, status: retry.status, body: retry.body, message: 'Failed to start turn: missing turn id.' }
-      if (input.channel && input.remoteSession) {
-        await this.persistStreamingConversationMapping(settings, input.channel, input.conversation, input.remoteSession, thread.id)
-      }
-      return { ok: true, status: retry.status, body: retry.body, threadId: thread.id, turnId: retryTurnId, message: 'started' }
-    }
-    if (!turn.ok) return { ok: false, status: turn.status, body: turn.body, message: runtimeErrorMessage(turn, 'Failed to start turn.') }
-    const parsed = parseJsonObject(turn.body)
-    const turnId = asString(parsed?.turnId) || asString(nestedRecord(parsed?.turn).id)
-    if (!turnId) return { ok: false, status: turn.status, body: turn.body, message: 'Failed to start turn: missing turn id.' }
-    if (input.channel && input.remoteSession) {
-      await this.persistStreamingConversationMapping(settings, input.channel, input.conversation, input.remoteSession, thread.id)
-    }
-    return { ok: true, status: turn.status, body: turn.body, threadId: thread.id, turnId, message: 'started' }
-  }
-
-  private async persistStreamingConversationMapping(
-    settings: AppSettingsV1,
-    channel: ClawImChannelV1,
-    conversation: ClawImConversationV1 | undefined,
-    remoteSession: Pick<ClawImRemoteSessionV1, 'chatId' | 'messageId' | 'threadId' | 'senderId' | 'senderName'>,
-    threadId: string
-  ): Promise<void> {
-    const now = new Date().toISOString()
-    const latestSettings = await this.deps.store.load()
-    const existingConversation = conversation ?? this.findChannelConversation(channel, remoteSession)
-    const nextConversation: ClawImConversationV1 = existingConversation
-      ? { ...existingConversation, latestMessageId: remoteSession.messageId, senderId: remoteSession.senderId, senderName: remoteSession.senderName, localThreadId: threadId, updatedAt: now }
-      : { id: randomUUID(), chatId: remoteSession.chatId, remoteThreadId: remoteSession.threadId, latestMessageId: remoteSession.messageId, senderId: remoteSession.senderId, senderName: remoteSession.senderName, localThreadId: threadId, workspaceRoot: this.resolveConversationWorkspaceRoot(settings, channel, remoteSession), createdAt: now, updatedAt: now }
-    await this.deps.store.patch({
-      claw: {
-        channels: latestSettings.claw.channels.map((item) => item.id === channel.id
-          ? { ...item, threadId, conversations: existingConversation ? item.conversations.map((entry) => entry.id === existingConversation.id ? nextConversation : entry) : [...item.conversations, nextConversation], updatedAt: now }
-          : item)
-      }
-    })
-  }
-
   private async subscribeSse(
     settings: AppSettingsV1,
     threadId: string,
@@ -1498,34 +1399,104 @@ export class ClawRuntime {
     try {
       const shouldStream = settings.claw.im.feishuStream !== false
       if (shouldStream) {
-        const turnOnly = await this.startRuntimeTurnAndReturn(settings, {
-          channel, conversation, remoteSession,
+        const initialThreadId = conversation?.localThreadId.trim() || channel?.threadId.trim() || ''
+        const runResult = await this.runPrompt(settings, {
           prompt: buildFeishuPrompt(message),
-          sender,
           title: channel ? `[Claw IM:${channel.label}] ${sender}` : `[Claw IM:feishu] ${sender}`,
           workspaceRoot: this.resolveIncomingWorkspaceRoot(settings, channel, conversation, remoteSession),
-          source: 'im'
+          model: channel?.model ?? settings.claw.im.model,
+          mode: settings.claw.im.mode,
+          waitForResult: false,
+          responseTimeoutMs: settings.claw.im.responseTimeoutMs,
+          source: 'im',
+          threadId: initialThreadId || undefined,
+          channel,
+          onTurnStarted: async ({ threadId, turnId }) => {
+            // Mirror processIncomingImPrompt.onTurnStarted behavior so the
+            // streaming path produces the same channel / conversation state
+            // as the polling path (mapping persisted, activity notified).
+            void turnId
+            if (!channel) return
+            const now = new Date().toISOString()
+            const latestSettings = await this.deps.store.load()
+            if (remoteSession) {
+              const existingConversation = conversation ?? this.findChannelConversation(channel, remoteSession)
+              const nextConversation: ClawImConversationV1 = existingConversation
+                ? {
+                    ...existingConversation,
+                    latestMessageId: remoteSession.messageId,
+                    senderId: remoteSession.senderId,
+                    senderName: remoteSession.senderName,
+                    localThreadId: threadId,
+                    workspaceRoot: this.resolveIncomingWorkspaceRoot(latestSettings, channel, existingConversation, remoteSession),
+                    updatedAt: now
+                  }
+                : {
+                    id: randomUUID(),
+                    chatId: remoteSession.chatId,
+                    remoteThreadId: remoteSession.threadId,
+                    latestMessageId: remoteSession.messageId,
+                    senderId: remoteSession.senderId,
+                    senderName: remoteSession.senderName,
+                    localThreadId: threadId,
+                    workspaceRoot: this.resolveConversationWorkspaceRoot(latestSettings, channel, remoteSession),
+                    createdAt: now,
+                    updatedAt: now
+                  }
+              await this.deps.store.patch({
+                claw: {
+                  channels: latestSettings.claw.channels.map((item) =>
+                    item.id === channel.id
+                      ? {
+                          ...item,
+                          threadId,
+                          conversations: existingConversation
+                            ? item.conversations.map((entry) => entry.id === existingConversation.id ? nextConversation : entry)
+                            : [...item.conversations, nextConversation],
+                          updatedAt: now
+                        }
+                      : item
+                  )
+                }
+              })
+            } else if (!initialThreadId) {
+              await this.deps.store.patch({
+                claw: {
+                  channels: latestSettings.claw.channels.map((item) =>
+                    item.id === channel.id
+                      ? {
+                          ...item,
+                          threadId,
+                          updatedAt: now
+                        }
+                      : item
+                  )
+                }
+              })
+            }
+            this.deps.notifyChannelActivity?.({ channelId: channel.id, threadId })
+          }
         })
-        if (turnOnly.ok && turnOnly.threadId && turnOnly.turnId) {
+        if (runResult.ok && runResult.threadId && runResult.turnId) {
           const stream = await this.runStreamingReply({
             bridge,
             chatId: message.chatId,
-            threadId: turnOnly.threadId,
-            turnId: turnOnly.turnId,
+            threadId: runResult.threadId,
+            turnId: runResult.turnId,
             replyOptions: { replyTo: message.messageId, replyInThread: Boolean(message.threadId) },
             responseTimeoutMs: settings.claw.im.responseTimeoutMs,
-            context: { channelId, chatId: message.chatId, inboundMessageId: message.messageId, threadId: turnOnly.threadId, turnId: turnOnly.turnId }
+            context: { channelId, chatId: message.chatId, inboundMessageId: message.messageId, threadId: runResult.threadId, turnId: runResult.turnId }
           })
           result = {
             ok: stream.ok,
-            threadId: turnOnly.threadId,
-            turnId: turnOnly.turnId,
+            threadId: runResult.threadId,
+            turnId: runResult.turnId,
             text: stream.finalText,
             message: stream.message,
             files: []
           }
         } else {
-          result = { ok: false, message: turnOnly.message || 'Failed to start turn.' }
+          result = { ok: false, message: runResult.message || 'Failed to start turn.' }
         }
       } else {
         result = await this.processIncomingImPrompt(settings, {
