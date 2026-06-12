@@ -128,7 +128,10 @@ module.exports = {
     sign: hasExplicitMacSigningIdentity
   },
   win: {
-    icon: './src/asset/img/deepseek.png',
+    // Multi-size .ico (16/24/32/48/64/72/96/128/256) so Explorer and the
+    // desktop render crisp icons at small sizes (#222). Regenerate from the
+    // source PNG with: npx --yes png2icons src/asset/img/deepseek.png build/icon -icowe -bc
+    icon: './build/icon.ico',
     target: [{ target: 'nsis', arch: ['x64'] }]
   },
   nsis: {
