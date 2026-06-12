@@ -116,7 +116,7 @@ function subscribeThreadEventsWithRecovery(
 
 export function createThreadActions(
   { set, get, sseAbortRef }: StoreActionContext
-): Pick<ChatState, 'createThread' | 'recoverActiveTurn' | 'selectThread' | 'drainQueuedMessages' | 'removeQueuedMessage' | 'sendMessage' | 'reviewActiveThread'> {
+): Pick<ChatState, 'createThread' | 'recoverActiveTurn' | 'selectThread' | 'subscribeThreadEventsLive' | 'drainQueuedMessages' | 'removeQueuedMessage' | 'sendMessage' | 'reviewActiveThread'> {
   return {
   createThread: async (options = {}) => {
     if (get().runtimeConnection !== 'ready') {
@@ -316,6 +316,51 @@ export function createThreadActions(
       const sink = buildThreadEventSink(set, get, { threadId: id, signal: ac.signal, sinceSeq: latestSeq })
       subscribeThreadEventsWithRecovery(p, id, latestSeq, sink, ac.signal, get)
       if (busy) armBusyWatchdog(set, get)
+    } catch (e) {
+      set({
+        error: formatRuntimeError(e),
+        ...(shouldOpenSettingsForError(e)
+          ? { route: 'settings' as const, settingsSection: 'agents' as const }
+          : {})
+      })
+    }
+  },
+
+  subscribeThreadEventsLive: async (threadId) => {
+    if (get().runtimeConnection !== 'ready') return
+    const targetThreadId = threadId.trim()
+    if (!targetThreadId) return
+    // Replace any prior subscription (whether live or explicit) with the
+    // new live one. We are switching the chat view to this thread so the
+    // user sees the Feishu bot's streaming reply as it arrives, instead of
+    // waiting for getThreadDetail to return.
+    sseAbortRef.current?.abort()
+    sseAbortRef.current = null
+    const p = getProvider()
+    try {
+      resetBusyRecoveryAttempts()
+      clearBusyWatchdog()
+      set({
+        activeThreadId: targetThreadId,
+        blocks: [],
+        lastSeq: 0,
+        liveReasoning: '',
+        liveAssistant: '',
+        unreadThreadIds: { ...get().unreadThreadIds, [targetThreadId]: false },
+        busy: true,
+        currentTurnId: null,
+        currentTurnUserId: null,
+        turnStartedAtByUserId: {},
+        turnDurationByUserId: {},
+        turnReasoningFirstAtByUserId: {},
+        turnReasoningLastAtByUserId: {},
+        queuedMessages: []
+      })
+      const ac = new AbortController()
+      sseAbortRef.current = ac
+      const sink = buildThreadEventSink(set, get, { threadId: targetThreadId, signal: ac.signal, sinceSeq: 0 })
+      subscribeThreadEventsWithRecovery(p, targetThreadId, 0, sink, ac.signal, get)
+      armBusyWatchdog(set, get)
     } catch (e) {
       set({
         error: formatRuntimeError(e),

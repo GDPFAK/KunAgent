@@ -209,6 +209,17 @@ export type ChatState = {
   setShowArchivedThreads: (show: boolean) => void
   createThread: (options?: { workspaceRoot?: string; forceNew?: boolean }) => Promise<void>
   selectThread: (id: string) => Promise<void>
+  /**
+   * Open SSE for a Feishu bot thread WITHOUT doing the HTTP `getThreadDetail`
+   * fetch, so the chat view sees deltas in real-time instead of waiting for
+   * the metadata roundtrip. Switches `activeThreadId` so the chat timeline
+   * (already on the 'claw' route) shows the bot's turn.
+   *
+   * The first time the user explicitly clicks a thread, `selectThread` runs
+   * the full HTTP fetch and replaces this live state with the persisted
+   * blocks (which is a no-op when the live state already matches).
+   */
+  subscribeThreadEventsLive: (threadId: string) => Promise<void>
   recoverActiveTurn: () => Promise<boolean>
   sendMessage: (text: string, mode?: string, overrides?: SendMessageOverrides) => Promise<boolean>
   reviewActiveThread: (target: ReviewTarget) => Promise<boolean>

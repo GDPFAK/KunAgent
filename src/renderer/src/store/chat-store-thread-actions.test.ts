@@ -116,4 +116,54 @@ describe('chat-store-thread-actions queued messages', () => {
       queued: expect.objectContaining({ id: 'q-user' })
     })
   })
+
+describe('chat-store-thread-actions subscribeThreadEventsLive', () => {
+  it('opens SSE with sinceSeq=0, skips the HTTP fetch, and switches activeThreadId so deltas flow in', async () => {
+    const subscribeCalls: Array<{ threadId: string; sinceSeq: number }> = []
+    const getDetailCalls: string[] = []
+    let capturedSink: { onDeltas: (deltas: Array<{ kind: string; text: string; seq: number }>) => void } | null = null
+
+    const provider = {
+      getThreadDetail: vi.fn(async (id: string) => {
+        getDetailCalls.push(id)
+        return { blocks: [], latestSeq: 0, threadStatus: 'idle' }
+      }),
+      subscribeThreadEvents: vi.fn(async (threadId: string, sinceSeq: number, sink: unknown) => {
+        subscribeCalls.push({ threadId, sinceSeq })
+        capturedSink = sink as typeof capturedSink
+        return { streamId: 'stream_1' }
+      })
+    }
+    registryMock.getProvider.mockReturnValue(provider)
+
+    const { actions, state } = buildHarness()
+    state.activeThreadId = 'thr_existing'
+    state.busy = true
+    state.runtimeConnection = 'ready'
+
+    await actions.subscribeThreadEventsLive('thr_live')
+
+    // HTTP fetch is NOT done (no metadata roundtrip)
+    expect(provider.getThreadDetail).not.toHaveBeenCalled()
+    // SSE opens with sinceSeq=0 so all events replay
+    expect(subscribeCalls).toEqual([{ threadId: 'thr_live', sinceSeq: 0 }])
+    // The chat view switches to the live thread
+    expect(state.activeThreadId).toBe('thr_live')
+    // SSE-sourced deltas flow into the chat-store's live state.
+    // `capturedSink` is typed `T | null`; after `not.toBeNull()` the compiler
+    // still narrows to `never` because there's no control-flow assignment.
+    // Use a non-null cast for the assertion (the runtime check above is real).
+    const sink = capturedSink as unknown as {
+      onDeltas: (deltas: Array<{ kind: string; text: string; seq: number }>) => void
+    } | null
+    expect(sink).not.toBeNull()
+    if (sink) {
+      sink.onDeltas([{ kind: 'agent_message', text: 'hello', seq: 1 }])
+      expect(state.liveAssistant).toBe('hello')
+      sink.onDeltas([{ kind: 'agent_message', text: ' world', seq: 2 }])
+      expect(state.liveAssistant).toBe('hello world')
+    }
+  })
+})
+
 })
