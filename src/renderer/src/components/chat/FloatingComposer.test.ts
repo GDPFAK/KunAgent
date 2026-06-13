@@ -18,6 +18,7 @@ import {
   buildComposerModelMenuGroups,
   calculateFloatingMenuPlacement,
   calculateFloatingSubmenuPlacement,
+  canSwitchComposerModelFromCurrent,
   composerModelMenuItemSelected,
   composerMenuSupportsModel,
   composerReasoningEffortRequestValue,
@@ -370,6 +371,25 @@ describe('FloatingComposer model controls', () => {
       currentModel: 'deepseek-v4-pro',
       modelId: 'deepseek-v4-pro'
     })).toBe(false)
+  })
+
+  it('prevents switching from a vision model to a text-only model', () => {
+    const visionProfile: Parameters<typeof canSwitchComposerModelFromCurrent>[0] = {
+      inputModalities: ['text', 'image'],
+      outputModalities: ['text'],
+      supportsToolCalling: true,
+      messageParts: ['text', 'image_url']
+    }
+    const textProfile: Parameters<typeof canSwitchComposerModelFromCurrent>[1] = {
+      inputModalities: ['text'],
+      outputModalities: ['text'],
+      supportsToolCalling: true,
+      messageParts: ['text']
+    }
+
+    expect(canSwitchComposerModelFromCurrent(visionProfile, textProfile)).toBe(false)
+    expect(canSwitchComposerModelFromCurrent(visionProfile, visionProfile)).toBe(true)
+    expect(canSwitchComposerModelFromCurrent(textProfile, visionProfile)).toBe(true)
   })
 
   it('keeps the reasoning strength visible in the model control', () => {

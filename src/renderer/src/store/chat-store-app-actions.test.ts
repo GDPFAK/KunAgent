@@ -138,6 +138,124 @@ describe('chat-store app actions composer model loading', () => {
     })
   })
 
+  it('blocks switching an active chat with user messages from vision to text-only', () => {
+    const { actions, state } = buildHarness({
+      ok: true,
+      modelIds: ['vision-model', 'text-model'],
+      defaultModelId: 'vision-model',
+      modelGroups: []
+    })
+    state.route = 'chat'
+    state.blocks = [{ kind: 'user', id: 'user-1', text: 'hello' }] as ChatState['blocks']
+    state.composerModel = 'vision-model'
+    state.composerProviderId = 'test-provider'
+    state.composerModelGroups = [{
+      providerId: 'test-provider',
+      label: 'Test',
+      modelIds: ['vision-model', 'text-model'],
+      modelProfiles: {
+        'vision-model': {
+          inputModalities: ['text', 'image'],
+          outputModalities: ['text'],
+          supportsToolCalling: true,
+          messageParts: ['text', 'image_url']
+        },
+        'text-model': {
+          inputModalities: ['text'],
+          outputModalities: ['text'],
+          supportsToolCalling: true,
+          messageParts: ['text']
+        }
+      }
+    }]
+
+    actions.setComposerModel('text-model', 'test-provider')
+
+    expect(state.composerModel).toBe('vision-model')
+    expect(state.composerProviderId).toBe('test-provider')
+    expect(localStorage.getItem(COMPOSER_MODEL_STORAGE_KEY)).toBeNull()
+    expect(window.kunGui.saveSettingsSilent).not.toHaveBeenCalled()
+  })
+
+  it('allows switching an empty chat from vision to text-only', () => {
+    const { actions, state } = buildHarness({
+      ok: true,
+      modelIds: ['vision-model', 'text-model'],
+      defaultModelId: 'vision-model',
+      modelGroups: []
+    })
+    state.route = 'chat'
+    state.blocks = []
+    state.composerModel = 'vision-model'
+    state.composerProviderId = 'test-provider'
+    state.composerModelGroups = [{
+      providerId: 'test-provider',
+      label: 'Test',
+      modelIds: ['vision-model', 'text-model'],
+      modelProfiles: {
+        'vision-model': {
+          inputModalities: ['text', 'image'],
+          outputModalities: ['text'],
+          supportsToolCalling: true,
+          messageParts: ['text', 'image_url']
+        },
+        'text-model': {
+          inputModalities: ['text'],
+          outputModalities: ['text'],
+          supportsToolCalling: true,
+          messageParts: ['text']
+        }
+      }
+    }]
+
+    actions.setComposerModel('text-model', 'test-provider')
+
+    expect(state.composerModel).toBe('text-model')
+    expect(state.composerProviderId).toBe('test-provider')
+    expect(localStorage.getItem(COMPOSER_MODEL_STORAGE_KEY)).toBe('text-model')
+    expect(window.kunGui.saveSettingsSilent).toHaveBeenCalledWith({
+      agents: { kun: { model: 'text-model' } }
+    })
+  })
+
+  it('allows switching the active chat model from text-only to vision', () => {
+    const { actions, state } = buildHarness({
+      ok: true,
+      modelIds: ['vision-model', 'text-model'],
+      defaultModelId: 'text-model',
+      modelGroups: []
+    })
+    state.composerModel = 'text-model'
+    state.composerProviderId = 'test-provider'
+    state.composerModelGroups = [{
+      providerId: 'test-provider',
+      label: 'Test',
+      modelIds: ['vision-model', 'text-model'],
+      modelProfiles: {
+        'vision-model': {
+          inputModalities: ['text', 'image'],
+          outputModalities: ['text'],
+          supportsToolCalling: true,
+          messageParts: ['text', 'image_url']
+        },
+        'text-model': {
+          inputModalities: ['text'],
+          outputModalities: ['text'],
+          supportsToolCalling: true,
+          messageParts: ['text']
+        }
+      }
+    }]
+
+    actions.setComposerModel('vision-model', 'test-provider')
+
+    expect(state.composerModel).toBe('vision-model')
+    expect(localStorage.getItem(COMPOSER_MODEL_STORAGE_KEY)).toBe('vision-model')
+    expect(window.kunGui.saveSettingsSilent).toHaveBeenCalledWith({
+      agents: { kun: { model: 'vision-model' } }
+    })
+  })
+
   it('does not overwrite a stored custom model when only fallback models are available', async () => {
     localStorage.setItem(COMPOSER_MODEL_STORAGE_KEY, 'MiniMax-M2')
     const { actions, state } = buildHarness({

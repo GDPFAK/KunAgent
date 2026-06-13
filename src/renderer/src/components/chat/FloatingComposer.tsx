@@ -109,6 +109,7 @@ type Props = {
   composerPickList: string[]
   composerModelGroups?: ModelProviderModelGroup[]
   composerReasoningEffort?: string
+  lockVisionToTextModelSwitch?: boolean
   onComposerModelChange: (modelId: string, providerId?: string) => void
   onComposerReasoningEffortChange?: (effort: ComposerReasoningEffort) => void
   onConfigureProviders?: () => void
@@ -575,6 +576,7 @@ export function FloatingComposer({
   composerPickList,
   composerModelGroups = EMPTY_MODEL_GROUPS,
   composerReasoningEffort,
+  lockVisionToTextModelSwitch = false,
   onComposerModelChange,
   onComposerReasoningEffortChange,
   onConfigureProviders,
@@ -2064,6 +2066,7 @@ export function FloatingComposer({
                   composerPickList={composerPickList}
                   composerModelGroups={composerModelGroups}
                   composerReasoningEffort={composerReasoningEffort}
+                  lockVisionToTextModelSwitch={lockVisionToTextModelSwitch}
                   canChangeModel={canChangeModel}
                   stretch={stretchModelPicker}
                   onComposerModelChange={onComposerModelChange}

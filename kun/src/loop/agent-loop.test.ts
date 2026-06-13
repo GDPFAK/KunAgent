@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import { resolvePlanModeToolSpecs } from './agent-loop.js'
+import { filterToolsForModelCapabilities, resolvePlanModeToolSpecs } from './agent-loop.js'
 import type { ModelToolSpec } from '../ports/model-client.js'
+import type { ModelCapabilityMetadata } from '../contracts/capabilities.js'
 
 function spec(name: string): ModelToolSpec {
   return {
@@ -126,3 +127,32 @@ describe('resolvePlanModeToolSpecs', () => {
     expect(names).not.toContain('bash')
   })
 })
+
+describe('filterToolsForModelCapabilities', () => {
+  const tools = [
+    spec('read'),
+    spec('recognize_image')
+  ]
+
+  it('hides the image recognition tool from vision models', () => {
+    const result = filterToolsForModelCapabilities(tools, capability(['text', 'image']))
+
+    expect(result.map((tool) => tool.name)).toEqual(['read'])
+  })
+
+  it('keeps the image recognition tool for text-only models', () => {
+    const result = filterToolsForModelCapabilities(tools, capability(['text']))
+
+    expect(result).toBe(tools)
+  })
+})
+
+function capability(inputModalities: Array<'text' | 'image'>): ModelCapabilityMetadata {
+  return {
+    id: 'test-model',
+    inputModalities,
+    outputModalities: ['text'],
+    supportsToolCalling: true,
+    messageParts: ['text']
+  }
+}

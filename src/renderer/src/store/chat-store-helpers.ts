@@ -4,10 +4,12 @@ import type { ModelProviderModelGroup } from '@shared/kun-gui-api'
 import {
   CLAW_MANAGED_INSTRUCTIONS_HEADING,
   CLAW_MODEL_IDS,
+  modelSupportsImageInput,
   type ClawImAgentProfileV1,
   type ClawImChannelV1,
   type ClawImPlatformCredentialV1,
-  type ClawImProvider
+  type ClawImProvider,
+  type ModelProviderModelProfileV1
 } from '@shared/app-settings'
 import type { ChatState } from './chat-store-types'
 import {
@@ -70,6 +72,55 @@ export function providerIdForComposerModel(
   const model = modelId.trim()
   if (!model) return ''
   return modelGroups.find((group) => modelGroupHasModel(group, model))?.providerId ?? ''
+}
+
+export function canSwitchComposerModel(
+  lockVisionToTextSwitch: boolean,
+  modelGroups: readonly ModelProviderModelGroup[],
+  currentModelId: string,
+  currentProviderId: string,
+  nextModelId: string,
+  nextProviderId: string
+): boolean {
+  if (!lockVisionToTextSwitch) return true
+  const currentProfile = modelProfileForComposerSelection(modelGroups, currentModelId, currentProviderId)
+  if (!modelSupportsImageInput(currentProfile)) return true
+  const nextProfile = modelProfileForComposerSelection(modelGroups, nextModelId, nextProviderId)
+  return modelSupportsImageInput(nextProfile)
+}
+
+function modelProfileForComposerSelection(
+  modelGroups: readonly ModelProviderModelGroup[],
+  modelId: string,
+  providerId: string
+): ModelProviderModelProfileV1 | undefined {
+  const selectedProviderId = providerId.trim()
+  const selectedGroup = selectedProviderId
+    ? modelGroups.find((group) => group.providerId === selectedProviderId)
+    : undefined
+  if (selectedGroup && modelGroupHasModel(selectedGroup, modelId)) {
+    return modelProfileForComposerModel(selectedGroup, modelId)
+  }
+  for (const group of modelGroups) {
+    if (!modelGroupHasModel(group, modelId)) continue
+    const profile = modelProfileForComposerModel(group, modelId)
+    if (profile) return profile
+  }
+  return undefined
+}
+
+function modelProfileForComposerModel(
+  group: ModelProviderModelGroup,
+  modelId: string
+): ModelProviderModelProfileV1 | undefined {
+  const normalized = normalizeComposerModelId(modelId)
+  if (!normalized) return undefined
+  const profiles = group.modelProfiles ?? {}
+  const direct = profiles[normalized] ?? profiles[modelId.trim()]
+  if (direct) return direct
+  return Object.values(profiles).find((profile) =>
+    profile.aliases?.some((alias) => normalizeComposerModelId(alias) === normalized)
+  )
 }
 
 function modelGroupHasModel(group: ModelProviderModelGroup, modelId: string): boolean {
