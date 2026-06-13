@@ -1,9 +1,11 @@
 import {
   SDD_DRAFT_FILE_NAME,
+  SDD_CHAT_META_FILE_NAME,
   SDD_REQUIREMENTS_RELATIVE_DIR,
   buildSddDraftRelativePath,
   isSddDraftRelativePath,
-  normalizeSddRelativePath
+  normalizeSddRelativePath,
+  sddUnitChatDir
 } from '@shared/sdd'
 import type {
   WorkspaceDirectoryListResult,
@@ -21,6 +23,7 @@ import {
 export type SddDraftHistoryItem = SddDraft & {
   title: string
   searchText?: string
+  chatThreadIds?: string[]
   source: 'remembered' | 'disk'
 }
 
@@ -79,6 +82,42 @@ async function readDraftTitle(
     absolutePath: result.path,
     searchText: result.content
   }
+}
+
+function parseSddChatThreadIds(raw: string): string[] {
+  try {
+    const parsed = JSON.parse(raw) as {
+      primaryThreadId?: unknown
+      threads?: unknown
+    }
+    const ids = new Set<string>()
+    if (typeof parsed.primaryThreadId === 'string' && parsed.primaryThreadId.trim()) {
+      ids.add(parsed.primaryThreadId.trim())
+    }
+    if (Array.isArray(parsed.threads)) {
+      for (const entry of parsed.threads) {
+        if (!entry || typeof entry !== 'object') continue
+        const id = (entry as { id?: unknown }).id
+        if (typeof id === 'string' && id.trim()) ids.add(id.trim())
+      }
+    }
+    return [...ids]
+  } catch {
+    return []
+  }
+}
+
+async function readDraftChatThreadIds(
+  draft: SddDraft,
+  readWorkspaceFile: ListSddDraftHistoryOptions['readWorkspaceFile']
+): Promise<string[]> {
+  const chatDir = sddUnitChatDir(draft.relativePath)
+  if (!chatDir) return []
+  const result = await readWorkspaceFile({
+    workspaceRoot: draft.workspaceRoot,
+    path: `${chatDir}/${SDD_CHAT_META_FILE_NAME}`
+  }).catch(() => null)
+  return result?.ok ? parseSddChatThreadIds(result.content) : []
 }
 
 async function discoverDiskDrafts({
@@ -150,11 +189,15 @@ export async function listSddDraftHistory({
 
   const items = await Promise.all(
     [...merged.values()].map(async (draft) => {
-      const title = await readDraftTitle(draft, readWorkspaceFile)
+      const [title, chatThreadIds] = await Promise.all([
+        readDraftTitle(draft, readWorkspaceFile),
+        readDraftChatThreadIds(draft, readWorkspaceFile)
+      ])
       return {
         ...draft,
         absolutePath: title.absolutePath ?? draft.absolutePath,
         ...(title.searchText ? { searchText: title.searchText } : {}),
+        ...(chatThreadIds.length > 0 ? { chatThreadIds } : {}),
         title: title.title
       }
     })

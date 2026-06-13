@@ -25,7 +25,7 @@ export type SddThreadRegistry = {
 
 type SddThreadLike =
   Pick<NormalizedThread, 'id'> &
-  Partial<Pick<NormalizedThread, 'title' | 'workspace' | 'preview'>>
+  Partial<Pick<NormalizedThread, 'latestTurnId' | 'preview' | 'status' | 'title' | 'workspace'>>
 
 function emptySddThreadRegistry(): SddThreadRegistry {
   return { version: 1, drafts: {} }
@@ -250,6 +250,14 @@ export function isSddAssistantThread(
   if (!thread) return false
   if (publicSddThreadIds(registry).has(thread.id)) return false
   return isSddAssistantThreadId(thread.id, registry) || looksLikeLegacySddAssistantThread(thread)
+}
+
+export function isEmptySddAssistantThreadCandidate(thread: SddThreadLike | null | undefined): boolean {
+  if (!thread) return false
+  const preview = typeof thread.preview === 'string' ? thread.preview.trim() : ''
+  const latestTurnId = typeof thread.latestTurnId === 'string' ? thread.latestTurnId.trim() : ''
+  const status = typeof thread.status === 'string' ? thread.status.trim().toLowerCase() : ''
+  return !preview && !latestTurnId && status !== 'running'
 }
 
 function looksLikeLegacySddAssistantThread(thread: SddThreadLike): boolean {

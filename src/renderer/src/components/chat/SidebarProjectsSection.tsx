@@ -23,6 +23,7 @@ import { formatRelativeTime } from '../../lib/format-relative-time'
 import { workspaceLabelFromPath } from '../../lib/workspace-label'
 import { deleteSddDraft } from '../../sdd/sdd-draft-actions'
 import { listSddDraftHistory, type SddDraftHistoryItem } from '../../sdd/sdd-draft-history'
+import { isEmptySddAssistantThreadCandidate } from '../../sdd/sdd-thread-registry'
 import { useSddDraftStore, type SddDraft } from '../../sdd/sdd-draft-store'
 import {
   isClawWorkspacePath,
@@ -254,6 +255,22 @@ export function mergeSidebarWorkspaceGroupsWithDraftHistory(options: {
   }
 
   return Array.from(map.values()).sort(([a], [b]) => compareWorkspacePathsByActive(a, b, selectedWorkspace))
+}
+
+export function filterEmptySddAssistantThreadsFromSidebar(
+  threads: NormalizedThread[],
+  draftHistory: SddDraftHistoryItem[]
+): NormalizedThread[] {
+  const draftThreadIds = new Set<string>()
+  for (const draft of draftHistory) {
+    for (const threadId of draft.chatThreadIds ?? []) {
+      if (threadId.trim()) draftThreadIds.add(threadId.trim())
+    }
+  }
+  if (draftThreadIds.size === 0) return [...threads]
+  return threads.filter((thread) =>
+    !draftThreadIds.has(thread.id) || !isEmptySddAssistantThreadCandidate(thread)
+  )
 }
 
 function sddDraftHistoryForWorkspace(
@@ -637,7 +654,8 @@ export function SidebarProjectsSection({
           const folderName = workspaceLabelFromPath(workspacePath)
           const workspaceContext = workspaceContextLabel(workspacePath, folderName)
           const isCollapsed = collapsed[workspacePath] === true
-          const sortedThreads = [...list].sort(
+          const draftHistory = sddDraftHistoryForWorkspace(filteredDraftHistoryByWorkspace, workspacePath)
+          const sortedThreads = filterEmptySddAssistantThreadsFromSidebar(list, draftHistory).sort(
             (a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt)
           )
           const workspaceExpanded = expandedWorkspaces[workspacePath] === true
@@ -645,7 +663,6 @@ export function SidebarProjectsSection({
           const visibleThreads = workspaceExpanded
             ? sortedThreads
             : sortedThreads.slice(0, 5)
-          const draftHistory = sddDraftHistoryForWorkspace(filteredDraftHistoryByWorkspace, workspacePath)
           return (
             <div key={workspacePath} className="mb-2">
               <SidebarTreeRow

@@ -6,6 +6,7 @@ import type { SddDraftHistoryItem } from '../../sdd/sdd-draft-history'
 import {
   buildSidebarDraftWorkspacePaths,
   buildSidebarWorkspaceGroups,
+  filterEmptySddAssistantThreadsFromSidebar,
   filterSddDraftHistoryItems,
   mergeSidebarWorkspaceGroupsWithDraftHistory,
   SddDraftHistoryRows,
@@ -21,6 +22,8 @@ function thread(overrides: Partial<NormalizedThread> & Pick<NormalizedThread, 'i
     mode: overrides.mode ?? 'agent',
     workspace: overrides.workspace,
     ...(overrides.preview ? { preview: overrides.preview } : {}),
+    ...(overrides.latestTurnId ? { latestTurnId: overrides.latestTurnId } : {}),
+    ...(overrides.status ? { status: overrides.status } : {}),
     ...(overrides.archived !== undefined ? { archived: overrides.archived } : {})
   }
 }
@@ -35,6 +38,7 @@ function draft(overrides: Partial<SddDraftHistoryItem> & Pick<SddDraftHistoryIte
     updatedAt: overrides.updatedAt ?? '2026-01-02T00:00:00.000Z',
     title: overrides.title,
     source: overrides.source ?? 'remembered',
+    ...(overrides.chatThreadIds ? { chatThreadIds: overrides.chatThreadIds } : {}),
     ...(overrides.searchText ? { searchText: overrides.searchText } : {})
   }
 }
@@ -187,6 +191,37 @@ describe('SidebarProjectsSection groups', () => {
     expect(filterSddDraftHistoryItems(items, 'passkey', '/tmp/app').map((item) => item.id)).toEqual(['draft-login'])
     expect(filterSddDraftHistoryItems(items, 'export', '/tmp/app').map((item) => item.id)).toEqual(['draft-export'])
     expect(filterSddDraftHistoryItems(items, 'tmp', '/tmp/app')).toHaveLength(2)
+  })
+
+  it('filters empty Requirement AI backing threads recorded in draft history', () => {
+    const hidden = thread({
+      id: 'thread-sdd-empty',
+      title: 'Checkout requirement',
+      workspace: '/tmp/app'
+    })
+    const visibleNormal = thread({
+      id: 'thread-normal',
+      title: 'Checkout requirement',
+      workspace: '/tmp/app'
+    })
+    const visibleWithTurn = thread({
+      id: 'thread-sdd-active-build',
+      title: 'Checkout requirement',
+      workspace: '/tmp/app',
+      latestTurnId: 'turn-1'
+    })
+    const items = [
+      draft({
+        id: 'draft-checkout',
+        title: 'Checkout requirement',
+        chatThreadIds: ['thread-sdd-empty', 'thread-sdd-active-build']
+      })
+    ]
+
+    expect(
+      filterEmptySddAssistantThreadsFromSidebar([hidden, visibleNormal, visibleWithTurn], items)
+        .map((item) => item.id)
+    ).toEqual(['thread-normal', 'thread-sdd-active-build'])
   })
 })
 

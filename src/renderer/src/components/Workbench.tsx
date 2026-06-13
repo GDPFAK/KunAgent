@@ -22,7 +22,7 @@ import {
 import type { DesktopCommand, ModelProviderModelGroup, SkillListItem } from '@shared/kun-gui-api'
 import type { WriteRetrievalContext } from '@shared/write-retrieval'
 import type { ClipboardImageReadResult } from '@shared/workspace-file'
-import type { AttachmentReference, ChatBlock } from '../agent/types'
+import type { AttachmentReference, ChatBlock, NormalizedThread } from '../agent/types'
 import type { CoreRuntimeInfoJson, CoreRuntimeSkillJson } from '../agent/kun-contract'
 import { getProvider } from '../agent/registry'
 import { rendererRuntimeClient } from '../agent/runtime-client'
@@ -57,9 +57,9 @@ import { SidebarTitlebarToggleButton } from './sidebar/SidebarPrimitives'
 import { composeWritePrompt } from '../write/quoted-selection'
 import { useWriteWorkspaceStore } from '../write/write-workspace-store'
 import { isWriteThreadId } from '../write/write-thread-registry'
-import { createSddDraft, forgetRememberedSddDraft, useSddDraftStore } from '../sdd/sdd-draft-store'
+import { buildSddDraftId, createSddDraft, forgetRememberedSddDraft, useSddDraftStore } from '../sdd/sdd-draft-store'
 import type { SddDraft, SddDraftSaveStatus } from '../sdd/sdd-draft-store'
-import { titleFromSddDraftContent } from '../sdd/sdd-draft-history'
+import { listSddDraftHistory, titleFromSddDraftContent } from '../sdd/sdd-draft-history'
 import { saveActiveSddDraftToDisk } from '../sdd/sdd-draft-actions'
 import { restoreRememberedSddDraft, restoreSddDraft } from '../sdd/sdd-draft-restore'
 import { composeSddAssistantPrompt } from '../sdd/sdd-assistant-prompt'
@@ -68,12 +68,14 @@ import { PENDING_INFOGRAPHIC_PROTOCOL } from '../write/infographic-pending'
 import { buildSddDraftToPlanPrompt } from '../sdd/sdd-plan-prompt'
 import {
   isSddAssistantThread,
+  isEmptySddAssistantThreadCandidate,
   markSddAssistantThread,
   releaseSddAssistantThread,
   sddAssistantThreadIdForDraft
 } from '../sdd/sdd-thread-registry'
 import {
   refreshSddChatTranscriptFromProvider,
+  sddDraftRefForThreadId,
   writeSddChatTranscriptForThread
 } from '../sdd/sdd-chat-transcript'
 import { parseGuiPlanCommand } from '../plan/plan-command'
@@ -1319,6 +1321,48 @@ export function Workbench(): ReactElement {
     })
   }
 
+  const sddDraftFromRegisteredThread = (threadId: string): SddDraft | null => {
+    const ref = sddDraftRefForThreadId(threadId)
+    if (!ref) return null
+    const timestamp = new Date(0).toISOString()
+    return {
+      id: buildSddDraftId(ref.workspaceRoot, ref.draftRelativePath),
+      workspaceRoot: ref.workspaceRoot,
+      relativePath: ref.draftRelativePath,
+      createdAt: timestamp,
+      updatedAt: timestamp
+    }
+  }
+
+  const findSddDraftForSidebarThread = async (
+    threadId: string,
+    thread: NormalizedThread | null
+  ): Promise<SddDraft | null> => {
+    const normalizedThreadId = threadId.trim()
+    if (!normalizedThreadId) return null
+
+    if (isSddAssistantThread(thread ?? { id: normalizedThreadId })) {
+      return sddDraftFromRegisteredThread(normalizedThreadId)
+    }
+
+    if (thread && !isEmptySddAssistantThreadCandidate(thread)) return null
+    const listWorkspaceDirectory = window.kunGui?.listWorkspaceDirectory
+    const readWorkspaceFile = window.kunGui?.readWorkspaceFile
+    if (typeof listWorkspaceDirectory !== 'function' || typeof readWorkspaceFile !== 'function') {
+      return null
+    }
+
+    const targetWorkspace = normalizeWorkspaceRoot(thread?.workspace || workspaceRoot)
+    if (!targetWorkspace) return null
+    const history = await listSddDraftHistory({
+      workspaceRoot: targetWorkspace,
+      listWorkspaceDirectory,
+      readWorkspaceFile,
+      limit: 80
+    }).catch(() => [])
+    return history.find((draft) => draft.chatThreadIds?.includes(normalizedThreadId)) ?? null
+  }
+
   useEffect(() => {
     if (activeSddDraft) return
     const activeCodeWorkspace = activeThreadId
@@ -1862,10 +1906,20 @@ export function Workbench(): ReactElement {
   }
 
   const openThread = (id: string): void => {
-    if (activeSddDraft) dismissActiveSddDraft({ closeAssistant: true })
     setConnectPhoneSidebarOpen(false)
-    setRoute('chat')
-    void selectThread(id)
+    void (async () => {
+      const thread = threads.find((item) => item.id === id) ?? null
+      const sddDraft = await findSddDraftForSidebarThread(id, thread)
+      if (sddDraft) {
+        markSddAssistantThread(sddDraft, id)
+        await openSddRequirementDraftFromHistory(sddDraft)
+        void useChatStore.getState().refreshThreads()
+        return
+      }
+      if (useSddDraftStore.getState().activeDraft) dismissActiveSddDraft({ closeAssistant: true })
+      setRoute('chat')
+      await selectThread(id)
+    })()
   }
 
   const startNewChat = (): void => {

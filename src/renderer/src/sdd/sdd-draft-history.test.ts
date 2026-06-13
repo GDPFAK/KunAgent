@@ -98,6 +98,56 @@ describe('sdd-draft-history', () => {
     })
   })
 
+  it('includes Requirement AI thread ids from chat meta', async () => {
+    const draftId = '123e4567-e89b-12d3-a456-426614174000'
+    const listWorkspaceDirectory = vi.fn(async (options: WorkspaceDirectoryTarget) => {
+      if (options.path === '.kunsdd/requirements') {
+        return directory([{ name: draftId, type: 'directory' }])
+      }
+      if (options.path === `.kunsdd/requirements/${draftId}`) {
+        return directory([{
+          name: 'requirement.md',
+          type: 'file',
+          path: `/tmp/app/.kunsdd/requirements/${draftId}/requirement.md`
+        }])
+      }
+      return { ok: false as const, message: 'missing' }
+    })
+    const readWorkspaceFile = vi.fn(async (options: WorkspaceFileTarget) => {
+      if (options.path?.endsWith('/chat/meta.json')) {
+        return {
+          ok: true as const,
+          path: `/tmp/app/${options.path}`,
+          content: JSON.stringify({
+            version: 1,
+            primaryThreadId: 'thread-sdd-primary',
+            threads: [
+              { id: 'thread-sdd-primary' },
+              { id: 'thread-sdd-previous' }
+            ]
+          }),
+          size: 120,
+          truncated: false
+        }
+      }
+      return {
+        ok: true as const,
+        path: `/tmp/app/.kunsdd/requirements/${draftId}/requirement.md`,
+        content: '# Payment requirement',
+        size: 21,
+        truncated: false
+      }
+    })
+
+    const history = await listSddDraftHistory({
+      workspaceRoot: '/tmp/app',
+      listWorkspaceDirectory,
+      readWorkspaceFile
+    })
+
+    expect(history[0]?.chatThreadIds).toEqual(['thread-sdd-primary', 'thread-sdd-previous'])
+  })
+
   it('merges remembered and disk drafts and prefers unsaved remembered titles', async () => {
     const draft = createSddDraft({
       id: '123e4567-e89b-12d3-a456-426614174000',

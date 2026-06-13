@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { BrowserStorageLike } from '../lib/browser-storage'
 import {
+  isEmptySddAssistantThreadCandidate,
   isSddAssistantThread,
   markSddAssistantThread,
   normalizeSddThreadRegistry,
@@ -108,6 +109,22 @@ describe('sdd-thread-registry', () => {
       title: '需求 AI',
       workspace: '/tmp/app'
     }, registry)).toBe(false)
+  })
+
+  it('detects only empty private thread candidates for disk-meta fallback', () => {
+    expect(isEmptySddAssistantThreadCandidate({ id: 'thread-empty' })).toBe(true)
+    expect(isEmptySddAssistantThreadCandidate({
+      id: 'thread-preview',
+      preview: 'Planning the implementation.'
+    })).toBe(false)
+    expect(isEmptySddAssistantThreadCandidate({
+      id: 'thread-turn',
+      latestTurnId: 'turn-1'
+    })).toBe(false)
+    expect(isEmptySddAssistantThreadCandidate({
+      id: 'thread-running',
+      status: 'running'
+    })).toBe(false)
   })
 
   it('normalizes malformed persisted data', () => {
