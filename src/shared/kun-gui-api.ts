@@ -74,6 +74,14 @@ import type {
   WriteRichClipboardPayload,
   WriteRichClipboardResult
 } from './write-export'
+import type {
+  TerminalCreatePayload,
+  TerminalCreateResult,
+  TerminalDataPayload,
+  TerminalExitPayload,
+  TerminalResizePayload,
+  TerminalWritePayload
+} from './terminal'
 
 export type KunRuntimeStatusPayload = {
   state: 'starting' | 'running' | 'restarting' | 'crashed' | 'failed' | 'stopped'
@@ -310,4 +318,10 @@ export type KunGuiApi = {
   logError: (category: string, message: string, detail?: unknown) => Promise<void>
   getLogPath: () => Promise<string>
   openLogDir: () => Promise<{ ok: boolean; message?: string }>
+  createTerminal: (payload: TerminalCreatePayload) => Promise<TerminalCreateResult>
+  writeToTerminal: (payload: TerminalWritePayload) => Promise<boolean>
+  resizeTerminal: (payload: TerminalResizePayload) => Promise<boolean>
+  disposeTerminal: (sessionId: string) => Promise<boolean>
+  onTerminalData: (handler: (payload: TerminalDataPayload) => void) => () => void
+  onTerminalExit: (handler: (payload: TerminalExitPayload) => void) => () => void
 }

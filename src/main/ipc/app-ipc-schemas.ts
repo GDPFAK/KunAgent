@@ -48,6 +48,15 @@ import { KEYBOARD_SHORTCUT_COMMANDS } from '../../shared/keyboard-shortcuts'
 import { WRITE_EXPORT_FORMATS } from '../../shared/write-export'
 import { WRITE_INFOGRAPHIC_MAX_TEXT_CHARS } from '../../shared/write-infographic'
 import { SPEECH_TRANSCRIPTION_MAX_BASE64_CHARS, SPEECH_TRANSCRIPTION_MAX_DURATION_MS } from '../../shared/speech-to-text'
+import {
+  TERMINAL_DEFAULT_COLS,
+  TERMINAL_DEFAULT_ROWS,
+  TERMINAL_MAX_COLS,
+  TERMINAL_MAX_CWD_LENGTH,
+  TERMINAL_MAX_DATA_WRITE_BYTES,
+  TERMINAL_MAX_ROWS,
+  TERMINAL_MAX_SESSION_ID_LENGTH
+} from '../../shared/terminal'
 
 const MAX_BODY_BYTES = 2_000_000
 const MAX_PATH_LENGTH = 4_096
@@ -1026,5 +1035,31 @@ export const streamIdSchema = trimmedString(MAX_ID_LENGTH)
 export const uiPluginIdPayloadSchema = z
   .object({
     id: z.string().trim().regex(/^[a-z0-9][a-z0-9-]{1,39}$/)
+  })
+  .strict()
+
+export const terminalSessionIdSchema = trimmedString(TERMINAL_MAX_SESSION_ID_LENGTH)
+
+export const terminalCreatePayloadSchema = z
+  .object({
+    sessionId: trimmedString(TERMINAL_MAX_SESSION_ID_LENGTH),
+    cwd: optionalTrimmedString(TERMINAL_MAX_CWD_LENGTH),
+    cols: z.number().int().min(1).max(TERMINAL_MAX_COLS).optional(),
+    rows: z.number().int().min(1).max(TERMINAL_MAX_ROWS).optional()
+  })
+  .strict()
+
+export const terminalWritePayloadSchema = z
+  .object({
+    sessionId: trimmedString(TERMINAL_MAX_SESSION_ID_LENGTH),
+    data: z.string().min(1).max(TERMINAL_MAX_DATA_WRITE_BYTES)
+  })
+  .strict()
+
+export const terminalResizePayloadSchema = z
+  .object({
+    sessionId: trimmedString(TERMINAL_MAX_SESSION_ID_LENGTH),
+    cols: z.number().int().min(1).max(TERMINAL_MAX_COLS).default(TERMINAL_DEFAULT_COLS),
+    rows: z.number().int().min(1).max(TERMINAL_MAX_ROWS).default(TERMINAL_DEFAULT_ROWS)
   })
   .strict()

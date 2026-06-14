@@ -204,7 +204,27 @@ const api = {
   logError: (category, message, detail) =>
     ipcRenderer.invoke('log:error', { category, message, detail }),
   getLogPath: () => ipcRenderer.invoke('log:get-path'),
-  openLogDir: () => ipcRenderer.invoke('log:open-dir')
+  openLogDir: () => ipcRenderer.invoke('log:open-dir'),
+  createTerminal: (payload) => ipcRenderer.invoke('terminal:create', payload),
+  writeToTerminal: (payload) => ipcRenderer.invoke('terminal:write', payload),
+  resizeTerminal: (payload) => ipcRenderer.invoke('terminal:resize', payload),
+  disposeTerminal: (sessionId) => ipcRenderer.invoke('terminal:dispose', sessionId),
+  onTerminalData: (handler) => {
+    const wrapped = (
+      _: Electron.IpcRendererEvent,
+      payload: Parameters<typeof handler>[0]
+    ) => handler(payload)
+    ipcRenderer.on('terminal:data', wrapped)
+    return () => ipcRenderer.removeListener('terminal:data', wrapped)
+  },
+  onTerminalExit: (handler) => {
+    const wrapped = (
+      _: Electron.IpcRendererEvent,
+      payload: Parameters<typeof handler>[0]
+    ) => handler(payload)
+    ipcRenderer.on('terminal:exit', wrapped)
+    return () => ipcRenderer.removeListener('terminal:exit', wrapped)
+  }
 } satisfies KunGuiApi
 
 contextBridge.exposeInMainWorld('kunGui', api)
