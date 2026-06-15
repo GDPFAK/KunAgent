@@ -1780,6 +1780,28 @@ describe('ClawRuntime handleFeishuMessage streaming', () => {
     //   - bridge.stream 从未被调用
     //   - processIncomingImPrompt 走原轮询路径(由 waitForAssistantResult 验证)
   })
+
+  it('still sends generated files after a successful streaming reply', async () => {
+    // Arrange:
+    //   - prompt 命中 shouldSendGeneratedFilesForPrompt(例如包含文件路径)
+    //   - mock LarkChannel,bridge.stream 正常收尾
+    //   - mock fetch 推 1 个 delta + turn_completed
+    //   - mock deps.sendFeishuGeneratedFiles 监听调用
+    // Assert:
+    //   - bridge.stream 调用 1 次(流式走完)
+    //   - deps.sendFeishuGeneratedFiles 调用 1 次(流式收尾后发文件)
+    //   - 顺序:stream 先,files 后
+  })
+
+  it('does not touch FeishuStreamer for non-feishu providers (weixin unchanged)', async () => {
+    // Arrange:
+    //   - channel.platformCredential.kind === 'weixin'(或 channel 整体被识别为 weixin 渠道)
+    //   - mock LarkChannel / WXChannel(根据既有渠道结构)
+    // Assert:
+    //   - bridge.stream 从未被调用
+    //   - 既有的 weixin 渠道发送路径被走 1 次
+    //   - 走原 processIncomingImPrompt 轮询路径
+  })
 })
 ```
 
@@ -1814,7 +1836,7 @@ Expected: 全绿。
 - [ ] **Step 2:确认 commit 链**
 
 Run: `git log --oneline origin/develop..HEAD 2>&1`
-Expected: 16-18 个 commit(Phase 1: 5、Phase 2: 3、Phase 3: 8-10)。
+Expected: 17-19 个 commit(Phase 1: 5、Phase 2: 3、Phase 3: 9-11)。
 
 - [ ] **Step 3:手动 Electron 启动 + 真飞书账号登录(用户手工)**
 
@@ -1911,7 +1933,7 @@ Run: `git log --oneline origin/develop..HEAD 2>&1`
 Expected: 全部 commit 落地,数量大致 17-19 个,分 4 个主题:
 - fix(chat): renderer live-view 卡顿修复(5)
 - feat(claw): 全局 feishuStream 设置 + migration(3)
-- feat(feishu-streamer): main 侧流式核心(8-10)
+- feat(feishu-streamer): main 侧流式核心(9-11,含 6 个集成 case 一次性提交)
 - docs(feishu): smoke 测试小节(1)
 
 - [ ] **Step 3:对比 spec 检查覆盖**
