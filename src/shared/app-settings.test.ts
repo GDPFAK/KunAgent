@@ -339,6 +339,37 @@ describe('claw settings', () => {
     expect(normalized.claw.channels[0].welcomeSentAt).toBe('2026-06-10T00:00:00.000Z')
     expect(normalized.claw.channels[1]).not.toHaveProperty('welcomeSentAt')
   })
+
+  it('migrates legacy ClawImSettingsV1.feishuStream to true when missing on old settings', () => {
+    const defaults = defaultClawSettings()
+    const legacyIm = { ...defaults.im }
+    delete (legacyIm as Partial<typeof defaults.im>).feishuStream
+    const normalized = normalizeAppSettings({
+      ...settings(),
+      claw: {
+        ...defaults,
+        im: legacyIm as typeof defaults.im
+      }
+    })
+
+    expect(normalized.claw.im.feishuStream).toBe(true)
+  })
+
+  it('preserves ClawImSettingsV1.feishuStream=false when explicitly set on old settings', () => {
+    const defaults = defaultClawSettings()
+    const normalized = normalizeAppSettings({
+      ...settings(),
+      claw: {
+        ...defaults,
+        im: {
+          ...defaults.im,
+          feishuStream: false
+        }
+      }
+    })
+
+    expect(normalized.claw.im.feishuStream).toBe(false)
+  })
 })
 
 describe('isKunRuntimeInsecure', () => {

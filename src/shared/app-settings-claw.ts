@@ -120,7 +120,8 @@ export function normalizeClawSettings(input: ClawSettingsPatchV1 | undefined): C
       providerId: typeof im.providerId === 'string' ? im.providerId.trim() : '',
       model: typeof im.model === 'string' && im.model.trim() ? im.model.trim() : DEFAULT_CLAW_MODEL,
       mode: normalizeRunMode(im.mode),
-      responseTimeoutMs: normalizePositiveInteger(im.responseTimeoutMs, defaults.im.responseTimeoutMs, 5_000, 600_000)
+      responseTimeoutMs: normalizePositiveInteger(im.responseTimeoutMs, defaults.im.responseTimeoutMs, 5_000, 600_000),
+      feishuStream: normalizeBoolean(im.feishuStream, defaults.im.feishuStream ?? true)
     },
     channels: rawChannels
       .map((channel, index): ClawImChannelV1 => {
