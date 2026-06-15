@@ -14,7 +14,6 @@ import {
 } from 'lucide-react'
 import { rendererRuntimeClient } from '../agent/runtime-client'
 import {
-  joinFsPath,
   loadPreferredSkillRootId,
   savePreferredSkillRootId,
   type SkillRootId
@@ -22,7 +21,7 @@ import {
 import { readBrowserStorageItem, writeBrowserStorageItem } from '../lib/browser-storage'
 import { normalizeWorkspaceRoot } from '../lib/workspace-path'
 import { getProvider } from '../agent/registry'
-import type { SkillListItem } from '@shared/kun-gui-api'
+import type { SkillListItem, SkillRootListItem } from '@shared/kun-gui-api'
 import type {
   CoreRuntimeInfoJson,
   CoreRuntimeToolDiagnosticsJson
@@ -63,6 +62,9 @@ type SkillRootOption = {
   id: SkillRootId
   label: string
   path: string
+  exists: boolean
+  enabled: boolean
+  skillCount: number
   available: boolean
 }
 
@@ -348,6 +350,32 @@ export function skillMarketplaceItemsFromDiscoveredSkills(
   }))
 }
 
+export function skillRootOptionsFromGuiRoots(
+  roots: SkillRootListItem[],
+  labelForKey: (key: string) => string
+): SkillRootOption[] {
+  return roots
+    .filter((root) => root.path.trim())
+    .map((root) => ({
+      id: root.id,
+      label: root.labelKey ? labelForKey(root.labelKey) : root.path,
+      path: root.path,
+      exists: root.exists,
+      enabled: root.enabled,
+      skillCount: root.skillCount,
+      available: root.enabled
+    }))
+}
+
+function skillRootOptionLabel(
+  option: SkillRootOption,
+  t: (key: string, values?: Record<string, unknown>) => string
+): string {
+  if (!option.available) return `${option.label} - ${t('pluginSkillStatusDisabled')}`
+  if (option.exists) return `${option.label} - ${t('pluginSkillDiscoveredCount', { count: option.skillCount })}`
+  return option.label
+}
+
 export function mcpMarketplaceItemsFromConfigAndDiagnostics(
   configText: string,
   diagnostics: CoreRuntimeToolDiagnosticsJson | null,
@@ -534,56 +562,26 @@ export function PluginMarketplaceView(): ReactElement {
   const [runtimeOverlayError, setRuntimeOverlayError] = useState('')
   const [mcpToggleBusyId, setMcpToggleBusyId] = useState<string | null>(null)
   const [discoveredSkills, setDiscoveredSkills] = useState<SkillListItem[]>([])
+  const [skillRootOptions, setSkillRootOptions] = useState<SkillRootOption[]>([])
+  const [skillRootsLoading, setSkillRootsLoading] = useState(false)
+  const [skillRootsError, setSkillRootsError] = useState('')
   const [skillListLoading, setSkillListLoading] = useState(false)
   const [skillListError, setSkillListError] = useState('')
   const [disabledSkillIds, setDisabledSkillIds] = useState<string[]>([])
   const [skillToggleBusyId, setSkillToggleBusyId] = useState<string | null>(null)
-
-  const skillRootOptions = useMemo<SkillRootOption[]>(() => {
-    const hasWorkspace = !!workspaceRoot
-    return [
-      {
-        id: 'workspace-agents',
-        label: t('pluginSkillRootWorkspaceAgents'),
-        path: workspaceRoot ? joinFsPath(workspaceRoot, '.agents/skills') : '',
-        available: hasWorkspace
-      },
-      {
-        id: 'workspace-skills',
-        label: t('pluginSkillRootWorkspaceSkills'),
-        path: workspaceRoot ? joinFsPath(workspaceRoot, 'skills') : '',
-        available: hasWorkspace
-      },
-      {
-        id: 'global-agents',
-        label: t('pluginSkillRootGlobalAgents'),
-        path: '~/.agents/skills',
-        available: true
-      },
-      {
-        id: 'global-deepseek',
-        label: t('pluginSkillRootGlobalDeepseek'),
-        path: '~/.kun/skills',
-        available: true
-      }
-    ]
-  }, [t, workspaceRoot])
 
   const selectedSkillRoot =
     skillRootOptions.find((option) => option.id === skillRootId && option.available) ??
     skillRootOptions.find((option) => option.available)
 
   useEffect(() => {
-    const selectedOption = skillRootOptions.find((option) => option.id === skillRootId && option.available)
-    if (selectedOption) {
-      savePreferredSkillRootId(skillRootId)
+    if (!selectedSkillRoot) return
+    if (selectedSkillRoot.id !== skillRootId) {
+      setSkillRootId(selectedSkillRoot.id)
       return
     }
-    const fallback = skillRootOptions.find((option) => option.available)
-    if (fallback && fallback.id !== skillRootId) {
-      setSkillRootId(fallback.id)
-    }
-  }, [skillRootId, skillRootOptions])
+    savePreferredSkillRootId(selectedSkillRoot.id)
+  }, [selectedSkillRoot, skillRootId])
 
   const readMcpConfig = useCallback(async (): Promise<string> => {
     if (typeof window.kunGui?.getKunConfigFile !== 'function') return mcpConfigText
@@ -639,6 +637,30 @@ export function PluginMarketplaceView(): ReactElement {
     void refreshMcpRuntimeOverlay()
   }, [activeKind, refreshMcpRuntimeOverlay])
 
+  const refreshSkillRoots = useCallback(async (): Promise<void> => {
+    if (typeof window.kunGui?.listSkillRoots !== 'function') {
+      setSkillRootOptions([])
+      setSkillRootsError(t('pluginSkillScanUnavailable'))
+      return
+    }
+    setSkillRootsLoading(true)
+    setSkillRootsError('')
+    try {
+      const result = await window.kunGui.listSkillRoots(workspaceRoot || undefined)
+      if (!result.ok) {
+        setSkillRootOptions([])
+        setSkillRootsError(result.message)
+        return
+      }
+      setSkillRootOptions(skillRootOptionsFromGuiRoots(result.roots, t))
+    } catch (error) {
+      setSkillRootOptions([])
+      setSkillRootsError(error instanceof Error ? error.message : String(error))
+    } finally {
+      setSkillRootsLoading(false)
+    }
+  }, [t, workspaceRoot])
+
   const refreshSkillList = useCallback(async (): Promise<void> => {
     if (typeof window.kunGui?.listSkills !== 'function') {
       setDiscoveredSkills([])
@@ -666,10 +688,14 @@ export function PluginMarketplaceView(): ReactElement {
     }
   }, [t, workspaceRoot])
 
+  const refreshSkillData = useCallback(async (): Promise<void> => {
+    await Promise.all([refreshSkillRoots(), refreshSkillList()])
+  }, [refreshSkillList, refreshSkillRoots])
+
   useEffect(() => {
     if (activeKind !== 'skill') return
-    void refreshSkillList()
-  }, [activeKind, refreshSkillList])
+    void refreshSkillData()
+  }, [activeKind, refreshSkillData])
 
   useEffect(() => {
     if (activeKind !== 'skill') return
@@ -820,7 +846,7 @@ export function PluginMarketplaceView(): ReactElement {
         return
       }
       markInstalled(storageKey('skill', item.id))
-      await refreshSkillList()
+      await refreshSkillData()
       setNotice({ tone: 'success', message: t('pluginSkillAdded', { path: result.path }) })
     } catch (e) {
       setNotice({ tone: 'error', message: e instanceof Error ? e.message : String(e) })
@@ -862,7 +888,7 @@ export function PluginMarketplaceView(): ReactElement {
           return
         }
         markInstalled(storageKey('skill', id))
-        await refreshSkillList()
+        await refreshSkillData()
         setNotice({ tone: 'success', message: t('pluginSkillAdded', { path: result.path }) })
       }
       setCustomName('')
@@ -1008,14 +1034,21 @@ export function PluginMarketplaceView(): ReactElement {
           <div className="mt-4 flex flex-col gap-2 md:flex-row md:items-center">
             <select
               value={selectedSkillRoot?.id ?? ''}
-              onChange={(event) => setSkillRootId(event.target.value as SkillRootId)}
+              onChange={(event) => setSkillRootId(event.target.value)}
+              disabled={skillRootsLoading || skillRootOptions.length === 0}
               className="h-10 rounded-xl border border-ds-border bg-ds-card px-3 text-[13px] text-ds-ink shadow-sm outline-none focus:border-accent/40 focus:ring-1 focus:ring-accent/30"
             >
-              {skillRootOptions.map((option) => (
-                <option key={option.id} value={option.id} disabled={!option.available}>
-                  {option.available ? option.label : `${option.label} · ${t('pluginSkillRootNeedsWorkspace')}`}
+              {skillRootOptions.length === 0 ? (
+                <option value="">
+                  {skillRootsLoading ? t('pluginSkillRefresh') : t('pluginSkillRootMissing')}
                 </option>
-              ))}
+              ) : (
+                skillRootOptions.map((option) => (
+                  <option key={option.id} value={option.id} disabled={!option.available}>
+                    {skillRootOptionLabel(option, t)}
+                  </option>
+                ))
+              )}
             </select>
             <button
               type="button"
@@ -1027,16 +1060,16 @@ export function PluginMarketplaceView(): ReactElement {
             </button>
             <button
               type="button"
-              onClick={() => void refreshSkillList()}
-              disabled={skillListLoading}
+              onClick={() => void refreshSkillData()}
+              disabled={skillListLoading || skillRootsLoading}
               className="inline-flex h-10 items-center gap-2 rounded-xl border border-ds-border bg-ds-card px-3 text-[13px] font-medium text-ds-ink shadow-sm transition hover:bg-ds-hover disabled:cursor-not-allowed disabled:opacity-60"
             >
-              {skillListLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+              {skillListLoading || skillRootsLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
               {t('pluginSkillRefresh')}
             </button>
-            {skillListError ? (
+            {skillRootsError || skillListError ? (
               <span className="text-[12px] text-red-700 dark:text-red-300">
-                {skillListError}
+                {skillRootsError || skillListError}
               </span>
             ) : (
               <span className="text-[12px] text-ds-faint">

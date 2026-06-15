@@ -7,7 +7,8 @@ import {
   mergeMcpJsonConfig,
   recommendedMarketplaceItemIds,
   setMcpServerEnabled,
-  skillMarketplaceItemsFromDiscoveredSkills
+  skillMarketplaceItemsFromDiscoveredSkills,
+  skillRootOptionsFromGuiRoots
 } from './PluginMarketplaceView'
 
 describe('PluginMarketplaceView MCP config helpers', () => {
@@ -263,6 +264,79 @@ describe('skillMarketplaceItemsFromDiscoveredSkills', () => {
         group: 'personal',
         title: 'Remotion Best Practices',
         sourceLabel: 'Global'
+      })
+    ])
+  })
+})
+
+describe('skillRootOptionsFromGuiRoots', () => {
+  it('mirrors GUI-managed roots including Claude, Codex, and extra dirs', () => {
+    const labelMap: Record<string, string> = {
+      pluginSkillRootWorkspaceClaude: 'Workspace Claude',
+      pluginSkillRootGlobalCodex: 'Global Codex'
+    }
+    const items = skillRootOptionsFromGuiRoots([
+      {
+        id: 'workspace-claude',
+        disableKey: 'workspace-claude',
+        path: '/workspace/.claude/skills',
+        scope: 'project',
+        source: 'common',
+        labelKey: 'pluginSkillRootWorkspaceClaude',
+        exists: true,
+        enabled: true,
+        skillCount: 2
+      },
+      {
+        id: 'global-codex',
+        disableKey: 'global-codex',
+        path: '/home/user/.codex/skills',
+        scope: 'global',
+        source: 'common',
+        labelKey: 'pluginSkillRootGlobalCodex',
+        exists: true,
+        enabled: false,
+        skillCount: 4
+      },
+      {
+        id: '/extra/skills',
+        disableKey: '/extra/skills',
+        path: '/extra/skills',
+        scope: 'global',
+        source: 'extra',
+        exists: false,
+        enabled: true,
+        skillCount: 0
+      }
+    ], (key) => labelMap[key] ?? key)
+
+    expect(items).toEqual([
+      expect.objectContaining({
+        id: 'workspace-claude',
+        label: 'Workspace Claude',
+        path: '/workspace/.claude/skills',
+        exists: true,
+        enabled: true,
+        skillCount: 2,
+        available: true
+      }),
+      expect.objectContaining({
+        id: 'global-codex',
+        label: 'Global Codex',
+        path: '/home/user/.codex/skills',
+        exists: true,
+        enabled: false,
+        skillCount: 4,
+        available: false
+      }),
+      expect.objectContaining({
+        id: '/extra/skills',
+        label: '/extra/skills',
+        path: '/extra/skills',
+        exists: false,
+        enabled: true,
+        skillCount: 0,
+        available: true
       })
     ])
   })
