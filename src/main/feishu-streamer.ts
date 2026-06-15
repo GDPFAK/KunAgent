@@ -26,6 +26,8 @@ export class FeishuStreamer {
   private state: 'pending' | 'streaming' | 'closed' = 'pending'
   private accumulatedText = ''
   private subscription: { close: () => void } | null = null
+  private startAbortController: AbortController | null = null
+  private failed = false
 
   constructor(opts: FeishuStreamerOptions) {
     this.opts = opts
@@ -34,6 +36,8 @@ export class FeishuStreamer {
   start(input: { subscribe: SseSubscriber }): Promise<FeishuStreamerResult> {
     return new Promise<FeishuStreamerResult>((resolve, reject) => {
       const controller = new AbortController()
+      this.startAbortController = controller
+      this.failed = false
       let resolved = false
       const onComplete = (result: FeishuStreamerResult): void => {
         if (resolved) return
@@ -67,7 +71,7 @@ export class FeishuStreamer {
                 })
               }
               onComplete({
-                ok: true,
+                ok: !this.failed,
                 messageId: streamController.messageId,
                 finalText: this.accumulatedText,
                 fellBack: false
@@ -83,7 +87,7 @@ export class FeishuStreamer {
             })
           }
           onComplete({
-            ok: true,
+            ok: !this.failed,
             messageId: streamController.messageId,
             finalText: this.accumulatedText,
             fellBack: false
@@ -145,6 +149,7 @@ export class FeishuStreamer {
       (kind === 'turn_completed' || kind === 'turn_failed' || kind === 'turn_aborted') &&
       event.turnId === this.opts.turnId
     ) {
+      if (kind === 'turn_failed') this.failed = true
       this.subscription?.close()
       this.subscription = null
       this.push(null)
@@ -177,6 +182,7 @@ export class FeishuStreamer {
     this.state = 'closed'
     this.subscription?.close()
     this.subscription = null
+    this.startAbortController?.abort()
   }
 
   dispose(): void {
