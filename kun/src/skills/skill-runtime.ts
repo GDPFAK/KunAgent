@@ -1,5 +1,5 @@
-import { type Dirent } from 'node:fs'
 import { readdir, readFile, stat } from 'node:fs/promises'
+import type { Dirent } from 'node:fs'
 import { basename, extname, join, resolve } from 'node:path'
 import { z } from 'zod'
 import type { SkillsCapabilityConfig } from '../contracts/capabilities.js'
@@ -334,8 +334,8 @@ async function packageCandidates(root: string): Promise<string[]> {
   }
   const entries = await readdir(root, { withFileTypes: true })
   for (const entry of entries) {
-    const dir = join(root, entry.name)
-    if (!(await entryIsDirectory(entry, dir))) continue
+    const dir = await directoryPathForEntry(root, entry)
+    if (!dir) continue
     if (await exists(join(dir, 'skill.json')) || await exists(join(dir, 'SKILL.md'))) {
       candidates.add(dir)
     }
@@ -344,20 +344,22 @@ async function packageCandidates(root: string): Promise<string[]> {
 }
 
 /**
- * Whether a directory entry is — or resolves to — a directory. `readdir` with
+ * Return the directory path for entries that are — or resolve to — directories.
+ * `readdir` with
  * `withFileTypes` describes the link itself, so a symlinked skill package (e.g.
  * the per-skill links `cc switch` drops into `.claude/skills`) reports
  * `isDirectory() === false` and would be skipped. Follow such links via `stat`
  * so those packages are still discovered. Also covers filesystems that report
  * an unknown `d_type`. (#320)
  */
-async function entryIsDirectory(entry: Dirent, path: string): Promise<boolean> {
-  if (entry.isDirectory()) return true
-  if (entry.isFile()) return false
+async function directoryPathForEntry(root: string, entry: Dirent): Promise<string | null> {
+  const path = join(root, entry.name)
+  if (entry.isDirectory()) return path
+  if (entry.isFile()) return null
   try {
-    return (await stat(path)).isDirectory()
+    return (await stat(path)).isDirectory() ? path : null
   } catch {
-    return false
+    return null
   }
 }
 

@@ -307,18 +307,20 @@ async function collectSkillRoots(root: string, roots: string[], depth: number, m
     return
   }
   const entries = await readdir(root, { withFileTypes: true }).catch(() => [])
-  await Promise.all(entries
-    .filter((entry) => entry.isDirectory())
-    .map((entry) => collectSkillRoots(join(root, entry.name), roots, depth + 1, maxDepth)))
+  await Promise.all(entries.map(async (entry) => {
+    const child = await directoryPathForEntry(root, entry)
+    if (!child) return
+    await collectSkillRoots(child, roots, depth + 1, maxDepth)
+  }))
 }
 
 function skillRootHasPackages(root: string): boolean {
   if (existsSync(join(root, 'SKILL.md')) || existsSync(join(root, 'skill.json'))) return true
   try {
-    return readdirSync(root, { withFileTypes: true }).some((entry) =>
-      entryIsDirectorySync(entry, join(root, entry.name)) &&
-      (existsSync(join(root, entry.name, 'SKILL.md')) || existsSync(join(root, entry.name, 'skill.json')))
-    )
+    return readdirSync(root, { withFileTypes: true }).some((entry) => {
+      const dir = directoryPathForEntrySync(root, entry)
+      return Boolean(dir && (existsSync(join(dir, 'SKILL.md')) || existsSync(join(dir, 'skill.json'))))
+    })
   } catch {
     return false
   }
@@ -331,8 +333,8 @@ async function packageCandidates(root: string): Promise<string[]> {
   }
   const entries = await readdir(root, { withFileTypes: true })
   for (const entry of entries) {
-    const dir = join(root, entry.name)
-    if (!(await entryIsDirectory(entry, dir))) continue
+    const dir = await directoryPathForEntry(root, entry)
+    if (!dir) continue
     if (existsSync(join(dir, 'skill.json')) || existsSync(join(dir, 'SKILL.md'))) {
       candidates.add(dir)
     }
@@ -341,30 +343,33 @@ async function packageCandidates(root: string): Promise<string[]> {
 }
 
 /**
- * Whether a directory entry is — or resolves to — a directory. `readdir`/
+ * Return the directory path for entries that are — or resolve to — directories.
+ * `readdir`/
  * `readdirSync` with `withFileTypes` describe the link itself, so a symlinked
  * skill package (e.g. the per-skill links `cc switch` drops into
  * `.claude/skills`) reports `isDirectory() === false` and would be skipped.
  * Follow such links via `stat` so those packages are still discovered. Also
  * covers filesystems that report an unknown `d_type`. (#320)
  */
-async function entryIsDirectory(entry: Dirent, path: string): Promise<boolean> {
-  if (entry.isDirectory()) return true
-  if (entry.isFile()) return false
+async function directoryPathForEntry(root: string, entry: Dirent): Promise<string | null> {
+  const path = join(root, entry.name)
+  if (entry.isDirectory()) return path
+  if (entry.isFile()) return null
   try {
-    return (await stat(path)).isDirectory()
+    return (await stat(path)).isDirectory() ? path : null
   } catch {
-    return false
+    return null
   }
 }
 
-function entryIsDirectorySync(entry: Dirent, path: string): boolean {
-  if (entry.isDirectory()) return true
-  if (entry.isFile()) return false
+function directoryPathForEntrySync(root: string, entry: Dirent): string | null {
+  const path = join(root, entry.name)
+  if (entry.isDirectory()) return path
+  if (entry.isFile()) return null
   try {
-    return statSync(path).isDirectory()
+    return statSync(path).isDirectory() ? path : null
   } catch {
-    return false
+    return null
   }
 }
 

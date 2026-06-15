@@ -45,6 +45,36 @@ describe('SkillRuntime', () => {
     expect(diagnostics.validationErrors[0]?.message).toMatch(/expected string/i)
   })
 
+  it('loads skills from linked package directories', async () => {
+    const realSkill = join(root, '..', 'cc-switch-store', 'linked-review')
+    const linkedSkill = join(root, 'linked-review')
+    await mkdir(realSkill, { recursive: true })
+    await writeFile(join(realSkill, 'SKILL.md'), [
+      '---',
+      'name: linked-review',
+      'description: Loaded through a directory link.',
+      '---',
+      '',
+      'Review through the linked skill.'
+    ].join('\n'), 'utf8')
+    await linkDirectory(realSkill, linkedSkill)
+
+    const runtime = await createRuntime()
+    const diagnostics = runtime.diagnostics()
+
+    expect(diagnostics.skills).toContainEqual(expect.objectContaining({
+      id: 'linked-review',
+      name: 'linked-review',
+      description: 'Loaded through a directory link.',
+      root: linkedSkill,
+      legacy: true
+    }))
+    const loaded = runtime.loadSkillById('linked-review')
+    expect('error' in loaded).toBe(false)
+    if ('error' in loaded) return
+    expect(loaded.instruction).toContain('Review through the linked skill.')
+  })
+
   it('uses Chinese legacy frontmatter names for diagnostics without changing folder ids', async () => {
     const skillRoot = join(root, 'tdd')
     await mkdir(skillRoot, { recursive: true })
@@ -354,5 +384,9 @@ describe('SkillRuntime', () => {
     const entryName = typeof manifest.entry === 'string' ? manifest.entry : 'SKILL.md'
     await writeFile(join(dir, 'skill.json'), JSON.stringify(manifest), 'utf8')
     await writeFile(join(dir, entryName), entry, 'utf8')
+  }
+
+  async function linkDirectory(target: string, path: string): Promise<void> {
+    await symlink(target, path, process.platform === 'win32' ? 'junction' : 'dir')
   }
 })
