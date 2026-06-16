@@ -70,6 +70,7 @@ import {
   formatCompactNumber,
   formatCost,
   formatPercent,
+  primaryCacheHitRate,
   useThreadUsageState
 } from '../../hooks/use-thread-usage'
 import { buildContextCapacity, estimateBlockTokens } from '../../lib/context-capacity'
@@ -2289,15 +2290,21 @@ export function FloatingComposer({
                 className="ds-composer-usage ds-no-drag inline-flex min-h-7 max-w-full min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 overflow-visible rounded-lg border border-ds-border-muted bg-ds-card/72 px-2.5 py-0.5 text-[12.5px] font-medium leading-5 text-ds-muted shadow-sm"
                 title={
                   threadUsage
-                    ? t('sessionUsageDetailsTitle', {
+                    ? t(
+                        threadUsage.lastTurnCacheHitRate != null
+                          ? 'sessionUsageDetailsTitleWithLatestCache'
+                          : 'sessionUsageDetailsTitle',
+                        {
                         tokens: formatCompactNumber(threadUsage.totalTokens),
                         cost: formatCost(threadUsage.costUsd, i18n.language, threadUsage.costCny),
                         saved: formatCompactNumber(threadUsage.tokenEconomySavingsTokens),
                         cache: formatPercent(threadUsage.cacheHitRate),
+                        latestCache: formatPercent(threadUsage.lastTurnCacheHitRate),
                         cached: formatCompactNumber(threadUsage.cachedTokens),
                         miss: formatCompactNumber(threadUsage.cacheMissTokens),
                         turns: threadUsage.turns
-                      })
+                        }
+                      )
                     : t('sessionUsageUnavailable')
                 }
               >
@@ -2333,7 +2340,7 @@ export function FloatingComposer({
                     <span className="ds-composer-usage-cache-separator text-ds-faint">·</span>
                     <span className="ds-composer-usage-cache shrink-0 truncate tabular-nums">
                       {t('sessionUsageCache', {
-                        cache: formatPercent(threadUsage.lastTurnCacheHitRate ?? threadUsage.cacheHitRate)
+                        cache: formatPercent(primaryCacheHitRate(threadUsage))
                       })}
                     </span>
                     <span className="ds-composer-usage-turns-separator text-ds-faint">·</span>
