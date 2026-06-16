@@ -233,7 +233,7 @@ export function ClawSettingsSection({ ctx }: { ctx: ClawSettingsContext }): Reac
                   </label>
                 </div>
 
-                <div className="mt-4 grid gap-3">
+                <div className="mt-4 grid gap-3 px-3">
                   {profileFields.map((field) => (
                     <label key={field.key} className="block min-w-0">
                       <span className="mb-1.5 block text-[12px] font-semibold text-ds-muted">
