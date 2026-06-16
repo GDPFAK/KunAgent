@@ -103,16 +103,6 @@ export function ClawSettingsSection({ ctx }: { ctx: ClawSettingsContext }): Reac
           }
         />
         <SettingRow
-          title={t('clawFeishuStream')}
-          description={t('clawFeishuStreamDesc')}
-          control={
-            <Toggle
-              checked={form.claw.im.feishuStream !== false}
-              onChange={(value) => update({ claw: { im: { feishuStream: value } } })}
-            />
-          }
-        />
-        <SettingRow
           title={t('clawDefaultWorkspace')}
           description={t('clawDefaultWorkspaceDesc')}
           control={

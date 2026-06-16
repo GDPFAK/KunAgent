@@ -340,35 +340,33 @@ describe('claw settings', () => {
     expect(normalized.claw.channels[1]).not.toHaveProperty('welcomeSentAt')
   })
 
-  it('migrates legacy ClawImSettingsV1.feishuStream to true when missing on old settings', () => {
+  it('defaults per-channel ClawImChannelV1.feishuStream to false when missing on old settings', () => {
     const defaults = defaultClawSettings()
-    const legacyIm = { ...defaults.im }
-    delete (legacyIm as Partial<typeof defaults.im>).feishuStream
+    const legacyChannel = { ...defaults.channels[0], id: 'channel_legacy' }
+    delete (legacyChannel as Partial<typeof legacyChannel>).feishuStream
     const normalized = normalizeAppSettings({
       ...settings(),
       claw: {
         ...defaults,
-        im: legacyIm as typeof defaults.im
+        channels: [legacyChannel as typeof defaults.channels[0]]
       }
     })
 
-    expect(normalized.claw.im.feishuStream).toBe(true)
+    expect(normalized.claw.channels[0].feishuStream).toBe(false)
   })
 
-  it('preserves ClawImSettingsV1.feishuStream=false when explicitly set on old settings', () => {
+  it('preserves ClawImChannelV1.feishuStream=true when explicitly set on old settings', () => {
     const defaults = defaultClawSettings()
+    const channelWithStream = { ...defaults.channels[0], id: 'channel_stream', feishuStream: true }
     const normalized = normalizeAppSettings({
       ...settings(),
       claw: {
         ...defaults,
-        im: {
-          ...defaults.im,
-          feishuStream: false
-        }
+        channels: [channelWithStream as typeof defaults.channels[0]]
       }
     })
 
-    expect(normalized.claw.im.feishuStream).toBe(false)
+    expect(normalized.claw.channels[0].feishuStream).toBe(true)
   })
 })
 

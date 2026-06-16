@@ -73,8 +73,7 @@ export function defaultClawSettings(): ClawSettingsV1 {
       providerId: '',
       model: DEFAULT_CLAW_MODEL,
       mode: 'agent',
-      responseTimeoutMs: 120_000,
-      feishuStream: true
+      responseTimeoutMs: 120_000
     },
     channels: [],
     tasks: []
@@ -120,8 +119,7 @@ export function normalizeClawSettings(input: ClawSettingsPatchV1 | undefined): C
       providerId: typeof im.providerId === 'string' ? im.providerId.trim() : '',
       model: typeof im.model === 'string' && im.model.trim() ? im.model.trim() : DEFAULT_CLAW_MODEL,
       mode: normalizeRunMode(im.mode),
-      responseTimeoutMs: normalizePositiveInteger(im.responseTimeoutMs, defaults.im.responseTimeoutMs, 5_000, 600_000),
-      feishuStream: normalizeBoolean(im.feishuStream, defaults.im.feishuStream ?? true)
+      responseTimeoutMs: normalizePositiveInteger(im.responseTimeoutMs, defaults.im.responseTimeoutMs, 5_000, 600_000)
     },
     channels: rawChannels
       .map((channel, index): ClawImChannelV1 => {
@@ -157,7 +155,11 @@ export function normalizeClawSettings(input: ClawSettingsPatchV1 | undefined): C
               ? { welcomeSentAt: raw.welcomeSentAt }
               : {}),
             createdAt: typeof raw.createdAt === 'string' && raw.createdAt ? raw.createdAt : now,
-            updatedAt: typeof raw.updatedAt === 'string' && raw.updatedAt ? raw.updatedAt : now
+            updatedAt: typeof raw.updatedAt === 'string' && raw.updatedAt ? raw.updatedAt : now,
+            // Per-channel feishuStream. Default is off (false); only flip to
+            // true when the user explicitly enables streaming for this
+            // specific Feishu / Lark channel.
+            feishuStream: normalizeBoolean(raw.feishuStream, false)
           }
         }),
     tasks: Array.isArray(source.tasks)

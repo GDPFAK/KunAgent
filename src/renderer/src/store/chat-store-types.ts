@@ -216,6 +216,7 @@ export type ChatState = {
   deleteClawChannel: (channelId: string) => Promise<void>
   resetClawChannelSession: (channelId: string) => Promise<void>
   setClawChannelModel: (channelId: string, model: string) => Promise<void>
+  setClawChannelFeishuStream: (channelId: string, enabled: boolean) => Promise<void>
   openInitialSetup: (mode?: InitialSetupMode) => void
   closeInitialSetup: () => void
   boot: () => Promise<void>

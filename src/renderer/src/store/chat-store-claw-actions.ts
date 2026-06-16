@@ -177,6 +177,7 @@ export function createClawActions(options: CreateClawActionsOptions): Pick<
   | 'deleteClawChannel'
   | 'resetClawChannelSession'
   | 'setClawChannelModel'
+  | 'setClawChannelFeishuStream'
 > {
   const {
     set,
@@ -606,6 +607,19 @@ export function createClawActions(options: CreateClawActionsOptions): Pick<
         clawChannels: saved.claw.channels,
         error: i18n.t('common:clawModelChanged', { model: normalized })
       })
+    },
+
+    setClawChannelFeishuStream: async (channelId, enabled) => {
+      if (typeof window.kunGui === 'undefined') return
+      const settings = await rendererRuntimeClient.getSettings()
+      const now = new Date().toISOString()
+      const channels = settings.claw.channels.map((channel) =>
+        channel.id === channelId
+          ? { ...channel, feishuStream: enabled, updatedAt: now }
+          : channel
+      )
+      const saved = await rendererRuntimeClient.setSettings({ claw: { channels } })
+      set({ clawChannels: saved.claw.channels })
     }
   }
 }

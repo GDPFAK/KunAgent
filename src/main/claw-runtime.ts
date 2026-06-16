@@ -1819,7 +1819,10 @@ export class ClawRuntime {
     // streamed text as a separate message bubble.
     let streamedToFeishu = false
     try {
-      if (settings.claw.im.feishuStream !== false) {
+      // feishuStream is now per-channel (default off). The runtime
+      // default is the polling path; only switch to streaming when this
+      // channel has explicitly enabled it.
+      if (channel.feishuStream === true) {
         // Streaming path: start the turn (this also persists the
         // conversation via the onTurnStarted callback) and then stream
         // the assistant's reply into a Feishu / Lark markdown card.

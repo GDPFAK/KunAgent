@@ -40,6 +40,7 @@ import {
 } from './SidebarClawDialogHelpers'
 import { ClawProviderLogo } from './SidebarClaw'
 import { SidebarTitlebarToggleButton } from '../sidebar/SidebarPrimitives'
+import { useChatStore } from '../../store/chat-store'
 
 type AddClawPhoneChannel = (
   provider: ClawImProvider,
@@ -616,11 +617,13 @@ export function ConnectPhoneSidebarPanel({
   onOpenSettings: () => void
 }): ReactElement {
   const { t } = useTranslation('common')
+  const setClawChannelFeishuStream = useChatStore((s) => s.setClawChannelFeishuStream)
   const [target, setTarget] = useState<ClawInstallTarget>('feishu')
   const [installQr, setInstallQr] = useState<ClawInstallQrState>(INITIAL_QR_STATE)
   const [saving, setSaving] = useState(false)
   const [disconnecting, setDisconnecting] = useState(false)
   const [disconnectError, setDisconnectError] = useState('')
+  const [streamingBusy, setStreamingBusy] = useState(false)
   const installPollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const installCountdownTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const installRequestInFlightRef = useRef(false)
@@ -1004,6 +1007,42 @@ export function ConnectPhoneSidebarPanel({
                 </span>
               </span>
             </div>
+            {connectedChannel.provider !== 'weixin' ? (
+              <div className="mt-3 flex items-start justify-between gap-3 rounded-[10px] border border-ds-border bg-ds-main/45 px-2.5 py-2">
+                <div className="min-w-0 flex-1">
+                  <div className="text-[12px] font-semibold text-ds-ink">
+                    {t('clawFeishuStream')}
+                  </div>
+                  <div className="mt-0.5 text-[11.5px] leading-4 text-ds-faint">
+                    {t('clawFeishuStreamDesc')}
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={connectedChannel.feishuStream === true}
+                  aria-label={t('clawFeishuStream')}
+                  disabled={streamingBusy}
+                  onClick={() => {
+                    if (streamingBusy) return
+                    setStreamingBusy(true)
+                    void setClawChannelFeishuStream(
+                      connectedChannel.id,
+                      connectedChannel.feishuStream !== true
+                    ).finally(() => setStreamingBusy(false))
+                  }}
+                  className={`relative h-5 w-9 shrink-0 rounded-full transition disabled:cursor-not-allowed disabled:opacity-60 ${
+                    connectedChannel.feishuStream === true ? 'bg-accent/80' : 'bg-ds-border'
+                  }`}
+                >
+                  <span
+                    className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow-sm transition ${
+                      connectedChannel.feishuStream === true ? 'left-[18px]' : 'left-0.5'
+                    }`}
+                  />
+                </button>
+              </div>
+            ) : null}
             <div className="mt-3 grid gap-2">
               <button
                 type="button"

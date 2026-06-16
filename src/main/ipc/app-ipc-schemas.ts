@@ -517,8 +517,7 @@ const clawImPatchSchema = z.object({
   providerId: z.string().trim().max(64).optional(),
   model: z.string().trim().min(1).max(128).optional(),
   mode: clawRunModeSchema.optional(),
-  responseTimeoutMs: z.number().int().min(5_000).max(600_000).optional(),
-  feishuStream: z.boolean().optional()
+  responseTimeoutMs: z.number().int().min(5_000).max(600_000).optional()
 }).strict()
 
 const clawImAgentProfilePatchSchema = z.object({
@@ -583,7 +582,8 @@ const clawImChannelPatchSchema = z.object({
   conversations: z.array(clawImConversationPatchSchema).max(512).optional(),
   welcomeSentAt: z.string().max(128).optional(),
   createdAt: z.string().max(128).optional(),
-  updatedAt: z.string().max(128).optional()
+  updatedAt: z.string().max(128).optional(),
+  feishuStream: z.boolean().optional()
 }).strict()
 
 const clawTaskSchedulePatchSchema = z.object({

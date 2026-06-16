@@ -897,7 +897,6 @@ describe('ClawRuntime', () => {
     const settings = buildSettings()
     settings.claw.im.enabled = true
     settings.claw.im.responseTimeoutMs = 2_000
-    settings.claw.im.feishuStream = false
     settings.provider.providers = [
       ...settings.provider.providers,
       buildModelProvider()
@@ -2464,7 +2463,6 @@ describe('ClawRuntime', () => {
       const settings = buildSettings()
       settings.claw.im.enabled = true
       settings.claw.im.responseTimeoutMs = 2_000
-      settings.claw.im.feishuStream = false
       settings.agents.kun.imageGeneration = {
         enabled: true,
         providerId: '',
@@ -3251,7 +3249,6 @@ describe('ClawRuntime', () => {
     const settings = buildSettings()
     settings.claw.im.enabled = true
     settings.claw.im.responseTimeoutMs = 2_000
-    settings.claw.im.feishuStream = false
     settings.claw.channels = [buildChannel({ threadId: 'thr_1', conversations: [buildConversation({ localThreadId: 'thr_1' })] })]
     const store = {
       load: vi.fn(async () => settings),
@@ -3379,7 +3376,6 @@ describe('ClawRuntime', () => {
     const settings = buildSettings()
     settings.claw.im.enabled = true
     settings.claw.im.responseTimeoutMs = 2_000
-    settings.claw.im.feishuStream = false
     settings.claw.channels = [buildChannel({ threadId: 'thr_1', conversations: [buildConversation({ localThreadId: 'thr_1' })] })]
     const store = {
       load: vi.fn(async () => settings),
@@ -3657,16 +3653,17 @@ describe('ClawRuntime handleFeishuMessage streaming', () => {
     })
   }
 
-  it('routes through runStreamingReply when feishuStream=true (default)', async () => {
+  it('routes through runStreamingReply when channel.feishuStream=true', async () => {
     // Open the SSE event stream; the test will push events as the
     // streamer reads them.
     const { fetchMock, latestHandle } = stubFetchForThreadEvents()
     const settings = buildSettings()
     settings.claw.im.enabled = true
     settings.claw.im.responseTimeoutMs = 5_000
-    // feishuStream is default (true) — explicitly leave it unset
+    // feishuStream is per-channel (default off). Enable it on this
+    // channel to exercise the streaming path.
     settings.claw.channels = [
-      buildChannel({ threadId: 'thr_1', conversations: [buildConversation({ localThreadId: 'thr_1' })] })
+      buildChannel({ threadId: 'thr_1', feishuStream: true, conversations: [buildConversation({ localThreadId: 'thr_1' })] })
     ]
     const store = {
       load: vi.fn(async () => settings),
@@ -3747,8 +3744,11 @@ describe('ClawRuntime handleFeishuMessage streaming', () => {
     const settings = buildSettings()
     settings.claw.im.enabled = true
     settings.claw.im.responseTimeoutMs = 5_000
+    // feishuStream is per-channel; enable it so the streaming path is
+    // exercised. bridge.stream will reject, triggering the in-band
+    // fallback to bridge.send.
     settings.claw.channels = [
-      buildChannel({ threadId: 'thr_1', conversations: [buildConversation({ localThreadId: 'thr_1' })] })
+      buildChannel({ threadId: 'thr_1', feishuStream: true, conversations: [buildConversation({ localThreadId: 'thr_1' })] })
     ]
     const store = {
       load: vi.fn(async () => settings),
@@ -3806,8 +3806,11 @@ describe('ClawRuntime handleFeishuMessage streaming', () => {
     const settings = buildSettings()
     settings.claw.im.enabled = true
     settings.claw.im.responseTimeoutMs = 5_000
+    // feishuStream is per-channel; enable it so the streaming path is
+    // exercised. controller.append will throw, triggering the
+    // setContent(accumulated) fallback inside FeishuStreamer.
     settings.claw.channels = [
-      buildChannel({ threadId: 'thr_1', conversations: [buildConversation({ localThreadId: 'thr_1' })] })
+      buildChannel({ threadId: 'thr_1', feishuStream: true, conversations: [buildConversation({ localThreadId: 'thr_1' })] })
     ]
     const store = {
       load: vi.fn(async () => settings),
@@ -3884,13 +3887,13 @@ describe('ClawRuntime handleFeishuMessage streaming', () => {
     expect(bridge.send).not.toHaveBeenCalled()
   })
 
-  it('does not use FeishuStreamer when feishuStream=false', async () => {
-    // feishuStream=false keeps the legacy polling path. We do NOT open
-    // the SSE event stream because the streamer is never instantiated.
+  it('does not use FeishuStreamer when channel.feishuStream is not true', async () => {
+    // feishuStream is per-channel and defaults to off. The legacy
+    // polling path stays in use. We do NOT open the SSE event stream
+    // because the streamer is never instantiated.
     const settings = buildSettings()
     settings.claw.im.enabled = true
     settings.claw.im.responseTimeoutMs = 2_000
-    settings.claw.im.feishuStream = false
     settings.claw.channels = [
       buildChannel({ threadId: 'thr_1', conversations: [buildConversation({ localThreadId: 'thr_1' })] })
     ]
@@ -3970,8 +3973,10 @@ describe('ClawRuntime handleFeishuMessage streaming', () => {
     const settings = buildSettings()
     settings.claw.im.enabled = true
     settings.claw.im.responseTimeoutMs = 5_000
+    // feishuStream is per-channel (default off). Enable it on this
+    // channel so the streaming path is exercised.
     settings.claw.channels = [
-      buildChannel({ threadId: 'thr_1', conversations: [buildConversation({ localThreadId: 'thr_1' })] })
+      buildChannel({ threadId: 'thr_1', feishuStream: true, conversations: [buildConversation({ localThreadId: 'thr_1' })] })
     ]
     const store = {
       load: vi.fn(async () => settings),
@@ -4046,7 +4051,6 @@ describe('ClawRuntime handleFeishuMessage streaming', () => {
     const settings = buildSettings()
     settings.claw.im.enabled = true
     settings.claw.im.responseTimeoutMs = 2_000
-    settings.claw.im.feishuStream = true
     settings.claw.channels = [
       buildChannel({
         provider: 'weixin' as const,
