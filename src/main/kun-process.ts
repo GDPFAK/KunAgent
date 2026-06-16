@@ -385,6 +385,7 @@ export async function syncGuiManagedKunConfig(
   const mcp = objectValue(capabilities.mcp)
   const search = objectValue(mcp.search)
   const attachments = objectValue(capabilities.attachments)
+  const memory = objectValue(capabilities.memory)
   const web = objectValue(capabilities.web)
   const skills = objectValue(capabilities.skills)
   const imageGen = objectValue(capabilities.imageGen)
@@ -408,6 +409,10 @@ export async function syncGuiManagedKunConfig(
       attachments: {
         ...attachments,
         enabled: attachments.enabled === false ? false : true
+      },
+      memory: {
+        ...memory,
+        enabled: memory.enabled === false ? false : true
       },
       web: {
         ...web,
