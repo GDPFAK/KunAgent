@@ -30,6 +30,7 @@ export function ClawStepContent({ ctx }: { ctx: Record<string, any> }): ReactEle
     endpoint,
     error,
     existingChannel,
+    feishuStream,
     imEnabled,
     imPath,
     imPort,
@@ -52,6 +53,7 @@ export function ClawStepContent({ ctx }: { ctx: Record<string, any> }): ReactEle
     setChannelEnabled,
     setChannelModel,
     setChannelWorkspaceRoot,
+    setFeishuStream,
     setImEnabled,
     setImPath,
     setImPort,
@@ -409,6 +411,34 @@ export function ClawStepContent({ ctx }: { ctx: Record<string, any> }): ReactEle
                                 </select>
                               </label>
                             </div>
+                            {effectiveProvider !== 'weixin' && (
+                              <div className="mt-4 grid gap-4 sm:grid-cols-2">
+                                <label className="block min-w-0">
+                                  <span className="text-[12px] font-semibold text-ds-muted">
+                                    {t('clawFeishuStream')}
+                                  </span>
+                                  <div className="mt-1.5 flex min-h-[46px] items-center justify-between rounded-xl border border-ds-border bg-ds-card px-3 text-[13px] text-ds-ink">
+                                    <span>{feishuStream ? t('clawImEnabled') : t('clawImDisabled')}</span>
+                                    <button
+                                      type="button"
+                                      onClick={() => setFeishuStream((value: boolean) => !value)}
+                                      className={`relative h-6 w-11 rounded-full transition ${
+                                        feishuStream ? 'bg-accent/80' : 'bg-ds-border'
+                                      }`}
+                                    >
+                                      <span
+                                        className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow-sm transition ${
+                                          feishuStream ? 'left-[22px]' : 'left-0.5'
+                                        }`}
+                                      />
+                                    </button>
+                                  </div>
+                                </label>
+                                <p className="self-end pb-1 text-[12px] leading-5 text-ds-faint">
+                                  {t('clawFeishuStreamDesc')}
+                                </p>
+                              </div>
+                            )}
                             <div className="mt-4 grid gap-4 sm:grid-cols-2">
                               <label className="block min-w-0">
                                 <span className="text-[12px] font-semibold text-ds-muted">

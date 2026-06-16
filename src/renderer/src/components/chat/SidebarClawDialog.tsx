@@ -109,6 +109,7 @@ export function ClawAddImDialog({
   const [imPath, setImPath] = useState('/claw/im')
   const [secret, setSecret] = useState('')
   const [imEnabled, setImEnabled] = useState(true)
+  const [feishuStream, setFeishuStream] = useState(true)
   const [responseTimeoutSec, setResponseTimeoutSec] = useState(120)
   const [runMode, setRunMode] = useState<ClawRunMode>('agent')
   const [loadingConfig, setLoadingConfig] = useState(false)
@@ -233,6 +234,7 @@ export function ClawAddImDialog({
           ? settings.claw.im.path
           : `/${settings.claw.im.path}`
         setImEnabled(settings.claw.im.enabled)
+        setFeishuStream(settings.claw.im.feishuStream !== false)
         setImPort(settings.claw.im.port)
         setImPath(path)
         setEndpoint(`http://127.0.0.1:${settings.claw.im.port}${path}`)
@@ -485,7 +487,8 @@ export function ClawAddImDialog({
           path: imPath,
           secret: secret.trim(),
           mode: runMode,
-          responseTimeoutMs: responseTimeoutSec * 1000
+          responseTimeoutMs: responseTimeoutSec * 1000,
+          feishuStream
         }
       })
       onClose()
@@ -523,7 +526,8 @@ export function ClawAddImDialog({
           path: imPath,
           secret: secret.trim(),
           mode: runMode,
-          responseTimeoutMs: responseTimeoutSec * 1000
+          responseTimeoutMs: responseTimeoutSec * 1000,
+          feishuStream
         }
       })
       onClose()
@@ -619,11 +623,11 @@ export function ClawAddImDialog({
 
   const dialogViewContext = {
     activeStep, activeStepConfig, activeStepIndex, advancedSettingsOpen, agentProfile, atLastStep, bindingPayload, busy, channelEnabled, channelModel, channelWorkspaceRoot, copied, copyBindingPayload, credentialStatusText,
-    defaultWorkspacePreview, effectiveProvider, editableChannels, endpoint, enterManageConfigure, error, existingChannel, goToPreviousStep, handleDeleteChannel, handlePrimaryAction,
+    defaultWorkspacePreview, effectiveProvider, editableChannels, endpoint, enterManageConfigure, error, existingChannel, feishuStream, goToPreviousStep, handleDeleteChannel, handlePrimaryAction,
     imEnabled, imPath, imPort, installQr, isManageSelection, loadingConfig, mode, navigationDisabled, noEditableChannel, officialInstallTarget, onClose, onDeleteChannel,
     primaryActionLabel, providerConfigured, providerListTitle, qrValue, requiresOfficialInstall, resolvedPlatformCredential, responseTimeoutSec, returnToManageSelection, runMode,
     secret, selectedChannelId, selectedCredentialHints, selectedOption, setActiveStep, setAdvancedSettingsOpen, setEndpoint, setChannelEnabled, setChannelModel, setChannelWorkspaceRoot,
-    setImEnabled, setImPath, setImPort, setOfficialInstallTarget, setResponseTimeoutSec, setRunMode, setSecret, setShowSecret, showSecret, startOfficialInstallQr,
+    setFeishuStream, setImEnabled, setImPath, setImPort, setOfficialInstallTarget, setResponseTimeoutSec, setRunMode, setSecret, setShowSecret, showSecret, startOfficialInstallQr,
     submitDisabled, t, updateAgentProfile
   }
 
