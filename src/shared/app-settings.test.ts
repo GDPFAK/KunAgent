@@ -253,6 +253,26 @@ describe('app behavior settings', () => {
   })
 })
 
+describe('ui effects settings', () => {
+  it('defaults cursor spotlight to on while preserving an explicit off', () => {
+    const withoutEffects = {
+      ...settings(),
+      uiEffects: undefined
+    } as unknown as AppSettingsV1
+
+    expect(normalizeAppSettings(withoutEffects).uiEffects).toEqual({
+      cursorSpotlight: true
+    })
+
+    expect(normalizeAppSettings({
+      ...settings(),
+      uiEffects: { cursorSpotlight: false }
+    }).uiEffects).toEqual({
+      cursorSpotlight: false
+    })
+  })
+})
+
 describe('keyboard shortcut settings', () => {
   it('defaults shortcut overrides to empty', () => {
     const raw = {

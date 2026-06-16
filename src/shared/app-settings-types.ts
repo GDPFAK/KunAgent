@@ -428,6 +428,10 @@ export type AppBehaviorConfigV1 = {
   closeToTray: boolean
 }
 
+export type UiEffectsConfigV1 = {
+  cursorSpotlight: boolean
+}
+
 export type ScheduleSkillSettingsV1 = {
   defaultNames: string[]
   extraDirs: string[]
@@ -808,6 +812,7 @@ export type AppSettingsV1 = {
   log: LogConfigV1
   notifications: NotificationConfigV1
   appBehavior: AppBehaviorConfigV1
+  uiEffects?: UiEffectsConfigV1
   keyboardShortcuts: KeyboardShortcutsConfigV1
   write: WriteSettingsV1
   claw: ClawSettingsV1
@@ -826,6 +831,7 @@ export type AppSettingsPatch = Partial<
   log?: Partial<LogConfigV1>
   notifications?: Partial<NotificationConfigV1>
   appBehavior?: Partial<AppBehaviorConfigV1>
+  uiEffects?: Partial<UiEffectsConfigV1>
   keyboardShortcuts?: Partial<KeyboardShortcutsConfigV1>
   write?: WriteSettingsPatchV1
   claw?: ClawSettingsPatchV1

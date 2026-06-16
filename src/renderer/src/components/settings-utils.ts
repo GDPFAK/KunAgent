@@ -10,6 +10,7 @@ import {
   mergeScheduleSettings,
   mergeWriteSettings,
   normalizeAppBehaviorSettings,
+  normalizeUiEffectsSettings,
   normalizeClawSettings,
   normalizeGuiUpdateChannel,
   normalizeKeyboardShortcuts,
@@ -61,6 +62,10 @@ export function mergeSettings(current: AppSettingsV1, patch: SettingsPatch): App
       ...safeCurrent.appBehavior,
       ...(patch.appBehavior ?? {})
     }),
+    uiEffects: normalizeUiEffectsSettings({
+      ...(safeCurrent.uiEffects ?? {}),
+      ...(patch.uiEffects ?? {})
+    }),
     keyboardShortcuts: normalizeKeyboardShortcuts({
       bindings: {
         ...safeCurrent.keyboardShortcuts.bindings,
@@ -103,6 +108,7 @@ export function coerceRendererSettings(settings: AppSettingsV1): AppSettingsV1 {
       turnComplete: raw.notifications?.turnComplete !== false
     },
     appBehavior: normalizeAppBehaviorSettings(raw.appBehavior),
+    uiEffects: normalizeUiEffectsSettings(raw.uiEffects),
     keyboardShortcuts: normalizeKeyboardShortcuts(raw.keyboardShortcuts),
     write: normalizeWriteSettings(raw.write),
     claw: normalizeClawSettings(raw.claw),

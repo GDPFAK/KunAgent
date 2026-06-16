@@ -19,6 +19,7 @@ import {
   mergeScheduleSettings,
   mergeWriteSettings,
   normalizeAppBehaviorSettings,
+  normalizeUiEffectsSettings,
   normalizeKeyboardShortcuts,
   migrateLegacyAppSettings,
   normalizeAppSettings,
@@ -208,6 +209,7 @@ const defaultSettings = (): AppSettingsV1 => ({
     turnComplete: true
   },
   appBehavior: normalizeAppBehaviorSettings(),
+  uiEffects: normalizeUiEffectsSettings(),
   keyboardShortcuts: normalizeKeyboardShortcuts(),
   guiUpdate: {
     channel: DEFAULT_GUI_UPDATE_CHANNEL
@@ -234,6 +236,10 @@ function buildMergedSettings(parsed: Partial<AppSettingsV1>): AppSettingsV1 {
     appBehavior: normalizeAppBehaviorSettings({
       ...defaults.appBehavior,
       ...migrated.appBehavior
+    }),
+    uiEffects: normalizeUiEffectsSettings({
+      ...(defaults.uiEffects ?? {}),
+      ...(migrated.uiEffects ?? {})
     }),
     keyboardShortcuts: normalizeKeyboardShortcuts(migrated.keyboardShortcuts),
     write: mergeWriteSettings(defaults.write, migrated.write),
@@ -403,6 +409,10 @@ export class JsonSettingsStore {
       appBehavior: normalizeAppBehaviorSettings({
         ...cur.appBehavior,
         ...(partial.appBehavior ?? {})
+      }),
+      uiEffects: normalizeUiEffectsSettings({
+        ...(cur.uiEffects ?? {}),
+        ...(partial.uiEffects ?? {})
       }),
       keyboardShortcuts: normalizeKeyboardShortcuts({
         bindings: {

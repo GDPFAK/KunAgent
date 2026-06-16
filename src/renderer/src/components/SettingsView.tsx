@@ -24,7 +24,7 @@ import type {
   CoreRuntimeToolDiagnosticsJson
 } from '../agent/kun-contract'
 import type { WriteInlineCompletionDebugEntry } from '@shared/write-inline-completion'
-import { applyTheme, applyUiFontScale, applyWriteTypography } from '../lib/apply-theme'
+import { applyCursorSpotlight, applyTheme, applyUiFontScale, applyWriteTypography } from '../lib/apply-theme'
 import { formatWorkspacePickerError } from '../lib/format-workspace-picker-error'
 import type { SkillRootListItem } from '@shared/kun-gui-api'
 import { normalizeWorkspaceRoot } from '../lib/workspace-path'
@@ -124,6 +124,7 @@ export function SettingsView(): ReactElement {
   const permissionsSectionRef = useRef<HTMLDivElement | null>(null)
   const formTheme = form?.theme
   const formUiFontScale = form?.uiFontScale
+  const formCursorSpotlight = form?.uiEffects?.cursorSpotlight
   const writeTypography = form?.write?.typography
   const formWorkspaceRoot = form?.workspaceRoot
   const formKun = form ? getKunRuntimeSettings(form) : null
@@ -172,6 +173,11 @@ export function SettingsView(): ReactElement {
     applyTheme(formTheme)
     applyUiFontScale(formUiFontScale)
   }, [formTheme, formUiFontScale])
+
+  useEffect(() => {
+    if (typeof formCursorSpotlight !== 'boolean') return
+    applyCursorSpotlight(formCursorSpotlight)
+  }, [formCursorSpotlight])
 
   // Live-preview the Write editor typography as the form changes, mirroring the
   // theme/scale preview above. Keyed on the scalar fields so it only re-applies

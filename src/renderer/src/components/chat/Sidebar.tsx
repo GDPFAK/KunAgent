@@ -311,6 +311,7 @@ function FocusModeToggle({
       aria-checked={enabled}
       aria-label={ariaLabel}
       title={`${title} · ${status}`}
+      data-cursor-spotlight-target
       onClick={onToggle}
       className={`group inline-flex h-8 w-[112px] shrink-0 items-center justify-between overflow-hidden rounded-[10px] border px-2.5 text-[12px] font-medium outline-none transition focus-visible:ring-2 focus-visible:ring-accent/25 ${
         enabled

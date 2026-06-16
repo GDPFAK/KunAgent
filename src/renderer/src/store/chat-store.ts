@@ -3,7 +3,7 @@ import type { NormalizedThread } from '../agent/types'
 import { getProvider } from '../agent/registry'
 import { rendererRuntimeClient } from '../agent/runtime-client'
 import i18n from '../i18n'
-import { applyDocumentLocale, applyTheme, applyUiFontScale, applyWriteTypography } from '../lib/apply-theme'
+import { applyCursorSpotlight, applyDocumentLocale, applyTheme, applyUiFontScale, applyWriteTypography } from '../lib/apply-theme'
 import { formatWorkspacePickerError } from '../lib/format-workspace-picker-error'
 import { formatRuntimeError, getRuntimeErrorCode } from '../lib/format-runtime-error'
 import {
@@ -194,6 +194,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     },
     applyTheme,
     applyUiFontScale,
+    applyCursorSpotlight,
     applyWriteTypography,
     applyDocumentLocale,
     workspaceLabelFromPath,

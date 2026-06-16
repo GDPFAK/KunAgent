@@ -430,6 +430,10 @@ const appBehaviorPatchSchema = z.object({
   closeToTray: z.boolean().optional()
 }).strict()
 
+const uiEffectsPatchSchema = z.object({
+  cursorSpotlight: z.boolean().optional()
+}).strict()
+
 const keyboardShortcutCommandIds = KEYBOARD_SHORTCUT_COMMANDS.map((command) => command.id) as [
   typeof KEYBOARD_SHORTCUT_COMMANDS[number]['id'],
   ...Array<typeof KEYBOARD_SHORTCUT_COMMANDS[number]['id']>
@@ -708,6 +712,7 @@ const settingsPatchObjectSchema = z.object({
   log: logPatchSchema.optional(),
   notifications: notificationsPatchSchema.optional(),
   appBehavior: appBehaviorPatchSchema.optional(),
+  uiEffects: uiEffectsPatchSchema.optional(),
   keyboardShortcuts: keyboardShortcutsPatchSchema.optional(),
   write: writeSettingsPatchSchema.optional(),
   claw: clawSettingsPatchSchema.optional(),

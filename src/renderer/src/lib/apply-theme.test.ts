@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { applyDocumentLocale } from './apply-theme'
+import { applyCursorSpotlight, applyDocumentLocale } from './apply-theme'
 
 describe('applyDocumentLocale', () => {
   afterEach(() => {
@@ -37,5 +37,28 @@ describe('applyDocumentLocale', () => {
 
     applyDocumentLocale('en')
     expect(writes).toBe(0)
+  })
+})
+
+describe('applyCursorSpotlight', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it('mirrors the setting onto a document attribute', () => {
+    const attributes = new Map<string, string>()
+    vi.stubGlobal('document', {
+      documentElement: {
+        setAttribute: (name: string, value: string) => {
+          attributes.set(name, value)
+        }
+      }
+    })
+
+    applyCursorSpotlight(true)
+    expect(attributes.get('data-cursor-spotlight')).toBe('on')
+
+    applyCursorSpotlight(false)
+    expect(attributes.get('data-cursor-spotlight')).toBe('off')
   })
 })

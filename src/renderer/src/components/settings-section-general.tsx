@@ -152,6 +152,16 @@ export function GeneralSettingsSection({ ctx }: { ctx: Record<string, any> }): R
                   }
                 />
                 <SettingRow
+                  title={t('cursorSpotlight')}
+                  description={t('cursorSpotlightDesc')}
+                  control={
+                    <Toggle
+                      checked={form.uiEffects?.cursorSpotlight !== false}
+                      onChange={(v) => update({ uiEffects: { cursorSpotlight: v } })}
+                    />
+                  }
+                />
+                <SettingRow
                   title={t('workspaceRoot')}
                   description={t('workspaceRootDesc')}
                   control={

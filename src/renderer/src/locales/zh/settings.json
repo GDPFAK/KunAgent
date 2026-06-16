@@ -125,6 +125,8 @@
   "fontScaleMedium": "中",
   "fontScaleLarge": "大",
   "fontScaleCurrent": "当前：{{value}}",
+  "cursorSpotlight": "鼠标跟随高光",
+  "cursorSpotlightDesc": "在置顶栏和侧边栏显示跟随鼠标的柔和悬停高光。电脑性能较弱时可以关闭。",
   "turnCompleteNotification": "回复完成通知",
   "turnCompleteNotificationDesc": "AI 助手回复完成时，显示 Windows/macOS 系统通知。",
   "desktopBehavior": "桌面行为",

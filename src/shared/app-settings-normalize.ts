@@ -7,6 +7,7 @@ import {
   type GuiUpdateConfigV1,
   type NotificationConfigV1,
   type ScheduleSettingsPatchV1,
+  type UiEffectsConfigV1,
   type WriteSettingsPatchV1
 } from './app-settings-types'
 import { normalizeKeyboardShortcuts, type KeyboardShortcutsConfigV1 } from './keyboard-shortcuts'
@@ -35,6 +36,7 @@ export function normalizeAppSettings(settings: AppSettingsV1): AppSettingsV1 {
     keyboardShortcuts?: Partial<KeyboardShortcutsConfigV1>
     notifications?: Partial<NotificationConfigV1>
     provider?: Parameters<typeof normalizeModelProviderSettings>[0]
+    uiEffects?: Partial<UiEffectsConfigV1>
     write?: WriteSettingsPatchV1
     claw?: ClawSettingsPatchV1
     schedule?: ScheduleSettingsPatchV1
@@ -82,6 +84,7 @@ export function normalizeAppSettings(settings: AppSettingsV1): AppSettingsV1 {
       turnComplete: maybeSettings.notifications?.turnComplete !== false
     },
     appBehavior: normalizeAppBehaviorSettings(maybeSettings.appBehavior),
+    uiEffects: normalizeUiEffectsSettings(maybeSettings.uiEffects),
     keyboardShortcuts: normalizeKeyboardShortcuts(maybeSettings.keyboardShortcuts),
     write: normalizeWriteSettings(maybeSettings.write),
     claw: normalizeClawSettings(maybeSettings.claw),
@@ -102,6 +105,14 @@ function normalizeDisabledSkillIds(value: unknown): string[] {
     .filter((id): id is string => typeof id === 'string')
     .map((id) => id.trim().replace(/^\/?skill:/i, '').trim())
     .filter(Boolean))]
+}
+
+export function normalizeUiEffectsSettings(
+  settings?: Partial<UiEffectsConfigV1>
+): UiEffectsConfigV1 {
+  return {
+    cursorSpotlight: settings?.cursorSpotlight !== false
+  }
 }
 
 export function normalizeAppBehaviorSettings(

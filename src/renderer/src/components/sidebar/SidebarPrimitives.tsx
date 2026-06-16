@@ -111,6 +111,7 @@ export function SidebarCommandRow({
     <button
       type="button"
       disabled={disabled}
+      data-cursor-spotlight-target
       title={disabled ? disabledHint : undefined}
       onClick={onClick}
       className={cx(
@@ -200,6 +201,7 @@ export function SidebarIconButton({
     <button
       type="button"
       disabled={disabled}
+      data-cursor-spotlight-target
       onPointerDown={(event) => {
         if (stopPropagation) event.stopPropagation()
       }}
@@ -315,6 +317,7 @@ export function SidebarTreeRow({
 
   return (
     <div
+      data-cursor-spotlight-target
       className={cx(
         'group relative flex w-full items-center overflow-hidden rounded-[8px] text-[13px] font-normal transition',
         outlined
