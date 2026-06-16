@@ -504,6 +504,7 @@
   "pluginSkillRootGlobalCodex": "Global · ~/.codex/skills",
   "pluginSkillRootGlobalDeepseek": "Global · ~/.kun/skills",
   "pluginSkillRootNeedsWorkspace": "workspace required",
+  "pluginSkillRootNone": "No skill directory detected",
   "pluginSkillRootMissing": "The current Skill directory is unavailable. Choose a workspace or switch to a global directory.",
   "pluginSkillRefresh": "Refresh",
   "pluginSkillDiscoveredCount": "{{count}} discovered",

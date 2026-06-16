@@ -504,6 +504,7 @@
   "pluginSkillRootGlobalCodex": "全局 · ~/.codex/skills",
   "pluginSkillRootGlobalDeepseek": "全局 · ~/.kun/skills",
   "pluginSkillRootNeedsWorkspace": "需先设置工作目录",
+  "pluginSkillRootNone": "未检测到技能目录",
   "pluginSkillRootMissing": "当前 Skill 目录不可用，请先选择工作目录或切换到全局目录。",
   "pluginSkillRefresh": "刷新",
   "pluginSkillDiscoveredCount": "已扫描到 {{count}} 个",
