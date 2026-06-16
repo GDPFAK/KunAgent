@@ -12,12 +12,16 @@ describe('keyboard shortcuts', () => {
   it('normalizes common shortcut strings', () => {
     expect(normalizeKeyboardShortcut('shift + tab')).toBe('Shift+Tab')
     expect(normalizeKeyboardShortcut('ctrl++')).toBe('Ctrl++')
+    expect(normalizeKeyboardShortcut('ctrl+=')).toBe('Ctrl++')
+    expect(normalizeKeyboardShortcut('ctrl+shift++')).toBe('Ctrl++')
     expect(normalizeKeyboardShortcut('control + shift + i')).toBe('Ctrl+Shift+I')
   })
 
   it('converts keyboard events to shortcut strings', () => {
     expect(keyboardEventToShortcut({ key: 'Tab', shiftKey: true })).toBe('Shift+Tab')
     expect(keyboardEventToShortcut({ key: '+', ctrlKey: true })).toBe('Ctrl++')
+    expect(keyboardEventToShortcut({ key: '=', ctrlKey: true })).toBe('Ctrl++')
+    expect(keyboardEventToShortcut({ key: '+', ctrlKey: true, shiftKey: true })).toBe('Ctrl++')
     expect(keyboardEventToShortcut({ key: 'Shift', shiftKey: true })).toBeNull()
   })
 

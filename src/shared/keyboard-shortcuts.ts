@@ -196,7 +196,12 @@ export function normalizeKeyboardShortcut(value: unknown): string | null {
   const normalizedKey = normalizeShortcutKey(key)
   if (!normalizedKey || MODIFIER_KEYS.has(normalizedKey)) return null
   const orderedModifiers = ['Ctrl', 'Shift', 'Alt', 'Meta']
-    .filter((modifier) => modifiers.includes(modifier as 'Ctrl' | 'Shift' | 'Alt' | 'Meta'))
+    .filter((modifier) =>
+      modifiers.includes(modifier as 'Ctrl' | 'Shift' | 'Alt' | 'Meta') &&
+      // On many keyboards the plus key is reported through Shift+=. Treat
+      // Shift as part of typing "+" rather than a separate shortcut modifier.
+      !(normalizedKey === '+' && modifier === 'Shift')
+    )
   return [...orderedModifiers, normalizedKey].join('+')
 }
 
@@ -205,7 +210,7 @@ export function keyboardEventToShortcut(event: KeyboardShortcutEventLike): strin
   if (!key || MODIFIER_KEYS.has(key)) return null
   const modifiers = [
     event.ctrlKey ? 'Ctrl' : '',
-    event.shiftKey ? 'Shift' : '',
+    event.shiftKey && key !== '+' ? 'Shift' : '',
     event.altKey ? 'Alt' : '',
     event.metaKey ? 'Meta' : ''
   ].filter(Boolean)
@@ -239,6 +244,7 @@ function normalizeShortcutKey(rawKey: string): string | null {
   const key = rawKey.trim()
   if (!key) return null
   if (key === ' ') return 'Space'
+  if (key === '=') return '+'
   if (key.length === 1) return key.toUpperCase()
   const lower = key.toLowerCase()
   if (lower === 'esc') return 'Escape'
