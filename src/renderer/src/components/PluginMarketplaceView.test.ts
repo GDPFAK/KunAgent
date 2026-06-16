@@ -17,6 +17,14 @@ describe('PluginMarketplaceView MCP config helpers', () => {
     expect(recommendedMarketplaceItemIds()).not.toContain('filesystem')
   })
 
+  it('recommends mainstream MCP servers for reasoning, memory, and web search', () => {
+    expect(recommendedMarketplaceItemIds()).toEqual(expect.arrayContaining([
+      'sequential-thinking',
+      'memory',
+      'brave-search'
+    ]))
+  })
+
   it('merges recommended MCP servers into JSON config without dropping existing fields', () => {
     const existing = JSON.stringify({
       timeouts: { read_timeout: 120 },
