@@ -498,6 +498,46 @@ const RECOMMENDED_ITEMS: MarketplaceItem[] = [
       )
   },
   {
+    id: 'sequential-thinking',
+    kind: 'mcp',
+    titleKey: 'pluginMcpSequentialThinkingTitle',
+    descriptionKey: 'pluginMcpSequentialThinkingDesc',
+    group: 'recommended',
+    mcpConfig: () =>
+      buildMcpConfig(
+        'sequential-thinking',
+        'npx',
+        ['-y', '@modelcontextprotocol/server-sequential-thinking']
+      )
+  },
+  {
+    id: 'memory',
+    kind: 'mcp',
+    titleKey: 'pluginMcpMemoryTitle',
+    descriptionKey: 'pluginMcpMemoryDesc',
+    group: 'recommended',
+    mcpConfig: () =>
+      buildMcpConfig(
+        'memory',
+        'npx',
+        ['-y', '@modelcontextprotocol/server-memory']
+      )
+  },
+  {
+    id: 'brave-search',
+    kind: 'mcp',
+    titleKey: 'pluginMcpBraveSearchTitle',
+    descriptionKey: 'pluginMcpBraveSearchDesc',
+    group: 'recommended',
+    mcpConfig: () =>
+      buildMcpConfig(
+        'brave-search',
+        'npx',
+        ['-y', '@modelcontextprotocol/server-brave-search'],
+        { env: { BRAVE_API_KEY: '' } }
+      )
+  },
+  {
     id: 'code-review',
     kind: 'skill',
     titleKey: 'pluginSkillReviewTitle',
