@@ -71,8 +71,12 @@ import {
   type ClawRuntimeDeps,
   type RunPromptOptions,
   type ThreadDetailJson,
-  type ThreadRecordJson
+  type ThreadRecordJson,
+  type SseSubscriber,
+  subscribeRuntimeThreadEvents
 } from './claw-runtime-helpers'
+import { getRuntimeBaseUrlForSettings, runtimeAuthHeaders } from './runtime/kun-adapter'
+import { FeishuStreamer } from './feishu-streamer'
 
 const MAX_IM_FILE_UPLOAD_BYTES = 50 * 1024 * 1024
 const CLAW_IM_APPROVAL_POLICY = 'auto'
@@ -654,6 +658,116 @@ export class ClawRuntime {
     }
   }
 
+  private async subscribeSse(
+    settings: AppSettingsV1,
+    threadId: string,
+    streamer: FeishuStreamer,
+    signal: AbortSignal
+  ): Promise<{ close: () => void }> {
+    const baseUrl = getRuntimeBaseUrlForSettings(settings)
+    if (!baseUrl) throw new Error('runtime_base_url_unavailable')
+    const headers: Record<string, string> = { Accept: 'text/event-stream' }
+    const auth = runtimeAuthHeaders(settings).get('Authorization')
+    if (auth) headers.Authorization = auth
+    const onEvent = (event: { kind?: string; [k: string]: unknown }): void => {
+      streamer.onSseEvent(event as Record<string, unknown>)
+    }
+    return subscribeRuntimeThreadEvents({
+      baseUrl,
+      threadId,
+      headers,
+      onEvent,
+      signal,
+      logError: (category, message, detail) => this.deps.logError(category, message, detail)
+    })
+  }
+
+  private subscribeSseForStreamer(
+    settings: AppSettingsV1,
+    threadId: string,
+    streamer: FeishuStreamer
+  ): SseSubscriber {
+    return (signal) => {
+      // subscribeRuntimeThreadEvents is async, but SseSubscriber contract is
+      // synchronous (returns a { close } handle). Kick off the async
+      // subscription and surface its close synchronously by racing the
+      // setup; if the setup itself throws (e.g. no base URL) we log via
+      // deps.logError and continue with a no-op close. The streamer will
+      // still rely on its own responseTimeoutMs abort as a backstop.
+      const setup = this.subscribeSse(settings, threadId, streamer, signal)
+      let close = (): void => undefined
+      void setup.then(
+        (handle) => { close = handle.close },
+        (error) => {
+          this.deps.logError('claw-feishu-stream', 'SSE subscription setup failed', {
+            message: error instanceof Error ? error.message : String(error),
+            threadId
+          })
+        }
+      )
+      return { close: () => close() }
+    }
+  }
+
+  private async runStreamingReply(input: {
+    bridge: LarkChannel
+    chatId: string
+    threadId: string
+    turnId: string
+    replyOptions: { replyTo?: string; replyInThread?: boolean }
+    responseTimeoutMs: number
+    context: Record<string, unknown>
+  }): Promise<{ ok: boolean; messageId: string; finalText: string; fellBack: boolean; message: string }> {
+    const cancel = new AbortController()
+    const timeout = setTimeout(() => cancel.abort(), input.responseTimeoutMs)
+    const streamer = new FeishuStreamer({
+      bridge: input.bridge,
+      chatId: input.chatId,
+      turnId: input.turnId,
+      threadId: input.threadId,
+      replyOptions: input.replyOptions,
+      logger: (category, message, detail) => this.deps.logError(category, message, detail)
+    })
+    try {
+      const settings = await this.deps.store.load()
+      const result = await streamer.start({
+        subscribe: this.subscribeSseForStreamer(settings, input.threadId, streamer)
+      })
+      return {
+        ok: result.ok,
+        messageId: result.messageId,
+        finalText: result.finalText,
+        fellBack: result.fellBack,
+        message: result.ok ? 'streamed' : 'stream_failed'
+      }
+    } catch (error) {
+      this.deps.logError('claw-feishu-stream', 'Streaming reply failed; falling back to one-shot send.', {
+        message: error instanceof Error ? error.message : String(error),
+        ...input.context
+      })
+      const finalText = streamer.getAccumulatedText() || ''
+      try {
+        const fb = await input.bridge.send(
+          input.chatId,
+          { markdown: finalText || 'Sorry, I could not finish streaming the response.' },
+          input.replyOptions
+        )
+        return { ok: true, messageId: fb.messageId, finalText, fellBack: true, message: 'fell_back' }
+      } catch (fbError) {
+        return {
+          ok: false,
+          messageId: '',
+          finalText,
+          fellBack: true,
+          message: fbError instanceof Error ? fbError.message : String(fbError)
+        }
+      }
+    } finally {
+      clearTimeout(timeout)
+      streamer.dispose()
+    }
+  }
+
   private startRuntimeTurn(
     settings: AppSettingsV1,
     threadId: string,
@@ -1013,6 +1127,14 @@ export class ClawRuntime {
       channel?: ClawImChannelV1
       conversation?: ClawImConversationV1
       remoteSession?: Pick<ClawImRemoteSessionV1, 'chatId' | 'messageId' | 'threadId' | 'senderId' | 'senderName'>
+      /**
+       * When `false`, the turn is started (and the conversation
+       * persisted) but `waitForAssistantResult` is skipped — the caller
+       * is responsible for observing the turn's outcome (e.g. via
+       * `runStreamingReply`). Defaults to `true` for the legacy
+       * `processIncomingImPrompt` polling path.
+       */
+      waitForResult?: boolean
     }
   ): Promise<ClawRunResult> {
     const { channel, conversation, prompt, provider, remoteSession, sender } = input
@@ -1027,7 +1149,7 @@ export class ClawRuntime {
       model: channel?.model ?? settings.claw.im.model,
       providerId: channel?.providerId ?? settings.claw.im.providerId,
       mode: settings.claw.im.mode,
-      waitForResult: true,
+      waitForResult: input.waitForResult !== false,
       responseTimeoutMs: settings.claw.im.responseTimeoutMs,
       source: 'im',
       threadId: initialThreadId || undefined,
@@ -1694,15 +1816,82 @@ export class ClawRuntime {
     }
 
     let result: ClawRunResult
+    // Tracks whether the streaming path (or its in-band one-shot fallback)
+    // already delivered a message to Feishu / Lark. When true, the post-
+    // branch `sendFeishuMessage` below is skipped to avoid duplicating the
+    // streamed text as a separate message bubble.
+    let streamedToFeishu = false
     try {
-      result = await this.processIncomingImPrompt(settings, {
-        prompt: buildFeishuPrompt(message),
-        sender,
-        provider: 'feishu',
-        channel,
-        conversation,
-        remoteSession
-      })
+      // feishuStream is now per-channel (default off). The runtime
+      // default is the polling path; only switch to streaming when this
+      // channel has explicitly enabled it.
+      if (channel.feishuStream === true) {
+        // Streaming path: start the turn (this also persists the
+        // conversation via the onTurnStarted callback) and then stream
+        // the assistant's reply into a Feishu / Lark markdown card.
+        // The original `processIncomingImPrompt` polling path is kept
+        // for users who explicitly disable streaming and for WeChat
+        // (which has no markdown-stream card concept).
+        const started = await this.processIncomingImPrompt(settings, {
+          prompt: buildFeishuPrompt(message),
+          sender,
+          provider: 'feishu',
+          channel,
+          conversation,
+          remoteSession,
+          waitForResult: false
+        })
+        if (!started.ok || !started.threadId || !started.turnId) {
+          result = { ok: false, message: started.message || 'Failed to start Feishu streaming turn.' }
+        } else {
+          const streamResult = await this.runStreamingReply({
+            bridge,
+            chatId: message.chatId,
+            threadId: started.threadId,
+            turnId: started.turnId,
+            replyOptions: { replyTo: message.messageId, replyInThread: Boolean(message.threadId) },
+            responseTimeoutMs: 60_000,
+            context: {
+              purpose: 'feishu-stream',
+              channelId,
+              chatId: message.chatId,
+              inboundMessageId: message.messageId,
+              threadId: started.threadId,
+              turnId: started.turnId
+            }
+          })
+          if (streamResult.ok) {
+            const streamedText = streamResult.finalText.trim() || 'Completed.'
+            // Either the streaming card (FeishuStreamer) or its one-shot
+            // fallback already delivered the text to the chat. Mark
+            // `streamedToFeishu` so the post-branch sendFeishuMessage
+            // below is skipped.
+            streamedToFeishu = true
+            result = {
+              ok: true,
+              threadId: started.threadId,
+              turnId: started.turnId,
+              text: streamedText,
+              message: streamResult.fellBack ? 'streamed (fell back to one-shot send)' : 'streamed'
+            }
+          } else {
+            result = {
+              ok: false,
+              message: streamResult.message.trim() || 'Sorry, something went wrong while handling your message.'
+            }
+          }
+        }
+      } else {
+        // Original polling path — unchanged.
+        result = await this.processIncomingImPrompt(settings, {
+          prompt: buildFeishuPrompt(message),
+          sender,
+          provider: 'feishu',
+          channel,
+          conversation,
+          remoteSession
+        })
+      }
     } catch (error) {
       this.deps.logError('claw-feishu', 'Failed to handle Feishu inbound message', {
         message: errorMessage(error),
@@ -1756,30 +1945,35 @@ export class ClawRuntime {
       : (result.message.trim() || 'Sorry, something went wrong while handling your message.')
     const resultThreadId = result.ok ? result.threadId : undefined
     const resultTurnId = result.ok ? result.turnId : undefined
-    try {
-      await this.sendFeishuMessage(
-        bridge,
-        message.chatId,
-        { markdown: replyText },
-        replyOptions,
-        {
-          purpose: 'agent-reply',
-          channelId,
+    // The streaming path already delivered the text (either as a live
+    // SDK card or via its one-shot fallback). Sending another one-shot
+    // message here would duplicate the reply.
+    if (!streamedToFeishu) {
+      try {
+        await this.sendFeishuMessage(
+          bridge,
+          message.chatId,
+          { markdown: replyText },
+          replyOptions,
+          {
+            purpose: 'agent-reply',
+            channelId,
+            chatId: message.chatId,
+            inboundMessageId: message.messageId,
+            runtimeOk: result.ok,
+            threadId: resultThreadId,
+            turnId: resultTurnId
+          }
+        )
+      } catch (error) {
+        this.deps.logError('claw-feishu', 'Failed to send Feishu / Lark agent reply', {
+          message: errorMessage(error),
           chatId: message.chatId,
-          inboundMessageId: message.messageId,
-          runtimeOk: result.ok,
+          senderId: message.senderId,
           threadId: resultThreadId,
           turnId: resultTurnId
-        }
-      )
-    } catch (error) {
-      this.deps.logError('claw-feishu', 'Failed to send Feishu / Lark agent reply', {
-        message: errorMessage(error),
-        chatId: message.chatId,
-        senderId: message.senderId,
-        threadId: resultThreadId,
-        turnId: resultTurnId
-      })
+        })
+      }
     }
     if (filesToSend.length > 0) {
       const delivery = await this.sendFeishuGeneratedFiles(
