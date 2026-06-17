@@ -418,6 +418,7 @@ export function Workbench(): ReactElement {
   )
   const [input, setInput] = useState('')
   const [mode, setMode] = useState<'plan' | 'agent'>('agent')
+  const [useWorktreePool, setUseWorktreePool] = useState(false)
   const [composerReasoningEffort, setComposerReasoningEffort] =
     useState<ComposerReasoningEffort>('max')
   const [runtimeInfo, setRuntimeInfo] = useState<CoreRuntimeInfoJson | null>(null)
@@ -673,7 +674,8 @@ export function Workbench(): ReactElement {
         return
       }
       if (commandId === 'new-chat') {
-        void createThread()
+        void createThread({ useWorktreePool })
+        if (useWorktreePool) setUseWorktreePool(false)
         return
       }
       if (commandId === 'choose-workspace') {
@@ -698,7 +700,8 @@ export function Workbench(): ReactElement {
     keyboardShortcutBindings,
     mode,
     openSettings,
-    setMode
+    setMode,
+    useWorktreePool
   ])
   const showDevPreviewCard =
     route === 'chat' &&
@@ -1980,14 +1983,16 @@ export function Workbench(): ReactElement {
     if (activeSddDraft) dismissActiveSddDraft({ closeAssistant: true })
     setConnectPhoneSidebarOpen(false)
     setRoute('chat')
-    void createThread()
+    void createThread({ useWorktreePool })
+    if (useWorktreePool) setUseWorktreePool(false)
   }
 
   const startNewChatInWorkspace = (workspaceRoot: string): void => {
     if (activeSddDraft) dismissActiveSddDraft({ closeAssistant: true })
     setConnectPhoneSidebarOpen(false)
     setRoute('chat')
-    void createThread({ workspaceRoot })
+    void createThread({ workspaceRoot, useWorktreePool })
+    if (useWorktreePool) setUseWorktreePool(false)
   }
 
   const openCodeMode = (): void => {
@@ -2498,6 +2503,8 @@ export function Workbench(): ReactElement {
                 onRemoveQueuedMessage={removeQueuedMessage}
                 onInterrupt={(options) => void interrupt(options)}
                 onPlanCommand={() => void handleGuiPlanCommand()}
+                useWorktreePool={useWorktreePool}
+                onToggleWorktreeMode={() => setUseWorktreePool((v) => !v)}
                 onNewCommand={() => void createThread({ workspaceRoot: activeSkillWorkspace, forceNew: true })}
                 onReviewCommand={(target) => void reviewActiveThread(target)}
                 onExecutionSettingsChange={updateComposerExecutionSettings}

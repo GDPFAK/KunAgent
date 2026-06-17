@@ -16,6 +16,7 @@ import {
   FileEdit,
   FileText,
   Folder,
+  GitBranch,
   GitFork,
   ImagePlus,
   ListTodo,
@@ -158,6 +159,9 @@ type Props = {
   onInterrupt: (options?: { discard?: boolean }) => void
   onPlanCommand?: () => void
   onNewCommand?: () => void
+  /** Worktree parallel mode toggle (single-use per new conversation). */
+  useWorktreePool?: boolean
+  onToggleWorktreeMode?: () => void
   onReviewCommand?: (target: ReviewTarget) => void
   onExecutionSettingsChange?: (patch: Partial<ComposerExecutionSettings>) => void
   onOpenChanges?: () => void
@@ -461,6 +465,8 @@ export function FloatingComposer({
   onInterrupt,
   onPlanCommand,
   onNewCommand,
+  useWorktreePool = false,
+  onToggleWorktreeMode,
   onReviewCommand,
   onExecutionSettingsChange,
   onOpenChanges,
@@ -564,8 +570,9 @@ export function FloatingComposer({
   const canCreateNewThread = runtimeReady && route !== 'claw' && Boolean(effectiveWorkspaceRoot) && Boolean(onNewCommand)
   const canOpenGoalPanel = canCompose && route !== 'claw'
   const canRunReview = canCompose && route !== 'claw' && Boolean(onReviewCommand)
+  const canToggleWorktreeMode = canCompose && route !== 'claw' && Boolean(onToggleWorktreeMode)
   const canOpenComposerMenu = showComposerMenuButton
-    && (canTogglePlanMode || canCreateNewThread || canOpenGoalPanel || canRunReview)
+    && (canTogglePlanMode || canCreateNewThread || canOpenGoalPanel || canRunReview || canToggleWorktreeMode)
   const showToolbarStartControls = showComposerMenuButton
   const showChangeSummary = !compact && route === 'chat' && changedFiles.length > 0
   const effectiveChangedFileStats = changedFileStats ?? changedFiles.reduce(
@@ -699,7 +706,9 @@ export function FloatingComposer({
           ? clawHasInboundConversation
             ? t('clawComposerHint')
             : t('clawComposerHintNeedsInbound')
-          : t('composerSlashHint')
+          : useWorktreePool
+            ? t('composerWorktreeModeHint')
+            : t('composerSlashHint')
   const slashCommands = useMemo<SlashCommand[]>(() => {
     const threadActionDisabled = !runtimeReady || busy || !activeThreadId
     const goalActionDisabled = !canOpenGoalPanel
@@ -1189,6 +1198,13 @@ export function FloatingComposer({
     draft.focusComposer()
   }
 
+  const handleWorktreeToolbarClick = (): void => {
+    if (!onToggleWorktreeMode) return
+    setComposerMenuOpen(false)
+    onToggleWorktreeMode()
+    draft.focusComposer()
+  }
+
   const syncComposerCursor = (element = draft.textareaRef.current): void => {
     if (!element) return
     setComposerCursor(element.selectionStart ?? input.length)
@@ -1587,6 +1603,32 @@ export function FloatingComposer({
                 />
               </span>
             </button>
+            {canToggleWorktreeMode ? (
+              <button
+                type="button"
+                disabled={!canToggleWorktreeMode}
+                onClick={handleWorktreeToolbarClick}
+                className="ds-no-drag flex h-8 w-full items-center gap-2 px-3 text-left transition hover:bg-ds-hover hover:text-ds-ink disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:bg-transparent disabled:hover:text-ds-muted"
+              >
+                <GitBranch className="h-3.5 w-3.5 shrink-0" strokeWidth={1.9} />
+                <span className="min-w-0 flex-1 truncate">{t('composerMenuWorktreeMode')}</span>
+                <span
+                  role="switch"
+                  aria-checked={useWorktreePool}
+                  className={`relative h-5 w-9 shrink-0 rounded-full ring-1 transition ${
+                    useWorktreePool
+                      ? 'bg-accent ring-accent/35 shadow-[inset_0_1px_0_rgba(255,255,255,0.24)]'
+                      : 'bg-ds-border-muted ring-ds-border-muted'
+                  }`}
+                >
+                  <span
+                    className={`absolute top-0.5 h-4 w-4 rounded-full bg-white ring-1 ring-black/5 transition ${
+                      useWorktreePool ? 'translate-x-[17px]' : 'translate-x-0.5'
+                    } shadow-[0_1px_4px_rgba(20,47,95,0.28)]`}
+                  />
+                </span>
+              </button>
+            ) : null}
           </div>
         ) : null}
 

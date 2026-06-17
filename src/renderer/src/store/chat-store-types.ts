@@ -228,7 +228,12 @@ export type ChatState = {
   refreshThreads: () => Promise<void>
   setThreadSearch: (query: string) => void
   setShowArchivedThreads: (show: boolean) => void
-  createThread: (options?: { workspaceRoot?: string; forceNew?: boolean }) => Promise<void>
+  createThread: (options?: {
+    workspaceRoot?: string
+    forceNew?: boolean
+    /** When true, acquire a worktree pool slot as the thread workspace. */
+    useWorktreePool?: boolean
+  }) => Promise<void>
   selectThread: (id: string) => Promise<void>
   recoverActiveTurn: () => Promise<boolean>
   sendMessage: (text: string, mode?: string, overrides?: SendMessageOverrides) => Promise<boolean>

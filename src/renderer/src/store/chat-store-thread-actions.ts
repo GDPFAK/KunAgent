@@ -19,6 +19,11 @@ import {
   readThreadForkRegistry,
   saveThreadForkRegistry
 } from '../lib/thread-fork-registry'
+import {
+  markThreadWorktree,
+  saveThreadWorktreeRegistry
+} from '../lib/thread-worktree-registry'
+import { parseWorktreeHasChangesError } from '@shared/worktree'
 import { workspaceLabelFromPath } from '../lib/workspace-label'
 import { isInternalTemporaryWorkspace, normalizeWorkspaceRoot } from '../lib/workspace-path'
 import {
@@ -195,7 +200,7 @@ export function createThreadActions(
       const activeThread = get().activeThreadId
         ? get().threads.find((thread) => thread.id === get().activeThreadId)
         : null
-      const workspaceRoot =
+      let workspaceRoot =
         normalizeWorkspaceRoot(options.workspaceRoot) ||
         (activeThread && !isInternalTemporaryWorkspace(activeThread.workspace)
           ? normalizeWorkspaceRoot(activeThread.workspace)
@@ -207,7 +212,9 @@ export function createThreadActions(
       }
       const codeWorkspaceRoots = rememberCodeWorkspaceRoots(get().codeWorkspaceRoots, [workspaceRoot])
       set({ codeWorkspaceRoots })
-      const reusableThreadId = options.forceNew
+      // Worktree pool mode always needs a fresh thread bound to a fresh pool
+      // slot, so never reuse an existing main-workspace thread in that case.
+      const reusableThreadId = options.forceNew || options.useWorktreePool
         ? null
         : await findReusableEmptyThreadId(
             get(),
@@ -223,6 +230,52 @@ export function createThreadActions(
         }
         return
       }
+      // Worktree pool mode: acquire an isolated worktree as the thread workspace
+      // so multiple agents can work on the same repo in parallel. Falls back to
+      // the normal workspace on any failure (pool full, not a git repo, etc.).
+      let acquiredWorktree: { projectPath: string; poolIndex: number; path: string; branch: string } | null = null
+      if (options.useWorktreePool) {
+        try {
+          const poolIndex = await window.kunGui.findAvailableWorktreePoolIndex({
+            projectPath: workspaceRoot
+          })
+          if (poolIndex === null) {
+            set({ error: i18n.t('common:worktreePoolFull') })
+          } else {
+            // Pool worktrees are ephemeral scratch spaces; if a leftover worktree
+            // has uncommitted changes from a previous run, force-reset it. This
+            // mirrors the Settings panel's force-acquire behavior.
+            const acquireWithForce = async (force: boolean) =>
+              window.kunGui.acquireWorktree({
+                projectPath: workspaceRoot,
+                poolIndex,
+                taskId: `pending-${Date.now()}`,
+                force
+              })
+            let wt: { path: string; branch: string }
+            try {
+              wt = await acquireWithForce(false)
+            } catch (acquireErr) {
+              const acquireMsg = acquireErr instanceof Error ? acquireErr.message : String(acquireErr)
+              if (parseWorktreeHasChangesError(acquireMsg)) {
+                wt = await acquireWithForce(true)
+              } else {
+                throw acquireErr
+              }
+            }
+            acquiredWorktree = {
+              projectPath: workspaceRoot,
+              poolIndex,
+              path: wt.path,
+              branch: wt.branch
+            }
+            workspaceRoot = wt.path
+          }
+        } catch {
+          set({ error: i18n.t('common:worktreeAcquireFailed') })
+          // proceed with the original workspaceRoot
+        }
+      }
       const t = await p.createThread({
         workspace: workspaceRoot,
         title: getDefaultThreadTitle(),
@@ -237,6 +290,17 @@ export function createThreadActions(
         threads: s.threads.some((thread) => thread.id === t.id) ? s.threads : [t, ...s.threads]
       }))
       await get().selectThread(t.id)
+      if (acquiredWorktree) {
+        saveThreadWorktreeRegistry(
+          markThreadWorktree(t.id, {
+            projectPath: acquiredWorktree.projectPath,
+            poolIndex: acquiredWorktree.poolIndex,
+            worktreePath: acquiredWorktree.path,
+            branch: acquiredWorktree.branch,
+            createdAt: new Date().toISOString()
+          })
+        )
+      }
       await get().refreshThreads()
     } catch (e) {
       set({
