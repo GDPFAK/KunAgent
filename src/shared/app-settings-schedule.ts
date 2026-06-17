@@ -17,6 +17,10 @@ import {
   normalizeTimeOfDay
 } from './app-settings-normalizers'
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
 export function normalizeScheduledTask(
   task: Partial<ScheduledTaskV1>,
   index: number,
@@ -76,9 +80,9 @@ export function normalizeScheduleSettings(
   input: ScheduleSettingsPatchV1 | undefined
 ): ScheduleSettingsV1 {
   const defaults = defaultScheduleSettings()
-  const source = input ?? {}
-  const skills = source.skills ?? defaults.skills
-  const internal = source.internal ?? defaults.internal
+  const source = isRecord(input) ? input as ScheduleSettingsPatchV1 : {}
+  const skills = isRecord(source.skills) ? source.skills : defaults.skills
+  const internal = isRecord(source.internal) ? source.internal : defaults.internal
   const now = new Date().toISOString()
   return {
     enabled: normalizeBoolean(source.enabled, defaults.enabled),
@@ -98,7 +102,9 @@ export function normalizeScheduleSettings(
       secret: typeof internal.secret === 'string' ? internal.secret.trim() : ''
     },
     tasks: Array.isArray(source.tasks)
-      ? source.tasks.map((task, index) => normalizeScheduledTask(task as Partial<ScheduledTaskV1>, index, now))
+      ? source.tasks
+        .filter(isRecord)
+        .map((task, index) => normalizeScheduledTask(task as Partial<ScheduledTaskV1>, index, now))
       : []
   }
 }

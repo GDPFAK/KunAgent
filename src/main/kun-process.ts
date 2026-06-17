@@ -215,6 +215,16 @@ function appRoot(): string {
     : app.getAppPath()
 }
 
+function resolveNodeScriptCommand(command: string): string {
+  if (command !== process.execPath) return command
+  if (process.platform !== 'darwin') return command
+  return resolveClawScheduleMcpCommand({
+    appPath: app.getAppPath(),
+    execPath: command,
+    isPackaged: app.isPackaged
+  })
+}
+
 export function resolveKunDataDir(runtime: { dataDir: string }): string {
   const trimmed = runtime.dataDir?.trim()
   if (trimmed) return expandHomePath(trimmed)
@@ -275,6 +285,7 @@ async function startKunChildOnce(
   lastResolvedBinary = resolution.command === process.execPath
     ? resolution.args.join(' ')
     : resolution.command
+  const command = resolveNodeScriptCommand(resolution.command)
   const args = buildKunServeArgs({
     resolution,
     host: '127.0.0.1',
@@ -288,7 +299,7 @@ async function startKunChildOnce(
     tokenEconomyMode: runtime.tokenEconomyMode,
     insecure: isKunRuntimeInsecure(runtime)
   })
-  child = spawn(resolution.command, args, {
+  child = spawn(command, args, {
     env: {
       ...process.env,
       ELECTRON_RUN_AS_NODE: '1',

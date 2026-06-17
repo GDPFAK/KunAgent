@@ -1,4 +1,4 @@
-import type { IpcMain } from 'electron'
+import type { IpcMain, WebContents } from 'electron'
 import { randomUUID } from 'node:crypto'
 import { URL } from 'node:url'
 import type { AppSettingsV1 } from '../shared/app-settings'
@@ -18,6 +18,16 @@ const SSE_START_TIMEOUT_MS = 15_000
 
 
 const sseControllers = new Map<string, SseControllerState>()
+
+function sendSseMessage(wc: WebContents, channel: string, payload: unknown): boolean {
+  if (wc.isDestroyed()) return false
+  try {
+    wc.send(channel, payload)
+    return true
+  } catch {
+    return false
+  }
+}
 
 async function sleepWithAbort(ms: number, signal: AbortSignal): Promise<void> {
   if (signal.aborted || ms <= 0) return
@@ -177,7 +187,11 @@ export function registerRuntimeSseIpc(options: {
             const res = await fetchSseWithStartTimeout(url, requestHeaders, ac.signal, SSE_START_TIMEOUT_MS)
             if (!res.ok || !res.body) {
               if (isFatalSseStatus(res.status)) {
-                wc.send('runtime:sse-error', { streamId: id, status: res.status })
+                if (!sendSseMessage(wc, 'runtime:sse-error', { streamId: id, status: res.status })) {
+                  state.stoppedByClient = true
+                  ac.abort()
+                  return
+                }
                 logError('sse', `SSE connection failed for thread ${request.threadId}`, {
                   status: res.status,
                   streamId: id
@@ -214,7 +228,11 @@ export function registerRuntimeSseIpc(options: {
                 }
               }
               if (batch.length > 0) {
-                wc.send('runtime:sse-event', { streamId: id, events: batch })
+                if (!sendSseMessage(wc, 'runtime:sse-event', { streamId: id, events: batch })) {
+                  state.stoppedByClient = true
+                  ac.abort()
+                  return
+                }
               }
             }
             buffer += dec.decode()
@@ -226,7 +244,11 @@ export function registerRuntimeSseIpc(options: {
                 if (typeof payload.seq === 'number') {
                   nextSinceSeq = Math.max(nextSinceSeq, payload.seq)
                 }
-                wc.send('runtime:sse-event', { streamId: id, events: [payload] })
+                if (!sendSseMessage(wc, 'runtime:sse-event', { streamId: id, events: [payload] })) {
+                  state.stoppedByClient = true
+                  ac.abort()
+                  return
+                }
               }
             }
           } catch (e) {
@@ -237,18 +259,28 @@ export function registerRuntimeSseIpc(options: {
               reconnectDelayMs = Math.min(reconnectDelayMs * 2, SSE_RECONNECT_MAX_MS)
               continue
             }
-            wc.send('runtime:sse-error', { streamId: id, message: msg })
+            if (!sendSseMessage(wc, 'runtime:sse-error', { streamId: id, message: msg })) {
+              state.stoppedByClient = true
+              ac.abort()
+              return
+            }
             logError('sse', `SSE stream error for thread ${request.threadId}`, { message: msg, streamId: id })
             return
           }
         }
       } finally {
         if (!state.stoppedByClient && !ac.signal.aborted) {
-          wc.send('runtime:sse-end', { streamId: id })
+          sendSseMessage(wc, 'runtime:sse-end', { streamId: id })
         }
         sseControllers.delete(id)
       }
-    })()
+    })().catch((error) => {
+      sseControllers.delete(id)
+      logError('sse', `SSE worker crashed for thread ${request.threadId}`, {
+        message: error instanceof Error ? error.message : String(error),
+        streamId: id
+      })
+    })
 
     return { streamId: id }
   })
