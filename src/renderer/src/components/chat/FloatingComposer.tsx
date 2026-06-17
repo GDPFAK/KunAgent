@@ -29,6 +29,7 @@ import {
   Plus,
   PlayCircle,
   RotateCcw,
+  Search,
   SearchCode,
   Send,
   Sparkles,
@@ -59,6 +60,7 @@ import {
 } from '../../lib/workspace-file-index'
 import {
   COMPACT_COMMAND_ALIASES,
+  buildResearchPrompt,
   getGoalPanelDraftObjective,
   getSlashQuery,
   NEW_COMMAND_ALIASES,
@@ -66,12 +68,14 @@ import {
   parseCompactCommand,
   parseGoalCommand,
   parseNewCommand,
+  parseResearchCommand,
   parseReviewCommand,
+  RESEARCH_COMMAND_ALIASES,
   REVIEW_COMMAND_ALIASES,
   type SlashCommand,
   type SlashCommandId
 } from './floating-composer-commands'
-export { parseBtwCommand, parseCompactCommand, parseGoalCommand, parseNewCommand, parseReviewCommand } from './floating-composer-commands'
+export { buildResearchPrompt, parseBtwCommand, parseCompactCommand, parseGoalCommand, parseNewCommand, parseResearchCommand, parseReviewCommand } from './floating-composer-commands'
 import {
   formatCompactNumber,
   formatCost,
@@ -723,6 +727,14 @@ export function FloatingComposer({
         icon: <Plus className="h-4 w-4" strokeWidth={1.9} />,
         disabled: !canCreateNewThread
       })
+      commands.push({
+        id: 'research',
+        title: t('slashCommandResearchTitle'),
+        description: t('slashCommandResearchDescription'),
+        keywords: ['research', 'deep', 'web', 'sources', 'papers', 'evidence', ...RESEARCH_COMMAND_ALIASES],
+        icon: <Search className="h-4 w-4" strokeWidth={1.9} />,
+        disabled: !runtimeReady
+      })
     }
     if (onPlanCommand) {
       commands.push({
@@ -1089,6 +1101,12 @@ export function FloatingComposer({
       draft.focusComposer()
       return
     }
+    if (commandId === 'research') {
+      setMode('agent')
+      setInput(buildResearchPrompt(t('slashCommandResearchPrompt'), null))
+      draft.focusComposer()
+      return
+    }
     if (commandId === 'review' && onReviewCommand) {
       setInput('')
       void onReviewCommand({ kind: 'uncommittedChanges' })
@@ -1265,6 +1283,15 @@ export function FloatingComposer({
       if (command?.disabled) return
       setInput('')
       void compactActiveThread(compactCommand.reason)
+      draft.focusComposer()
+      return
+    }
+    const researchTopic = parseResearchCommand(input)
+    if (researchTopic !== false) {
+      const command = slashCommands.find((item) => item.id === 'research')
+      if (command?.disabled) return
+      setMode('agent')
+      setInput(buildResearchPrompt(t('slashCommandResearchPrompt'), researchTopic))
       draft.focusComposer()
       return
     }
