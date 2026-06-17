@@ -107,11 +107,18 @@ export function pickTrayIcon(
 }
 
 /**
- * 菜单栏(macOS)/托盘(Windows、Linux)合适的图标点尺寸。kun_tray.png 源图
- * 接近 954x994,远大于菜单栏高度。macOS 菜单栏图标区高约 22pt,用这个值
- * 缩放后清晰可见;之前用 18px 会被菜单栏压得几乎看不见。
+ * 托盘图的目标像素尺寸,按平台取值:
+ *   - macOS 菜单栏图标区高约 22pt,用 22px。
+ *   - Windows 系统托盘标准 16px(高 DPI 时系统会再放大,源图缩到 16 比从 954
+ *     直接交给系统更可控)。
+ *   - Linux 各桌面环境不一,16 是常见安全值。
+ *
+ * kun_tray.png 源图约 954x994,远大于这些尺寸,所以一律需要缩放。
  */
-export const TRAY_ICON_SIZE = 22
+export function trayIconSize(): number {
+  if (process.platform === 'darwin') return 22
+  return 16
+}
 
 /**
  * 把托盘图缩到菜单栏合适的尺寸。
@@ -128,9 +135,10 @@ export const TRAY_ICON_SIZE = 22
  */
 export function prepareTrayIcon(image: Electron.NativeImage): Electron.NativeImage {
   if (image.isEmpty()) return image
+  const size = trayIconSize()
   const resized = image.resize({
-    width: TRAY_ICON_SIZE,
-    height: TRAY_ICON_SIZE,
+    width: size,
+    height: size,
     quality: 'best'
   })
   const result = resized.isEmpty() ? image : resized

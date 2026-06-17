@@ -191,9 +191,10 @@ describe('app icon loader', () => {
       const result = mod.prepareTrayIcon(source)
 
       expect(result).toBe(resized)
+      const expectedSize = mod.trayIconSize()
       expect(source.resize).toHaveBeenCalledWith({
-        width: mod.TRAY_ICON_SIZE,
-        height: mod.TRAY_ICON_SIZE,
+        width: expectedSize,
+        height: expectedSize,
         quality: 'best'
       })
     })
