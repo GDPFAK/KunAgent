@@ -86,3 +86,11 @@ export function normalizeStatus(value: unknown): ScheduleTaskStatus {
   if (value === 'running' || value === 'success' || value === 'error') return value
   return 'idle'
 }
+
+export function normalizeModelProviderId(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+}

@@ -30,9 +30,9 @@ import { WorkbenchTopBar, type RightPanelMode } from './chat/WorkbenchTopBar'
 import { MessageTimeline } from './chat/MessageTimeline'
 import {
   FloatingComposer,
-  type ComposerExecutionSettings,
   type ComposerFileReference
 } from './chat/FloatingComposer'
+import { ExpertMarketplaceView, type ExpertMarketplaceItem } from './expert-marketplace'
 import {
   composerReasoningEffortRequestValue,
   type ComposerReasoningEffort
@@ -250,6 +250,7 @@ export function Workbench(): ReactElement {
     createWriteThread,
     openSettings,
     openPlugins,
+    openExperts,
     openClaw,
     openSchedule,
     chooseWorkspace,
@@ -306,6 +307,7 @@ export function Workbench(): ReactElement {
       createWriteThread: s.createWriteThread,
       openSettings: s.openSettings,
       openPlugins: s.openPlugins,
+      openExperts: s.openExperts,
       openClaw: s.openClaw,
       openSchedule: s.openSchedule,
       chooseWorkspace: s.chooseWorkspace,
@@ -340,6 +342,7 @@ export function Workbench(): ReactElement {
     }))
   )
   const [input, setInput] = useState('')
+  const [selectedExpertName, setSelectedExpertName] = useState<string | null>(null)
   const [mode, setMode] = useState<'plan' | 'agent'>('agent')
   const [composerReasoningEffort, setComposerReasoningEffort] =
     useState<ComposerReasoningEffort>('max')
@@ -353,6 +356,9 @@ export function Workbench(): ReactElement {
   const [attachmentUploadBusy, setAttachmentUploadBusy] = useState(false)
   const [attachmentUploadError, setAttachmentUploadError] = useState<string | null>(null)
   const [connectPhoneSidebarOpen, setConnectPhoneSidebarOpen] = useState(false)
+  const [expertCategories, setExpertCategories] = useState<Array<{ id: string; name: { zh: string; en: string }; description: { zh: string; en: string } }>>([])
+  const [expertList, setExpertList] = useState<ExpertMarketplaceItem[]>([])
+  const [expertLoading, setExpertLoading] = useState(false)
   const [runtimeLogPath, setRuntimeLogPath] = useState('')
   const writeAssistantOpen = useWriteWorkspaceStore((s) => s.assistantOpen)
   const setWriteAssistantOpen = useWriteWorkspaceStore((s) => s.setAssistantOpen)
@@ -761,6 +767,30 @@ export function Workbench(): ReactElement {
 
   useEffect(() => {
     if (route !== 'chat') setComposerFileReferences([])
+  }, [route])
+
+  useEffect(() => {
+    if (route !== 'experts') return
+    let cancelled = false
+    const loadExperts = async () => {
+      setExpertLoading(true)
+      try {
+        const provider = getProvider()
+        if (provider.getExperts) {
+          const result = await provider.getExperts()
+          if (!cancelled) {
+            setExpertCategories(result.categories)
+            setExpertList(result.experts as ExpertMarketplaceItem[])
+          }
+        }
+      } catch (error) {
+        console.error('Failed to load experts:', error)
+      } finally {
+        if (!cancelled) setExpertLoading(false)
+      }
+    }
+    loadExperts()
+    return () => { cancelled = true }
   }, [route])
 
   const handlePickAttachments = async (files: File[]): Promise<void> => {
@@ -1460,6 +1490,19 @@ export function Workbench(): ReactElement {
     openPlugins(sidebarView === 'claw' ? 'claw' : 'chat')
   }
 
+  const openExpertsView = (): void => {
+    setConnectPhoneSidebarOpen(false)
+    openExperts()
+  }
+
+  const handleSelectExpert = (expert: ExpertMarketplaceItem): void => {
+    setRoute('chat')
+    setSelectedExpertName(expert.displayName.zh)
+    if (expert.defaultInitPrompt) {
+      setInput(expert.defaultInitPrompt.zh)
+    }
+  }
+
   const openScheduleView = (): void => {
     setConnectPhoneSidebarOpen(false)
     openSchedule()
@@ -1659,6 +1702,7 @@ export function Workbench(): ReactElement {
               activeView={sidebarView}
               connectPhoneSidebarOpen={connectPhoneSidebarOpen}
               pluginsActive={route === 'plugins'}
+              expertMarketplaceOpen={route === 'experts'}
               runtimeReady={runtimeConnection === 'ready'}
               threadSearch={threadSearch}
               showArchivedThreads={showArchivedThreads}
@@ -1674,6 +1718,7 @@ export function Workbench(): ReactElement {
               onNewRequirement={() => void startNewSddRequirement()}
               onOpenSettings={(section) => openSettings(section)}
               onOpenPlugins={openPluginsView}
+              onOpenExpertMarketplace={openExpertsView}
               onToggleConnectPhone={toggleConnectPhone}
               onCodeOpen={openCodeMode}
               onWriteOpen={openWriteMode}
@@ -1708,6 +1753,23 @@ export function Workbench(): ReactElement {
             <Suspense fallback={<div className="h-full bg-ds-main" />}>
               <PluginMarketplaceView />
             </Suspense>
+          </>
+        ) : route === 'experts' ? (
+          <>
+            <div className="ds-no-drag shrink-0 px-4 pt-4">
+              <SidebarTitlebarToggleButton
+                onClick={toggleLeftSidebar}
+                title={leftSidebarCollapsed ? t('sidebarExpand') : t('sidebarCollapse')}
+                ariaLabel={leftSidebarCollapsed ? t('sidebarExpand') : t('sidebarCollapse')}
+              />
+            </div>
+            <ExpertMarketplaceView
+              categories={expertCategories}
+              experts={expertList}
+              onSelectExpert={handleSelectExpert}
+              onBack={() => setRoute('chat')}
+              loading={expertLoading}
+            />
           </>
         ) : route === 'schedule' ? (
           <Suspense fallback={<div className="h-full bg-ds-main" />}>
@@ -1883,6 +1945,8 @@ export function Workbench(): ReactElement {
                   if (res.ok) return res.content
                   return `增强失败：${res.message}\n\n${text}`
                 }}
+                onOpenExpertMarketplace={openExpertsView}
+                expertName={selectedExpertName ?? undefined}
               />
             </div>
           </section>

@@ -12,12 +12,14 @@ import { getKunRuntimeSettings } from '@shared/app-settings'
 import {
   KUN_ATTACHMENT_DIAGNOSTICS_PATH,
   KUN_ATTACHMENTS_PATH,
+  KUN_EXPERTS_PATH,
   KUN_MEMORY_DIAGNOSTICS_PATH,
   KUN_MEMORY_PATH,
   KUN_RUNTIME_INFO_PATH,
   KUN_RUNTIME_TOOLS_PATH,
   KUN_SKILLS_PATH,
   kunApprovalPath,
+  kunExpertPromptPath,
   kunThreadCompactPath,
   kunThreadEventsPath,
   kunThreadForkPath,
@@ -311,6 +313,46 @@ export class KunRuntimeProvider implements AgentProvider {
     if (!response.ok) {
       throw runtimeErrorToError(readRuntimeError(response.body, 'failed to queue message'))
     }
+  }
+
+  async getExperts(): Promise<{
+    categories: Array<{ id: string; name: { zh: string; en: string }; description: { zh: string; en: string } }>
+    experts: Array<{
+      id: string
+      displayName: { zh: string; en: string }
+      profession: { zh: string; en: string }
+      description: { zh: string; en: string }
+      avatar?: string
+      tags: Array<{ zh: string; en: string }>
+      categoryId: string
+      isOPC?: boolean
+      promptFile: string
+      quickPrompts?: Array<{ zh: string; en: string }>
+      defaultInitPrompt?: { zh: string; en: string }
+      plugin?: string
+      agentName?: string
+    }>
+  }> {
+    const response = await rendererRuntimeClient.runtimeRequest(
+      KUN_EXPERTS_PATH,
+      'GET'
+    )
+    if (!response.ok) {
+      throw runtimeErrorToError(readRuntimeError(response.body, 'failed to load experts'))
+    }
+    return readRuntimeJson(response.body, 'invalid experts response')
+  }
+
+  async getExpertPrompt(expertId: string): Promise<string> {
+    const response = await rendererRuntimeClient.runtimeRequest(
+      kunExpertPromptPath(expertId),
+      'GET'
+    )
+    if (!response.ok) {
+      throw runtimeErrorToError(readRuntimeError(response.body, 'failed to load expert prompt'))
+    }
+    const result = readRuntimeJson<{ prompt: string }>(response.body, 'invalid expert prompt response')
+    return result.prompt
   }
 
   async interruptTurn(threadId: string, turnId: string, options?: { discard?: boolean }): Promise<void> {

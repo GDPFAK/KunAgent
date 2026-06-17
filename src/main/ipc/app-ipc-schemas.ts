@@ -5,6 +5,9 @@ import {
   KUN_ATTACHMENT_DIAGNOSTICS_TEMPLATE,
   KUN_ATTACHMENTS_TEMPLATE,
   KUN_ATTACHMENT_TEMPLATE,
+  KUN_EXPERTS_TEMPLATE,
+  KUN_EXPERT_AVATARS_TEMPLATE,
+  KUN_EXPERT_PROMPT_TEMPLATE,
   KUN_HEALTH_TEMPLATE,
   KUN_MEMORY_DIAGNOSTICS_TEMPLATE,
   KUN_MEMORY_RECORD_TEMPLATE,
@@ -87,7 +90,7 @@ function compileEndpoint(
   // substituting the `{id}` / `{turn}` placeholders with `[^/]+`. The
   // template fragments are URL-encoded by the path helpers, so they
   // contain only characters that are safe to escape directly.
-  const pattern = template.replace(/[.+*?^$()|[\]\\]/g, '\\$&').replace(/\{(?:id|turn)\}/g, '[^/]+')
+  const pattern = template.replace(/[.+*?^$()|[\]\\]/g, '\\$&').replace(/\{(?:id|turn|filename)\}/g, '[^/]+')
   const regex = new RegExp(`^${pattern}$`)
   return {
     match: (path: string) => regex.test(path),
@@ -100,6 +103,9 @@ const ENDPOINTS: readonly EndpointTemplate[] = [
   compileEndpoint(KUN_RUNTIME_INFO_TEMPLATE, ['GET']),
   compileEndpoint(KUN_RUNTIME_TOOLS_TEMPLATE, ['GET']),
   compileEndpoint(KUN_SKILLS_TEMPLATE, ['GET']),
+  compileEndpoint(KUN_EXPERTS_TEMPLATE, ['GET']),
+  compileEndpoint(KUN_EXPERT_AVATARS_TEMPLATE, ['GET']),
+  compileEndpoint(KUN_EXPERT_PROMPT_TEMPLATE, ['GET']),
   compileEndpoint(KUN_ATTACHMENTS_TEMPLATE, ['POST']),
   compileEndpoint(KUN_ATTACHMENT_DIAGNOSTICS_TEMPLATE, ['GET']),
   compileEndpoint(KUN_ATTACHMENT_TEMPLATE, ['GET']),

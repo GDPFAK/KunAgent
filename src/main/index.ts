@@ -675,6 +675,18 @@ function createWindow(options: { suppressInitialShow?: boolean } = {}): void {
     console.error(`[deepseek-gui] failed to load preload ${preloadPath}:`, error)
     logError('preload', 'Failed to load preload script', { preloadPath, message })
   })
+  // Dynamic CSP: relaxed in dev mode (for Vite HMR), strict in production
+  const isDev = !!devServerHintUrl()
+  const strictCsp = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: file: blob:; font-src 'self' data:;"
+  const devCsp = "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: file: blob:; font-src 'self' data:; connect-src 'self' ws://localhost:* http://localhost:*"
+  mainWindow.webContents.session.webRequest.onHeadersReceived((details, callback) => {
+    callback({
+      responseHeaders: {
+        ...details.responseHeaders,
+        'Content-Security-Policy': [isDev ? devCsp : strictCsp]
+      }
+    })
+  })
   const showWindow = (): void => {
     if (options.suppressInitialShow) return
     if (!mainWindow || mainWindow.isDestroyed() || mainWindow.isVisible()) return

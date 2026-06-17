@@ -56,6 +56,7 @@ import { SkillRuntime } from '../skills/skill-runtime.js'
 import { FileMemoryStore } from '../memory/memory-store.js'
 import { DelegationRuntime, FileDelegationStore } from '../delegation/delegation-runtime.js'
 import { createChildAgentExecutor } from '../delegation/child-agent-executor.js'
+import { ExpertRuntime } from '../experts/expert-runtime.js'
 
 export type KunServeRuntimeOptions = {
   host: string
@@ -159,6 +160,12 @@ export async function createKunServeRuntime(
   const mcpProviders = await buildMcpToolProviders(options.capabilities?.mcp)
   const webProviders = buildWebToolProviders(options.capabilities?.web)
   const skillRuntime = await SkillRuntime.create(options.capabilities?.skills)
+  const expertRuntime = new ExpertRuntime({
+    expertsDir: join(options.dataDir, 'experts'),
+    srcDir: join(new URL('../../src/experts', import.meta.url).pathname.replace(/^\/([A-Z]:)/, '$1').replace(/^\/([A-Z]:)/i, '$1')),
+    enabled: true
+  })
+  await expertRuntime.load()
   const attachmentStore = options.capabilities?.attachments.enabled
     ? new FileAttachmentStore({
         rootDir: join(options.dataDir, 'attachments'),
@@ -354,6 +361,7 @@ export async function createKunServeRuntime(
         : { enabled: false, rootDir: '', activeCount: 0, tombstoneCount: 0, lastInjectedIds: [] }
     }),
     skills: () => skillRuntime.diagnostics(),
+    expertRuntime,
     shutdown: async () => {
       try {
         await mcpProviders.close()

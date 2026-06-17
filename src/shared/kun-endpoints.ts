@@ -33,6 +33,17 @@ export function kunAttachmentContentPath(attachmentId: string): string {
   return `${kunAttachmentPath(attachmentId)}/content`
 }
 
+export const KUN_EXPERTS_PATH = '/v1/experts'
+export const KUN_EXPERTS_TEMPLATE = '/v1/experts'
+export const KUN_EXPERT_PROMPT_TEMPLATE = '/v1/experts/{id}/prompt'
+export function kunExpertPromptPath(expertId: string): string {
+  return `/v1/experts/${encodeURIComponent(expertId)}/prompt`
+}
+export const KUN_EXPERT_AVATARS_TEMPLATE = '/v1/experts/avatars/{filename}'
+export function kunExpertAvatarPath(id: string): string {
+  return `/v1/experts/avatars/${encodeURIComponent(id)}`
+}
+
 export const KUN_MEMORY_PATH = '/v1/memory'
 export const KUN_MEMORY_TEMPLATE = '/v1/memory'
 export const KUN_MEMORY_DIAGNOSTICS_PATH = '/v1/memory/diagnostics'

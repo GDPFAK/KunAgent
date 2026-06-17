@@ -12,6 +12,7 @@ import {
 import {
   Archive,
   BarChart3,
+  Bot,
   FileText,
   GitFork,
   ImagePlus,
@@ -80,6 +81,10 @@ import { useComposerDraft } from './use-composer-draft'
 
 export type { ComposerFileReference } from '../../lib/composer-file-references'
 
+export type ComposerExecutionSettings = Record<string, unknown>
+
+
+
 type Props = {
   variant?: 'default' | 'compact'
   workspaceRootOverride?: string
@@ -140,6 +145,9 @@ type Props = {
   hideBtwCommand?: boolean
   /** Enhance prompt: rephrases the current input for better AI results. Returns enhanced text or null if cancelled. */
   onEnhancePrompt?: (text: string, signal: AbortSignal) => Promise<string | null>
+  onOpenExpertMarketplace?: () => void
+  /** When set, shows the current expert name badge below the input */
+  expertName?: string
 }
 
 type SkillCommand = NonNullable<Props['skillCommands']>[number]
@@ -491,7 +499,9 @@ export function FloatingComposer({
   onReviewCommand,
   onBtwCommand,
   hideBtwCommand = false,
-  onEnhancePrompt
+  onEnhancePrompt,
+  onOpenExpertMarketplace,
+  expertName
 }: Props): ReactElement {
   const { t, i18n } = useTranslation('common')
   const [enhancing, setEnhancing] = useState(false)
@@ -1757,6 +1767,21 @@ export function FloatingComposer({
                         <Target className="h-3.5 w-3.5" strokeWidth={1.9} />
                         <span>{t('slashCommandGoalTitle')}</span>
                       </span>
+                    ) : null}
+                    {onOpenExpertMarketplace ? (
+                      <button
+                        type="button"
+                        onClick={onOpenExpertMarketplace}
+                        className={`ds-no-drag inline-flex h-8 shrink-0 items-center gap-1 rounded-lg border px-2 text-[12px] font-medium transition hover:text-ds-ink ${
+                          expertName
+                            ? 'border-ds-skill/30 bg-ds-skill/10 text-ds-skill hover:bg-ds-skill/15'
+                            : 'border-ds-border-muted bg-ds-card/80 text-ds-muted hover:bg-ds-hover'
+                        }`}
+                        title={expertName ? t('expertSummoned', { defaultValue: '已召唤：{name}' }).replace('{name}', expertName) : t('openExpertMarketplace', { defaultValue: '召唤专家' })}
+                      >
+                        <Bot className={`h-3.5 w-3.5 ${expertName ? 'text-ds-skill' : ''}`} strokeWidth={1.9} />
+                        <span>{expertName ? `${t('expertSummoned', { defaultValue: '已召唤：' })}${expertName}` : t('summonExpert', { defaultValue: '召唤专家' })}</span>
+                      </button>
                     ) : null}
                   </>
                 ) : null}

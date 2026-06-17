@@ -46,6 +46,7 @@ import {
 import { isAuthorized, bearerToken } from '../auth.js'
 import { ERRORS } from './runtime-error.js'
 import type { ServerRuntime } from './server-runtime.js'
+import type { ExpertRuntime } from '../../experts/expert-runtime.js'
 
 /**
  * Build the full router used by the HTTP server. The router exposes:
@@ -89,6 +90,18 @@ export function buildRouter(runtime: ServerRuntime): Router {
   router.add('GET', '/v1/skills', async (request) => {
     if (!authorize(request, runtime)) return ERRORS.unauthorized()
     return listSkills(runtime)
+  })
+  router.add('GET', '/v1/experts', async (request) => {
+    if (!authorize(request, runtime)) return ERRORS.unauthorized()
+    return listExperts(runtime)
+  })
+  router.add('GET', '/v1/experts/:id/prompt', async (request, ctx) => {
+    if (!authorize(request, runtime)) return ERRORS.unauthorized()
+    return getExpertPrompt(runtime, ctx.params.id)
+  })
+  router.add('GET', '/v1/experts/avatars/:filename', async (request, ctx) => {
+    if (!authorize(request, runtime)) return ERRORS.unauthorized()
+    return getExpertAvatar(runtime, ctx.params.filename)
   })
   router.add('POST', '/v1/attachments', async (request) => {
     if (!authorize(request, runtime)) return ERRORS.unauthorized()
@@ -266,6 +279,40 @@ export function buildRouter(runtime: ServerRuntime): Router {
 
 function authorize(request: Request, runtime: ServerRuntime): boolean {
   return isAuthorized(request.headers, runtime.runtimeToken, runtime.insecure)
+}
+
+async function listExperts(runtime: ServerRuntime) {
+  if (!runtime.expertRuntime) {
+    return ERRORS.unavailable('expert runtime not available')
+  }
+  const categories = runtime.expertRuntime.getCategories()
+  const experts = runtime.expertRuntime.getExperts()
+  return { status: 200, headers: { 'content-type': 'application/json' }, body: JSON.stringify({ categories, experts }) }
+}
+
+async function getExpertPrompt(runtime: ServerRuntime, expertId: string) {
+  if (!runtime.expertRuntime) {
+    return ERRORS.unavailable('expert runtime not available')
+  }
+  const prompt = runtime.expertRuntime.getExpertPrompt(expertId)
+  if (!prompt) {
+    return ERRORS.notFound('expert not found')
+  }
+  return { status: 200, headers: { 'content-type': 'application/json' }, body: JSON.stringify({ prompt }) }
+}
+
+async function getExpertAvatar(runtime: ServerRuntime, filename: string) {
+  if (!runtime.expertRuntime) {
+    return ERRORS.unavailable('expert runtime not available')
+  }
+  const imageBuffer = runtime.expertRuntime.getAvatarImage(filename)
+  if (!imageBuffer) {
+    return ERRORS.notFound('avatar not found')
+  }
+  const ext = filename.split('.').pop()?.toLowerCase() ?? 'png'
+  const mimeType = ext === 'jpg' || ext === 'jpeg' ? 'image/jpeg' : 'image/png'
+  const dataUrl = `data:${mimeType};base64,${imageBuffer.toString('base64')}`
+  return { status: 200, headers: { 'content-type': 'application/json' }, body: JSON.stringify({ dataUrl }) }
 }
 
 void bearerToken

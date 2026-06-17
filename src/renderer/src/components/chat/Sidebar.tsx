@@ -2,6 +2,7 @@ import type { ReactElement } from 'react'
 import { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
+  Bot,
   Clock3,
   FileQuestion,
   LayoutGrid,
@@ -33,6 +34,7 @@ type Props = {
   activeView: 'chat' | 'write' | 'claw' | 'schedule'
   connectPhoneSidebarOpen: boolean
   pluginsActive: boolean
+  expertMarketplaceOpen: boolean
   runtimeReady: boolean
   threadSearch: string
   showArchivedThreads: boolean
@@ -48,6 +50,7 @@ type Props = {
   onNewRequirement: () => void
   onOpenSettings: (section?: SettingsRouteSection) => void
   onOpenPlugins: () => void
+  onOpenExpertMarketplace: () => void
   onToggleConnectPhone: () => void
   onCodeOpen: () => void
   onWriteOpen: () => void
@@ -61,6 +64,7 @@ export function Sidebar({
   activeView,
   connectPhoneSidebarOpen,
   pluginsActive,
+  expertMarketplaceOpen,
   runtimeReady,
   threadSearch,
   showArchivedThreads,
@@ -76,6 +80,7 @@ export function Sidebar({
   onNewRequirement,
   onOpenSettings,
   onOpenPlugins,
+  onOpenExpertMarketplace,
   onToggleConnectPhone,
   onCodeOpen,
   onWriteOpen,
@@ -159,6 +164,12 @@ export function Sidebar({
           label={t('plugins')}
           onClick={onOpenPlugins}
           active={pluginsActive}
+        />
+        <SidebarCommandRow
+          icon={<Bot className="h-4 w-4" strokeWidth={1.75} />}
+          label={t('expertMarketplace', { defaultValue: '专家市场' })}
+          onClick={onOpenExpertMarketplace}
+          active={expertMarketplaceOpen}
         />
         <SidebarCommandRow
           icon={<Clock3 className="h-4 w-4" strokeWidth={1.75} />}

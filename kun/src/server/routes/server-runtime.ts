@@ -19,6 +19,7 @@ import type { AttachmentStore } from '../../attachments/attachment-store.js'
 import type { MemoryDiagnostics } from '../../contracts/memory.js'
 import type { MemoryStore } from '../../memory/memory-store.js'
 import type { ReviewTarget } from '../../contracts/review.js'
+import type { ExpertRuntime } from '../../experts/expert-runtime.js'
 
 export type RuntimeToolDiagnostics = {
   providers: ToolProviderPolicy[]
@@ -64,5 +65,6 @@ export type ServerRuntime = {
   info(): RuntimeInfoResponse
   toolDiagnostics?(): RuntimeToolDiagnostics | Promise<RuntimeToolDiagnostics>
   skills?(): SkillRuntimeDiagnostics | Promise<SkillRuntimeDiagnostics>
+  expertRuntime?: ExpertRuntime
   shutdown?(): Promise<void>
 }

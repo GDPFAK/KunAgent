@@ -452,6 +452,25 @@ export interface AgentProvider {
   deleteMemory?(memoryId: string): Promise<CoreMemoryRecordJson>
   steerUserMessage?(threadId: string, turnId: string, text: string): Promise<void>
   interruptTurn(threadId: string, turnId: string, options?: { discard?: boolean }): Promise<void>
+  getExperts?(): Promise<{
+    categories: Array<{ id: string; name: { zh: string; en: string }; description: { zh: string; en: string } }>
+    experts: Array<{
+      id: string
+      displayName: { zh: string; en: string }
+      profession: { zh: string; en: string }
+      description: { zh: string; en: string }
+      avatar?: string
+      tags: Array<{ zh: string; en: string }>
+      categoryId: string
+      isOPC?: boolean
+      promptFile: string
+      quickPrompts?: Array<{ zh: string; en: string }>
+      defaultInitPrompt?: { zh: string; en: string }
+      plugin?: string
+      agentName?: string
+    }>
+  }>
+  getExpertPrompt?(expertId: string): Promise<string>
   renameThread(threadId: string, title: string): Promise<void>
   updateThreadWorkspace?(threadId: string, workspace: string): Promise<void>
   archiveThread?(threadId: string, archived: boolean): Promise<void>

@@ -105,6 +105,8 @@ export function createAppActions(options: CreateAppActionsOptions): Pick<
         pluginHostRoute: host ?? (state.route === 'claw' ? 'claw' : 'chat')
       })),
 
+    openExperts: () => set({ route: 'experts' }),
+
     openClaw: () => {
       set({ route: 'claw' })
       void get().refreshClawChannels()
