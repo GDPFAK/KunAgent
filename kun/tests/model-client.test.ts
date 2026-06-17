@@ -33,6 +33,51 @@ function buildRequest(abortSignal: AbortSignal): ModelRequest {
   }
 }
 
+const READ_IMAGE_BASE64 = 'aW1hZ2UtYnl0ZXM='
+
+function readImageToolRequest(model: string): ModelRequest {
+  const request = buildRequest(new AbortController().signal)
+  request.model = model
+  request.tools = [{
+    name: 'read',
+    description: 'Read a file from the workspace.',
+    inputSchema: {
+      type: 'object',
+      properties: { path: { type: 'string' } },
+      required: ['path']
+    }
+  }]
+  request.history = [
+    makeToolCallItem({
+      id: 'item_call_read',
+      threadId: 'thr_1',
+      turnId: 'turn_1',
+      callId: 'call_read',
+      toolName: 'read',
+      arguments: { path: 'img/diagram.png' }
+    }),
+    makeToolResultItem({
+      id: 'item_result_read',
+      threadId: 'thr_1',
+      turnId: 'turn_1',
+      callId: 'call_read',
+      toolName: 'read',
+      output: {
+        path: '/workspace/img/diagram.png',
+        relative_path: 'img/diagram.png',
+        kind: 'image',
+        mime_type: 'image/png',
+        width: 16,
+        height: 8,
+        byte_size: 11,
+        data_base64: READ_IMAGE_BASE64,
+        note: 'Read image file [image/png]'
+      }
+    })
+  ]
+  return request
+}
+
 function collectKinds(chunks: ModelStreamChunk[]): string[] {
   return chunks.map((chunk) => chunk.kind)
 }
@@ -185,6 +230,201 @@ describe('CompatModelClient', () => {
       expect.objectContaining({ kind: 'usage', usage: expect.objectContaining({ promptTokens: 2, completionTokens: 3 }) }),
       { kind: 'completed', stopReason: 'stop' }
     ])
+  })
+
+  it('injects read-tool images as chat completions image parts for vision models', async () => {
+    const sentBodies: Array<Record<string, unknown>> = []
+    const fetchImpl: typeof fetch = async (_url, init) => {
+      sentBodies.push(JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>)
+      return new Response(JSON.stringify({
+        id: 'cmpl_read_image',
+        model: 'vision-model',
+        choices: [{ index: 0, finish_reason: 'stop', message: { role: 'assistant', content: 'ok' } }]
+      }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' }
+      })
+    }
+    const client = new CompatModelClient({
+      baseUrl: 'https://example.com/v1',
+      apiKey: 'k',
+      model: 'vision-model',
+      endpointFormat: 'chat_completions',
+      fetchImpl,
+      nonStreaming: true,
+      modelCapabilities: (model) => ({
+        id: model,
+        inputModalities: ['text', 'image'],
+        outputModalities: ['text'],
+        supportsToolCalling: true,
+        messageParts: ['text', 'image_url']
+      })
+    })
+
+    for await (const _chunk of client.stream(readImageToolRequest('vision-model'))) {
+      // drain
+    }
+
+    const messages = sentBodies[0]?.messages as Array<{ role: string; content: unknown }> | undefined
+    const toolMessage = messages?.find((message) => message.role === 'tool')
+    const imageMessage = messages?.find((message) =>
+      message.role === 'user' && Array.isArray(message.content)
+    )
+
+    expect(String(toolMessage?.content ?? '')).toContain('"kind":"image"')
+    expect(String(toolMessage?.content ?? '')).not.toContain(READ_IMAGE_BASE64)
+    expect(imageMessage?.content).toEqual([
+      expect.objectContaining({ type: 'text', text: expect.stringContaining('tool call(s) above returned the following image') }),
+      { type: 'image_url', image_url: { url: `data:image/png;base64,${READ_IMAGE_BASE64}` } }
+    ])
+  })
+
+  it('keeps read-tool image results as text for text-only models', async () => {
+    const sentBodies: Array<Record<string, unknown>> = []
+    const fetchImpl: typeof fetch = async (_url, init) => {
+      sentBodies.push(JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>)
+      return new Response(JSON.stringify({
+        id: 'cmpl_text_read_image',
+        model: 'text-model',
+        choices: [{ index: 0, finish_reason: 'stop', message: { role: 'assistant', content: 'ok' } }]
+      }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' }
+      })
+    }
+    const client = new CompatModelClient({
+      baseUrl: 'https://example.com/v1',
+      apiKey: 'k',
+      model: 'text-model',
+      endpointFormat: 'chat_completions',
+      fetchImpl,
+      nonStreaming: true,
+      modelCapabilities: (model) => ({
+        id: model,
+        inputModalities: ['text'],
+        outputModalities: ['text'],
+        supportsToolCalling: true,
+        messageParts: ['text']
+      })
+    })
+
+    for await (const _chunk of client.stream(readImageToolRequest('text-model'))) {
+      // drain
+    }
+
+    const messages = sentBodies[0]?.messages as Array<{ role: string; content: unknown }> | undefined
+    expect(messages?.some((message) => Array.isArray(message.content))).toBe(false)
+    const toolContent = String(messages?.find((message) => message.role === 'tool')?.content ?? '')
+    expect(toolContent).toContain('"kind":"image"')
+    expect(toolContent).not.toContain(READ_IMAGE_BASE64)
+  })
+
+  it('injects read-tool images as Responses API input_image parts for vision models', async () => {
+    const sentBodies: Array<Record<string, unknown>> = []
+    const fetchImpl: typeof fetch = async (_url, init) => {
+      sentBodies.push(JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>)
+      return new Response(JSON.stringify({
+        id: 'resp_read_image',
+        status: 'completed',
+        output_text: 'ok'
+      }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' }
+      })
+    }
+    const client = new CompatModelClient({
+      baseUrl: 'https://example.com/v1',
+      apiKey: 'k',
+      model: 'vision-model',
+      endpointFormat: 'responses',
+      fetchImpl,
+      nonStreaming: true,
+      modelCapabilities: (model) => ({
+        id: model,
+        inputModalities: ['text', 'image'],
+        outputModalities: ['text'],
+        supportsToolCalling: true,
+        messageParts: ['text', 'input_image']
+      })
+    })
+
+    for await (const _chunk of client.stream(readImageToolRequest('vision-model'))) {
+      // drain
+    }
+
+    const input = sentBodies[0]?.input as Array<Record<string, unknown>> | undefined
+    expect(input).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        type: 'function_call_output',
+        call_id: 'call_read',
+        output: expect.stringContaining('"kind":"image"')
+      })
+    ]))
+    expect(String(input?.find((item) => item.type === 'function_call_output')?.output ?? '')).not.toContain(READ_IMAGE_BASE64)
+    expect(input).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        role: 'user',
+        content: expect.arrayContaining([
+          { type: 'input_image', image_url: `data:image/png;base64,${READ_IMAGE_BASE64}` }
+        ])
+      })
+    ]))
+  })
+
+  it('injects read-tool images as Anthropic image blocks for vision models', async () => {
+    const sentBodies: Array<Record<string, unknown>> = []
+    const fetchImpl: typeof fetch = async (_url, init) => {
+      sentBodies.push(JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>)
+      return new Response(JSON.stringify({
+        id: 'msg_read_image',
+        type: 'message',
+        role: 'assistant',
+        content: [{ type: 'text', text: 'ok' }],
+        stop_reason: 'end_turn'
+      }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' }
+      })
+    }
+    const client = new CompatModelClient({
+      baseUrl: 'https://example.com/v1',
+      apiKey: 'k',
+      model: 'vision-model',
+      endpointFormat: 'messages',
+      fetchImpl,
+      nonStreaming: true,
+      modelCapabilities: (model) => ({
+        id: model,
+        inputModalities: ['text', 'image'],
+        outputModalities: ['text'],
+        supportsToolCalling: true,
+        messageParts: ['text', 'image_url']
+      })
+    })
+
+    for await (const _chunk of client.stream(readImageToolRequest('vision-model'))) {
+      // drain
+    }
+
+    const messages = sentBodies[0]?.messages as Array<{ role: string; content: Array<Record<string, unknown>> }> | undefined
+    const userMessage = messages?.find((message) => message.role === 'user')
+    expect(userMessage?.content).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        type: 'tool_result',
+        tool_use_id: 'call_read',
+        content: expect.stringContaining('"kind":"image"')
+      }),
+      expect.objectContaining({
+        type: 'image',
+        source: {
+          type: 'base64',
+          media_type: 'image/png',
+          data: READ_IMAGE_BASE64
+        }
+      })
+    ]))
+    const toolResult = userMessage?.content.find((part) => part.type === 'tool_result')
+    expect(String(toolResult?.content ?? '')).not.toContain(READ_IMAGE_BASE64)
   })
 
   it('maps Responses API cached input token details into cache telemetry', async () => {
