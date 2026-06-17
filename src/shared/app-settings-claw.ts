@@ -155,7 +155,11 @@ export function normalizeClawSettings(input: ClawSettingsPatchV1 | undefined): C
               ? { welcomeSentAt: raw.welcomeSentAt }
               : {}),
             createdAt: typeof raw.createdAt === 'string' && raw.createdAt ? raw.createdAt : now,
-            updatedAt: typeof raw.updatedAt === 'string' && raw.updatedAt ? raw.updatedAt : now
+            updatedAt: typeof raw.updatedAt === 'string' && raw.updatedAt ? raw.updatedAt : now,
+            // Per-channel feishuStream. Default is off (false); only flip to
+            // true when the user explicitly enables streaming for this
+            // specific Feishu / Lark channel.
+            feishuStream: normalizeBoolean(raw.feishuStream, false)
           }
         }),
     tasks: Array.isArray(source.tasks)

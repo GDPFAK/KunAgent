@@ -584,7 +584,8 @@ const clawImChannelPatchSchema = z.object({
   conversations: z.array(clawImConversationPatchSchema).max(512).optional(),
   welcomeSentAt: z.string().max(128).optional(),
   createdAt: z.string().max(128).optional(),
-  updatedAt: z.string().max(128).optional()
+  updatedAt: z.string().max(128).optional(),
+  feishuStream: z.boolean().optional()
 }).strict()
 
 const clawTaskSchedulePatchSchema = z.object({

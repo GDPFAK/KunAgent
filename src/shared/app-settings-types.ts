@@ -597,6 +597,8 @@ export type ClawImChannelV1 = {
   welcomeSentAt?: string
   createdAt: string
   updatedAt: string
+  /** 当 provider === 'feishu' 时,是否把 agent 回复改为流式输出。默认 false (per-channel)。 */
+  feishuStream?: boolean
 }
 
 export type ClawSettingsV1 = {

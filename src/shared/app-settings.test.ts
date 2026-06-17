@@ -353,6 +353,35 @@ describe('claw settings', () => {
     expect(normalized.claw.channels[0].welcomeSentAt).toBe('2026-06-10T00:00:00.000Z')
     expect(normalized.claw.channels[1]).not.toHaveProperty('welcomeSentAt')
   })
+
+  it('defaults per-channel ClawImChannelV1.feishuStream to false when missing on old settings', () => {
+    const defaults = defaultClawSettings()
+    const legacyChannel = { ...defaults.channels[0], id: 'channel_legacy' }
+    delete (legacyChannel as Partial<typeof legacyChannel>).feishuStream
+    const normalized = normalizeAppSettings({
+      ...settings(),
+      claw: {
+        ...defaults,
+        channels: [legacyChannel as typeof defaults.channels[0]]
+      }
+    })
+
+    expect(normalized.claw.channels[0].feishuStream).toBe(false)
+  })
+
+  it('preserves ClawImChannelV1.feishuStream=true when explicitly set on old settings', () => {
+    const defaults = defaultClawSettings()
+    const channelWithStream = { ...defaults.channels[0], id: 'channel_stream', feishuStream: true }
+    const normalized = normalizeAppSettings({
+      ...settings(),
+      claw: {
+        ...defaults,
+        channels: [channelWithStream as typeof defaults.channels[0]]
+      }
+    })
+
+    expect(normalized.claw.channels[0].feishuStream).toBe(true)
+  })
 })
 
 describe('isKunRuntimeInsecure', () => {
