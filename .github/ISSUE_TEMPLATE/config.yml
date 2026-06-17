@@ -1,8 +1,8 @@
 blank_issues_enabled: false
 contact_links:
-  - name: Security vulnerability report
+  - name: Security vulnerability report / 安全漏洞反馈
     url: mailto:security@deepseek-gui.com
-    about: Please report security issues privately instead of opening a public issue.
-  - name: Contribution guide
+    about: Please report security issues privately instead of opening a public issue. / 请通过私密渠道反馈安全问题，不要创建公开 issue。
+  - name: Contribution guide / 贡献指南
     url: https://github.com/KunAgent/Kun/blob/master/docs/CONTRIBUTING.md
-    about: Read the contribution workflow and validation expectations before opening a PR.
+    about: Read the contribution workflow and validation expectations before opening a PR. / 创建 PR 前请阅读贡献流程和验证要求。

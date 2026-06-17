@@ -1,5 +1,5 @@
-name: Feature request
-description: Suggest a product improvement, workflow enhancement, or new capability
+name: Feature request / 功能建议
+description: Suggest a product improvement, workflow enhancement, or new capability / 建议产品改进、工作流优化或新能力
 title: "[Feature] "
 labels:
   - enhancement
@@ -7,38 +7,39 @@ body:
   - type: markdown
     attributes:
       value: |
-        Thanks for sharing an idea.
-        The best requests explain the problem first, then the proposed solution.
+        Thanks for sharing an idea. The best requests explain the problem first, then the proposed solution.
+
+        感谢分享想法。建议先说明你遇到的问题，再描述期望的解决方案。
   - type: textarea
     id: problem
     attributes:
-      label: Problem or opportunity
-      description: What pain point are you trying to solve?
-      placeholder: Tell us what is hard, missing, or frustrating today.
+      label: Problem or opportunity / 问题或机会
+      description: What pain point are you trying to solve? / 你希望解决什么痛点？
+      placeholder: Tell us what is hard, missing, or frustrating today. / 请说明当前哪里不好用、缺少什么，或什么地方让你困扰。
     validations:
       required: true
   - type: textarea
     id: proposal
     attributes:
-      label: Proposed solution
-      description: What would you like to see?
-      placeholder: Describe the ideal behavior, UI, or workflow.
+      label: Proposed solution / 建议方案
+      description: What would you like to see? / 你希望看到什么样的改进？
+      placeholder: Describe the ideal behavior, UI, or workflow. / 请描述你理想中的行为、界面或工作流。
     validations:
       required: true
   - type: textarea
     id: alternatives
     attributes:
-      label: Alternatives considered
-      placeholder: Share any workarounds or alternative ideas you considered.
+      label: Alternatives considered / 已考虑的替代方案
+      placeholder: Share any workarounds or alternative ideas you considered. / 请分享你考虑过的临时方案或其他想法。
   - type: textarea
     id: context
     attributes:
-      label: Additional context
-      placeholder: Add screenshots, references, or related issues if helpful.
+      label: Additional context / 补充信息
+      placeholder: Add screenshots, references, or related issues if helpful. / 可以补充截图、参考资料或相关 issues。
   - type: checkboxes
     id: terms
     attributes:
-      label: Checklist
+      label: Checklist / 检查清单
       options:
-        - label: I searched existing issues before opening this request.
+        - label: I searched existing issues before opening this request. / 我已经搜索过现有 issues。
           required: true
