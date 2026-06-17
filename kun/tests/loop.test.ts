@@ -331,6 +331,7 @@ describe('AgentLoop', () => {
           yield { kind: 'completed', stopReason: 'tool_calls' }
           return
         }
+        yield { kind: 'assistant_text_delta', text: 'done' }
         yield { kind: 'completed', stopReason: 'stop' }
       }
     })
@@ -353,6 +354,106 @@ describe('AgentLoop', () => {
       .flatMap((turn) => turn.items)
       .find((item) => item.kind === 'tool_call' && item.callId === 'call_echo')
     expect(toolCall).toMatchObject({ kind: 'tool_call', status: 'completed' })
+  })
+
+  it('retries an empty model continuation after a file change', async () => {
+    let calls = 0
+    const requests: ModelRequest[] = []
+    const writeHelper = LocalToolHost.defineTool({
+      name: 'write_helper',
+      description: 'Write a helper script.',
+      inputSchema: { type: 'object', properties: {} },
+      policy: 'auto',
+      toolKind: 'file_change',
+      execute: async () => ({ output: { ok: true } })
+    })
+    const h = makeHarness(
+      {
+        provider: 'empty-after-tool',
+        model: 'empty-after-tool',
+        async *stream(request): AsyncIterable<ModelStreamChunk> {
+          requests.push(request)
+          calls += 1
+          if (calls === 1) {
+            yield {
+              kind: 'tool_call_complete',
+              callId: 'call_write_helper',
+              toolName: 'write_helper',
+              arguments: {}
+            }
+            yield { kind: 'completed', stopReason: 'tool_calls' }
+            return
+          }
+          if (calls === 2) {
+            yield { kind: 'completed', stopReason: 'stop' }
+            return
+          }
+          yield { kind: 'assistant_text_delta', text: 'analysis complete' }
+          yield { kind: 'completed', stopReason: 'stop' }
+        }
+      },
+      { tools: [writeHelper] }
+    )
+    await bootstrapThread(h)
+
+    const status = await h.loop.runTurn(h.threadId, h.turnId)
+    const items = await h.sessionStore.loadItems(h.threadId)
+
+    expect(status).toBe('completed')
+    expect(calls).toBe(3)
+    expect(requests[2]?.contextInstructions?.join('\n')).toContain('Tool continuation recovery')
+    expect(items).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        kind: 'assistant_text',
+        text: 'analysis complete'
+      })
+    ]))
+  })
+
+  it('fails visibly when the model repeats an empty post-tool continuation', async () => {
+    let calls = 0
+    const writeHelper = LocalToolHost.defineTool({
+      name: 'write_helper',
+      description: 'Write a helper script.',
+      inputSchema: { type: 'object', properties: {} },
+      policy: 'auto',
+      toolKind: 'file_change',
+      execute: async () => ({ output: { ok: true } })
+    })
+    const h = makeHarness(
+      {
+        provider: 'repeated-empty-after-tool',
+        model: 'repeated-empty-after-tool',
+        async *stream(): AsyncIterable<ModelStreamChunk> {
+          calls += 1
+          if (calls === 1) {
+            yield {
+              kind: 'tool_call_complete',
+              callId: 'call_write_helper',
+              toolName: 'write_helper',
+              arguments: {}
+            }
+            yield { kind: 'completed', stopReason: 'tool_calls' }
+            return
+          }
+          yield { kind: 'completed', stopReason: 'stop' }
+        }
+      },
+      { tools: [writeHelper] }
+    )
+    await bootstrapThread(h)
+
+    const status = await h.loop.runTurn(h.threadId, h.turnId)
+    const items = await h.sessionStore.loadItems(h.threadId)
+
+    expect(status).toBe('failed')
+    expect(calls).toBe(3)
+    expect(items).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        kind: 'error',
+        code: 'empty_post_tool_continuation'
+      })
+    ]))
   })
 
   it('keeps running past the legacy eight-step ceiling until the model stops', async () => {
@@ -1269,6 +1370,7 @@ describe('AgentLoop', () => {
             yield { kind: 'completed', stopReason: 'tool_calls' }
             return
           }
+          yield { kind: 'assistant_text_delta', text: 'done' }
           yield { kind: 'completed', stopReason: 'stop' }
         }
       },
