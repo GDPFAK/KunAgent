@@ -67,16 +67,12 @@ type AnthropicCacheControl = { type: 'ephemeral' }
 
 type AnthropicImageSource = { type: 'base64'; media_type: string; data: string } | { type: 'url'; url: string }
 
-type AnthropicToolResultBlock =
-  | { type: 'text'; text: string }
-  | { type: 'image'; source: AnthropicImageSource }
-
 type AnthropicContentBlock = (
   | { type: 'text'; text: string }
   | { type: 'image'; source: AnthropicImageSource }
   | { type: 'thinking'; thinking: string }
   | { type: 'tool_use'; id: string; name: string; input: Record<string, unknown> }
-  | { type: 'tool_result'; tool_use_id: string; content: string | AnthropicToolResultBlock[] }
+  | { type: 'tool_result'; tool_use_id: string; content: string }
 ) & { cache_control?: AnthropicCacheControl }
 
 type AnthropicMessage = {
@@ -1579,14 +1575,26 @@ function messagesToAnthropic(
     }
     if (message.role === 'tool') {
       if (!message.tool_call_id) continue
-      out.push({
-        role: 'user',
-        content: [{
-          type: 'tool_result',
-          tool_use_id: message.tool_call_id,
-          content: anthropicToolResultContent(message.content)
-        }]
-      })
+      // Keep `tool_result` content as plain text. Anthropic's own API also
+      // accepts an `image` block INSIDE tool_result (the computer-use beta
+      // shape), but third-party Anthropic-compat providers (MiniMax, etc.)
+      // often have not implemented that newer shape and return 502 / 4xx
+      // when they see it. The image rides instead as a sibling `image`
+      // block in the same user message — the older shape that every
+      // compat layer accepts.
+      const blocks: AnthropicContentBlock[] = [{
+        type: 'tool_result',
+        tool_use_id: message.tool_call_id,
+        content: chatContentToTextOnly(message.content)
+      }]
+      if (Array.isArray(message.content)) {
+        for (const part of message.content) {
+          if (part.type !== 'image_url') continue
+          const image = anthropicImageSource(part.image_url.url)
+          if (image) blocks.push({ type: 'image', source: image })
+        }
+      }
+      out.push({ role: 'user', content: blocks })
       continue
     }
     const content = chatContentToAnthropicContent(message.content)
@@ -1669,27 +1677,6 @@ function chatContentToResponsesContent(
     }
   }
   return parts
-}
-
-/**
- * Anthropic Messages allows a `tool_result` block to carry text plus
- * image blocks, so a screenshot returned by a tool rides inline with its
- * result. Falls back to plain text when the content has no images.
- */
-function anthropicToolResultContent(
-  content: ChatMessage['content']
-): string | AnthropicToolResultBlock[] {
-  if (!Array.isArray(content)) return chatContentToPlainText(content)
-  const blocks: AnthropicToolResultBlock[] = []
-  for (const part of content) {
-    if (part.type === 'text') {
-      if (part.text) blocks.push({ type: 'text', text: part.text })
-      continue
-    }
-    const image = anthropicImageSource(part.image_url.url)
-    if (image) blocks.push({ type: 'image', source: image })
-  }
-  return blocks.length > 0 ? blocks : chatContentToPlainText(content)
 }
 
 /**
@@ -1787,6 +1774,21 @@ function chatContentToPlainText(content: ChatMessage['content']): string {
     if (part.type === 'text') return part.text
     return `[image: ${part.image_url.url}]`
   }).join('\n')
+}
+
+/**
+ * Extract ONLY text parts from a chat-message content array — image parts
+ * are dropped entirely (no `[image: data:...]` placeholder). Used when the
+ * image rides separately (as a sibling block in the user message) so the
+ * raw base64 does not leak back into the text channel.
+ */
+function chatContentToTextOnly(content: ChatMessage['content']): string {
+  if (content === null || content === undefined) return ''
+  if (typeof content === 'string') return content
+  return content
+    .filter((part): part is Extract<ChatMessageContentPart, { type: 'text' }> => part.type === 'text')
+    .map((part) => part.text)
+    .join('\n')
 }
 
 type ModelReasoningCapability = NonNullable<ModelCapabilityMetadata['reasoning']>

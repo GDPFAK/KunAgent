@@ -109,7 +109,7 @@ describe('CompatModelClient tool-result image forwarding', () => {
     expect(jsonString(userImg?.content)).toContain(`data:image/png;base64,${SHOT}`)
   })
 
-  it('embeds the screenshot in the tool_result block for a vision model (anthropic messages)', async () => {
+  it('places the screenshot as a sibling of tool_result in the user message (anthropic messages)', async () => {
     const calls: CapturedCall[] = []
     const client = new CompatModelClient({
       baseUrl: 'https://api.example.com/v1',
@@ -122,11 +122,24 @@ describe('CompatModelClient tool-result image forwarding', () => {
     })
     await drain(client.stream(request('claude-vision')))
     expect(calls[0].url).toMatch(/\/messages$/)
-    const body = jsonString(calls[0].body)
-    // Anthropic tool_result carries an inline base64 image source.
-    expect(body).toContain('tool_result')
-    expect(body).toContain(`"data":"${SHOT}"`)
-    expect(body).toContain('"media_type":"image/png"')
+    const messages = calls[0].body.messages as Array<{ role: string; content: unknown }>
+    const userMsg = messages.find(
+      (m) => m.role === 'user' && Array.isArray(m.content) &&
+        (m.content as Array<{ type: string }>).some((b) => b.type === 'tool_result')
+    )
+    expect(userMsg).toBeDefined()
+    const blocks = userMsg!.content as Array<{ type: string; content?: unknown; source?: { data?: string; media_type?: string } }>
+    // tool_result is plain text (the older, universally-supported shape).
+    const toolResult = blocks.find((b) => b.type === 'tool_result')
+    expect(typeof toolResult?.content).toBe('string')
+    expect(toolResult?.content).not.toContain(SHOT)
+    // The screenshot rides as a sibling `image` block — the shape every
+    // Anthropic-compat layer (MiniMax/etc.) handles, not the newer
+    // image-inside-tool_result computer-use beta shape that compat layers
+    // tend to reject.
+    const imageBlock = blocks.find((b) => b.type === 'image')
+    expect(imageBlock?.source?.data).toBe(SHOT)
+    expect(imageBlock?.source?.media_type).toBe('image/png')
   })
 
   it('does NOT send image parts to a non-vision model (text-only tool result)', async () => {
