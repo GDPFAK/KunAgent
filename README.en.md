@@ -153,6 +153,7 @@ Requirements:
 | --- | --- |
 | Node.js | 20+ |
 | npm | Ships with Node.js |
+| macOS packaging | Full Xcode (`actool` is not included in Command Line Tools only) |
 | Model credentials | At least one of DeepSeek / Xiaomi MiMo / MiniMax / custom provider |
 
 ```bash

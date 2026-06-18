@@ -1,4 +1,4 @@
-import { chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { builtinModules, createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -88,6 +88,18 @@ function createMacPackContext(root: string): {
   }
 }
 
+function createWinPackContext(root: string): ReturnType<typeof createMacPackContext> {
+  return {
+    appOutDir: join(root, 'win-unpacked'),
+    electronPlatformName: 'win32',
+    packager: {
+      appInfo: {
+        productFilename: 'Kun'
+      }
+    }
+  }
+}
+
 afterEach(() => {
   while (tempRoots.length > 0) {
     const root = tempRoots.pop()
@@ -159,6 +171,26 @@ describe('electron-builder Kun packaging', () => {
     // instead of downscaling a single 1024px PNG (#222). The .ico still carries
     // the rounded Kun artwork — it is derived from kun_mac.png.
     expect(builderConfig.win.icon).toBe('./build/icon.ico')
+  })
+
+  it('ships a macOS SF Symbol asset catalog for the tray icon', () => {
+    const symbolsetDir = join(process.cwd(), 'src/asset/macos/Assets.xcassets/kun.symbolset')
+    const contentsPath = join(symbolsetDir, 'Contents.json')
+    const symbolPath = join(symbolsetDir, 'kun-sf-symbol.svg')
+
+    expect(existsSync(symbolPath)).toBe(true)
+    expect(require(contentsPath)).toEqual({
+      info: { author: 'xcode', version: 1 },
+      symbols: [{ filename: 'kun-sf-symbol.svg', idiom: 'universal' }]
+    })
+  })
+
+  it('skips SF Symbol asset compilation for non-macOS packages', () => {
+    const root = tempRoot()
+    const context = createWinPackContext(root)
+
+    expect(() => afterPack._internals.compileMacSymbolAssets(context)).not.toThrow()
+    expect(existsSync(join(context.appOutDir, 'resources', 'Assets.car'))).toBe(false)
   })
 
   it('uses a process-tree shutdown guard for Windows overwrite installs', () => {
