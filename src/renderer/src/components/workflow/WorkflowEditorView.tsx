@@ -1,5 +1,5 @@
 import type { DragEvent, ReactElement } from 'react'
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
   Background,
@@ -14,7 +14,9 @@ import {
   useReactFlow,
   type Connection,
   type EdgeChange,
-  type NodeChange
+  type NodeChange,
+  type OnConnectEnd,
+  type OnConnectStart
 } from '@xyflow/react'
 import { ArrowLeft, MousePointerClick, Play, Plus, Save, Square } from 'lucide-react'
 import type {
@@ -34,6 +36,7 @@ import {
 } from './WorkflowNodes'
 import { NodeConfigPanel } from './NodeConfigPanel'
 import {
+  TRIGGER_KINDS,
   WORKFLOW_PALETTE,
   createWorkflowNode,
   flowToWorkflowGraph,
@@ -42,6 +45,14 @@ import {
   type WorkflowFlowEdge,
   type WorkflowFlowNode
 } from './workflow-types'
+
+type ConnectMenuState = {
+  x: number
+  y: number
+  flowPos: { x: number; y: number }
+  sourceId: string
+  sourceHandle: string
+}
 
 const DND_MIME = 'application/x-workflow-node'
 
@@ -86,6 +97,8 @@ function WorkflowEditorInner({
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null)
   const [dirty, setDirty] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [connectMenu, setConnectMenu] = useState<ConnectMenuState | null>(null)
+  const connectingRef = useRef<{ nodeId: string; handleId: string } | null>(null)
 
   const styledEdges = useMemo(
     () => toFlowEdges(flowToWorkflowGraph(rfNodes, rfEdges).connections, runStatus),
@@ -113,6 +126,54 @@ function WorkflowEditorInner({
     setRfEdges((edges) => addEdge(connection, edges) as WorkflowFlowEdge[])
     setDirty(true)
   }, [])
+
+  const onConnectStart = useCallback<OnConnectStart>((_, params) => {
+    connectingRef.current = params.nodeId
+      ? { nodeId: params.nodeId, handleId: params.handleId ?? 'out' }
+      : null
+  }, [])
+
+  // Dragging a connection onto empty canvas opens a picker to add + connect the next node (n8n-style).
+  const onConnectEnd = useCallback<OnConnectEnd>(
+    (event) => {
+      const source = connectingRef.current
+      connectingRef.current = null
+      if (!source) return
+      const target = event.target as HTMLElement | null
+      if (!target || !target.classList.contains('react-flow__pane')) return
+      const clientX = 'clientX' in event ? event.clientX : 0
+      const clientY = 'clientY' in event ? event.clientY : 0
+      setConnectMenu({
+        x: clientX,
+        y: clientY,
+        flowPos: screenToFlowPosition({ x: clientX, y: clientY }),
+        sourceId: source.nodeId,
+        sourceHandle: source.handleId
+      })
+    },
+    [screenToFlowPosition]
+  )
+
+  const addConnectedNode = useCallback(
+    (kind: WorkflowNodeKind) => {
+      setConnectMenu((menu) => {
+        if (!menu) return null
+        const node = createWorkflowNode(kind, menu.flowPos)
+        setRfNodes((nodes) => [...nodes, { id: node.id, type: node.type, position: node.position, data: { node } }])
+        setRfEdges(
+          (edges) =>
+            addEdge(
+              { source: menu.sourceId, sourceHandle: menu.sourceHandle, target: node.id, targetHandle: 'in' },
+              edges
+            ) as WorkflowFlowEdge[]
+        )
+        setSelectedNodeId(node.id)
+        setDirty(true)
+        return null
+      })
+    },
+    []
+  )
 
   const insertNode = useCallback((kind: WorkflowNodeKind, position: { x: number; y: number }) => {
     const node = createWorkflowNode(kind, position)
@@ -312,6 +373,8 @@ function WorkflowEditorInner({
                 onNodesChange={onNodesChange}
                 onEdgesChange={onEdgesChange}
                 onConnect={onConnect}
+                onConnectStart={onConnectStart}
+                onConnectEnd={onConnectEnd}
                 onNodeClick={(_, node) => setSelectedNodeId(node.id)}
                 onPaneClick={() => setSelectedNodeId(null)}
                 fitView
@@ -328,6 +391,30 @@ function WorkflowEditorInner({
               <MousePointerClick className="h-8 w-8 text-ds-faint" strokeWidth={1.4} />
               <p className="text-[13px] text-ds-faint">{t('workflowEmptyCanvas')}</p>
             </div>
+          ) : null}
+          {connectMenu ? (
+            <>
+              <div className="fixed inset-0 z-[70]" onClick={() => setConnectMenu(null)} />
+              <div
+                className="fixed z-[71] max-h-[60vh] w-44 overflow-y-auto rounded-lg border border-ds-border bg-ds-card p-1 shadow-lg"
+                style={{ left: connectMenu.x, top: connectMenu.y }}
+              >
+                {WORKFLOW_PALETTE.filter((kind) => !TRIGGER_KINDS.has(kind)).map((kind) => {
+                  const Icon = NODE_ICONS[kind]
+                  return (
+                    <button
+                      key={kind}
+                      type="button"
+                      onClick={() => addConnectedNode(kind)}
+                      className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[12.5px] text-ds-ink transition hover:bg-ds-hover"
+                    >
+                      <Icon className="h-3.5 w-3.5 text-accent" strokeWidth={1.9} />
+                      {t(`workflowNode_${kind}`)}
+                    </button>
+                  )
+                })}
+              </div>
+            </>
           ) : null}
         </div>
 
