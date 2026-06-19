@@ -2971,7 +2971,7 @@ pre {
 
 .ds-composer-footer {
   flex-wrap: nowrap;
-  overflow: hidden;
+  overflow: visible;
 }
 
 .ds-composer-footer-left {
