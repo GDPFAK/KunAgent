@@ -363,16 +363,14 @@ export const MODEL_PROVIDER_PRESETS: ModelProviderPreset[] = [
       'mimo-v2.5-pro',
       'mimo-v2.5',
       'mimo-v2-pro',
-      'mimo-v2-omni',
-      'mimo-v2-flash'
+      'mimo-v2-omni'
     ],
     modelProfiles: {
       'mimo-v2.5-pro-ultraspeed': xiaomiTextChatProfile(1_000_000),
       'mimo-v2.5-pro': xiaomiTextChatProfile(1_000_000),
       'mimo-v2.5': xiaomiVisionChatProfile(1_000_000),
       'mimo-v2-pro': xiaomiTextChatProfile(1_000_000),
-      'mimo-v2-omni': xiaomiVisionChatProfile(256_000),
-      'mimo-v2-flash': xiaomiTextChatProfile(256_000)
+      'mimo-v2-omni': xiaomiVisionChatProfile(256_000)
     },
     speech: {
       protocol: 'mimo-asr',
@@ -397,16 +395,14 @@ export const MODEL_PROVIDER_PRESETS: ModelProviderPreset[] = [
         'mimo-v2.5-pro',
         'mimo-v2.5',
         'mimo-v2-pro',
-        'mimo-v2-omni',
-        'mimo-v2-flash'
+        'mimo-v2-omni'
       ],
       modelProfiles: {
         'mimo-v2.5-pro-ultraspeed': xiaomiTextChatProfile(1_000_000),
         'mimo-v2.5-pro': xiaomiTextChatProfile(1_000_000),
         'mimo-v2.5': xiaomiVisionChatProfile(1_000_000),
         'mimo-v2-pro': xiaomiTextChatProfile(1_000_000),
-        'mimo-v2-omni': xiaomiVisionChatProfile(256_000),
-        'mimo-v2-flash': xiaomiTextChatProfile(256_000)
+        'mimo-v2-omni': xiaomiVisionChatProfile(256_000)
       },
       speech: {
         protocol: 'mimo-asr',

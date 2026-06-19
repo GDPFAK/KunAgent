@@ -259,6 +259,10 @@ function baseCtx(): Record<string, unknown> {
     activeApiKey: '',
     update: noop,
     updateKun: noop,
+    compactHomePath: (path: string) => path,
+    expandHomePath: (path: string) => path,
+    compactHomePathList: (paths: string[]) => paths,
+    expandHomePathList: (paths: string[]) => paths,
     updateSharedCredential: noop,
     sharedApiKey: '',
     sharedBaseUrl: '',
@@ -405,7 +409,7 @@ describe('AgentsSettingsSection Kun diagnostics smoke', () => {
         id: 'xiaomi',
         baseUrl: 'https://api.xiaomimimo.com/v1',
         endpointFormat: 'chat_completions',
-        models: expect.arrayContaining(['mimo-v2-flash'])
+        models: expect.arrayContaining(['mimo-v2.5'])
       })
     ]))
     expect(patch.agents?.kun).toEqual(expect.objectContaining({

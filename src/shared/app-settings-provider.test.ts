@@ -179,7 +179,7 @@ describe('model provider settings', () => {
       name: 'Xiaomi',
       baseUrl: 'https://api.xiaomimimo.com/v1',
       endpointFormat: 'chat_completions',
-      models: expect.arrayContaining(['mimo-v2-flash', 'mimo-v2.5-pro']),
+      models: expect.arrayContaining(['mimo-v2.5-pro']),
       modelProfiles: {
         'mimo-v2.5': expect.objectContaining({
           inputModalities: expect.arrayContaining(['image']),
@@ -715,7 +715,7 @@ describe('model provider settings', () => {
             apiKey: 'tp-key',
             baseUrl: 'https://token-plan-cn.xiaomimimo.com/v1',
             endpointFormat: 'chat_completions',
-            models: ['mimo-v2-flash', 'mimo-v2-omni', 'mimo-v2.5', 'mimo-v2.5-pro'],
+            models: ['mimo-v2-omni', 'mimo-v2.5', 'mimo-v2.5-pro'],
             modelProfiles: {}
           }
         ]
@@ -724,7 +724,6 @@ describe('model provider settings', () => {
 
     expect(modelSupportsImageInput(resolved.modelProfiles['mimo-v2.5'])).toBe(true)
     expect(modelSupportsImageInput(resolved.modelProfiles['mimo-v2-omni'])).toBe(true)
-    expect(modelSupportsImageInput(resolved.modelProfiles['mimo-v2-flash'])).toBe(false)
     expect(resolved.modelProfiles['mimo-v2.5-pro']).toBeDefined()
   })
 
