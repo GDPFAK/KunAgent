@@ -456,7 +456,8 @@ export function SettingsView(): ReactElement {
     setRuntimeDiagnosticsNotice(null)
     try {
       const loaded = await loadKunDiagnostics(provider, {
-        workspace: normalizeWorkspaceRoot(formWorkspaceRoot)
+        workspace: normalizeWorkspaceRoot(formWorkspaceRoot),
+        project: normalizeWorkspaceRoot(formWorkspaceRoot)
       })
       if (loaded.runtimeInfo !== undefined) setRuntimeInfo(loaded.runtimeInfo)
       if (loaded.toolDiagnostics !== undefined) setToolDiagnostics(loaded.toolDiagnostics)
@@ -501,13 +502,20 @@ export function SettingsView(): ReactElement {
   const createMemoryRecord = async (input: {
     content: string
     scope?: 'user' | 'workspace' | 'project'
+    workspace?: string
+    project?: string
     tags?: string[]
     confidence?: number
   }): Promise<boolean> => {
     const provider = getProvider()
     if (typeof provider.createMemory !== 'function') return false
     try {
-      const memory = await provider.createMemory(input)
+      const workspace = normalizeWorkspaceRoot(formWorkspaceRoot)
+      const memory = await provider.createMemory({
+        ...input,
+        ...(input.scope === 'workspace' && workspace ? { workspace } : {}),
+        ...(input.scope === 'project' && workspace ? { workspace, project: workspace } : {})
+      })
       setMemoryRecords((records) => [memory, ...records])
       return true
     } catch (error) {

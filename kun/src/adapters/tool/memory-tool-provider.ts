@@ -19,6 +19,7 @@ export function buildMemoryToolProviders(store: MemoryStore | undefined): Capabi
             content: { type: 'string' },
             scope: { type: 'string', enum: ['user', 'workspace', 'project'] },
             workspace: { type: 'string' },
+            project: { type: 'string' },
             tags: { type: 'array', items: { type: 'string' } }
           },
           required: ['content'],
@@ -28,12 +29,20 @@ export function buildMemoryToolProviders(store: MemoryStore | undefined): Capabi
         execute: async (args, context) => {
           const content = typeof args.content === 'string' ? args.content.trim() : ''
           if (!content) return { output: { error: 'content is required' }, isError: true }
+          const scope = args.scope === 'user' || args.scope === 'project' ? args.scope : 'workspace'
+          const workspace = context.workspace.trim()
+          if (scope !== 'user' && !workspace) {
+            return { output: { error: 'workspace is required for workspace/project memory' }, isError: true }
+          }
           return {
             output: {
               memory: await store.create({
                 content,
-                scope: args.scope === 'user' || args.scope === 'project' ? args.scope : 'workspace',
-                workspace: typeof args.workspace === 'string' ? args.workspace : context.workspace,
+                scope,
+                ...(scope === 'user' ? {} : { workspace }),
+                ...(scope === 'project'
+                  ? { project: workspace }
+                  : {}),
                 sourceThreadId: context.threadId,
                 sourceTurnId: context.turnId,
                 tags: Array.isArray(args.tags) ? args.tags.filter((tag): tag is string => typeof tag === 'string') : []

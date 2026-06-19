@@ -506,7 +506,7 @@ describe('KunRuntimeProvider', () => {
 
   it('lists, disables, and deletes memory records through Kun endpoints', async () => {
     const runtimeRequest = vi.fn(async (path: string, method?: string, body?: string) => {
-      if (path === '/v1/memory?workspace=%2Ftmp%2Fworkspace&include_deleted=false') {
+      if (path === '/v1/memory?workspace=%2Ftmp%2Fworkspace&project=%2Ftmp%2Fworkspace&include_deleted=false') {
         return {
           ok: true,
           status: 200,
@@ -562,7 +562,11 @@ describe('KunRuntimeProvider', () => {
     installDsGui({ runtimeRequest })
     const provider = new KunRuntimeProvider()
 
-    await expect(provider.listMemories({ workspace: '/tmp/workspace', includeDeleted: false })).resolves.toHaveLength(1)
+    await expect(provider.listMemories({
+      workspace: '/tmp/workspace',
+      project: '/tmp/workspace',
+      includeDeleted: false
+    })).resolves.toHaveLength(1)
     await expect(provider.updateMemory('mem_1', { disabled: true })).resolves.toMatchObject({
       id: 'mem_1',
       disabledAt: 't1'

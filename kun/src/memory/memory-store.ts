@@ -13,8 +13,8 @@ export interface MemoryStore {
   create(input: MemoryCreateRequest): Promise<MemoryRecord>
   update(id: string, patch: MemoryUpdateRequest): Promise<MemoryRecord>
   delete(id: string): Promise<MemoryRecord>
-  list(filter?: { workspace?: string; includeDeleted?: boolean }): Promise<MemoryRecord[]>
-  retrieve(input: { query: string; workspace?: string; limit: number }): Promise<MemoryRecord[]>
+  list(filter?: { workspace?: string; project?: string; includeDeleted?: boolean }): Promise<MemoryRecord[]>
+  retrieve(input: { query: string; workspace?: string; project?: string; limit: number }): Promise<MemoryRecord[]>
   diagnostics(): Promise<MemoryDiagnostics>
   setLastInjected(ids: string[]): void
 }
@@ -79,17 +79,19 @@ export class FileMemoryStore implements MemoryStore {
     return next
   }
 
-  async list(filter: { workspace?: string; includeDeleted?: boolean } = {}): Promise<MemoryRecord[]> {
+  async list(filter: { workspace?: string; project?: string; includeDeleted?: boolean } = {}): Promise<MemoryRecord[]> {
     const records = await this.readAll()
     return records
       .filter((record) => filter.includeDeleted || !record.deletedAt)
-      .filter((record) => inScope(record, filter.workspace))
+      .filter((record) => inScope(record, filter, { includeAllWhenUnfiltered: true }))
       .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
   }
 
-  async retrieve(input: { query: string; workspace?: string; limit: number }): Promise<MemoryRecord[]> {
+  async retrieve(input: { query: string; workspace?: string; project?: string; limit: number }): Promise<MemoryRecord[]> {
     if (!this.options.config.enabled) return []
-    const active = (await this.list({ workspace: input.workspace }))
+    const active = (await this.readAll())
+      .filter((record) => !record.deletedAt)
+      .filter((record) => inScope(record, input, { includeAllWhenUnfiltered: false }))
       .filter((record) => !record.disabledAt)
     // User-scope memories are persistent identity facts (name, preferences,
     // account) — small in number, high in value, and frequently queried by
@@ -151,16 +153,30 @@ export class FileMemoryStore implements MemoryStore {
   }
 }
 
-function inScope(record: MemoryRecord, workspace: string | undefined): boolean {
+function inScope(
+  record: MemoryRecord,
+  filter: { workspace?: string; project?: string },
+  options: { includeAllWhenUnfiltered: boolean }
+): boolean {
   if (record.scope === 'user') return true
+  const workspace = normalizeScopeKey(filter.workspace)
+  const project = normalizeScopeKey(filter.project) || workspace
+  if (!workspace && !project) return options.includeAllWhenUnfiltered
   if (record.scope === 'workspace') {
-    // Records created via the GUI may not carry a workspace (e.g. manually
-    // added before any thread ran). Treat a missing workspace as in-scope so
-    // they are still retrievable; otherwise require an exact match.
-    if (!record.workspace) return true
-    return Boolean(workspace && record.workspace === workspace)
+    return Boolean(workspace && normalizeScopeKey(record.workspace) === workspace)
   }
-  return true
+  if (record.scope === 'project') {
+    const recordProject = normalizeScopeKey(record.project) || normalizeScopeKey(record.workspace)
+    return Boolean(project && recordProject === project)
+  }
+  return false
+}
+
+function normalizeScopeKey(value: string | undefined): string {
+  const trimmed = value?.trim() ?? ''
+  if (!trimmed) return ''
+  if (trimmed === '/') return trimmed
+  return trimmed.replace(/\/+$/, '')
 }
 
 function scoreMemory(record: MemoryRecord, query: string): number {

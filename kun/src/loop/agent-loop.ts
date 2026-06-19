@@ -862,7 +862,8 @@ export class AgentLoop {
     }
     const memories = await this.retrieveMemories({
       prompt: turn?.prompt ?? '',
-      workspace: thread?.workspace ?? ''
+      workspace: thread?.workspace ?? '',
+      project: thread?.workspace ?? ''
     })
     const planTurnActive = effectiveMode === 'plan' || Boolean(activePlanContext)
     const activeGoalInstruction = planTurnActive
@@ -2355,11 +2356,13 @@ export class AgentLoop {
   private async retrieveMemories(input: {
     prompt: string
     workspace: string
+    project?: string
   }) {
     if (!this.opts.memoryStore) return []
     const memories = await this.opts.memoryStore.retrieve({
       query: input.prompt,
       workspace: input.workspace,
+      project: input.project,
       limit: 8
     })
     this.opts.memoryStore.setLastInjected(memories.map((memory) => memory.id))

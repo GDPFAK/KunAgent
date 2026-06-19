@@ -631,9 +631,10 @@ export class KunRuntimeProvider implements AgentProvider {
     )
   }
 
-  async listMemories(options: { workspace?: string; includeDeleted?: boolean } = {}): Promise<CoreMemoryRecordJson[]> {
+  async listMemories(options: { workspace?: string; project?: string; includeDeleted?: boolean } = {}): Promise<CoreMemoryRecordJson[]> {
     const query = buildQuery({
       workspace: options.workspace,
+      project: options.project,
       include_deleted: options.includeDeleted
     })
     const response = await rendererRuntimeClient.runtimeRequest(`${KUN_MEMORY_PATH}${query}`, 'GET')

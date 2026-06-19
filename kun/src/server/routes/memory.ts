@@ -10,6 +10,7 @@ export async function listMemories(store: MemoryStore | undefined, request: Requ
   return jsonResponse({
     memories: await store.list({
       workspace: url.searchParams.get('workspace') ?? undefined,
+      project: url.searchParams.get('project') ?? undefined,
       includeDeleted: url.searchParams.get('include_deleted') === 'true'
     })
   })

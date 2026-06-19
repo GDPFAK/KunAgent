@@ -39,8 +39,26 @@ describe('Memory store and recall', () => {
       scope: 'workspace',
       workspace: '/tmp/other'
     })
+    const projectMemory = await store.create({
+      content: 'Project uses Vitest for regression coverage',
+      scope: 'project',
+      workspace: '/tmp/ws',
+      project: '/tmp/ws'
+    })
 
     expect((await store.retrieve({ query: 'frontend pnpm preference', workspace: '/tmp/ws', limit: 3 })).map((item) => item.id)).toEqual([memory.id])
+    expect((await store.retrieve({
+      query: 'Vitest regression coverage',
+      workspace: '/tmp/ws/',
+      project: '/tmp/ws/',
+      limit: 3
+    })).map((item) => item.id)).toEqual([projectMemory.id])
+    expect(await store.retrieve({
+      query: 'Vitest regression coverage',
+      workspace: '/tmp/other',
+      project: '/tmp/other',
+      limit: 3
+    })).toEqual([])
     expect(await createStore({ enabled: false }).retrieve({ query: 'pnpm', workspace: '/tmp/ws', limit: 3 })).toEqual([])
 
     await store.update(memory.id, { disabled: true })
@@ -50,6 +68,30 @@ describe('Memory store and recall', () => {
     await store.delete(memory.id)
     expect(await store.retrieve({ query: 'pnpm', workspace: '/tmp/ws', limit: 3 })).toEqual([])
     expect((await store.list({ workspace: '/tmp/ws', includeDeleted: true })).find((item) => item.id === memory.id)?.deletedAt).toBeTruthy()
+  })
+
+  it('does not recall workspace/project memories when no workspace is active', async () => {
+    const store = createStore()
+    await store.create({
+      content: 'Workspace prefers pnpm',
+      scope: 'workspace',
+      workspace: '/tmp/ws'
+    })
+    await store.create({
+      content: 'Project uses Vitest',
+      scope: 'project',
+      workspace: '/tmp/ws',
+      project: '/tmp/ws'
+    })
+    await store.create({
+      content: 'Global user preference should remain available everywhere',
+      scope: 'user'
+    })
+
+    expect((await store.retrieve({
+      query: 'pnpm Vitest Global user preference',
+      limit: 5
+    })).map((item) => item.scope)).toEqual(['user'])
   })
 
   it('exposes memory API routes with diagnostics', async () => {
@@ -131,6 +173,66 @@ describe('Memory store and recall', () => {
     expect(await store.list({ workspace: '/tmp/ws' })).toHaveLength(1)
   })
 
+  it('binds project-scope memory tool writes to the current project', async () => {
+    const store = createStore()
+    const host = new LocalToolHost({
+      registry: new CapabilityRegistry(buildMemoryToolProviders(store))
+    })
+    const result = await host.execute({
+      callId: 'call_1',
+      toolName: 'memory_create',
+      arguments: {
+        content: 'Use Vitest in this project',
+        scope: 'project',
+        workspace: '/tmp/project-b',
+        project: '/tmp/project-b'
+      }
+    }, {
+      threadId: 'thr_1',
+      turnId: 'turn_1',
+      workspace: '/tmp/project-a',
+      approvalPolicy: 'on-request',
+      abortSignal: new AbortController().signal,
+      awaitApproval: async () => 'allow'
+    })
+
+    expect(result.item).toMatchObject({ kind: 'tool_result', isError: false })
+    expect(await store.retrieve({
+      query: 'Vitest project',
+      workspace: '/tmp/project-a',
+      project: '/tmp/project-a',
+      limit: 3
+    })).toHaveLength(1)
+    expect(await store.retrieve({
+      query: 'Vitest project',
+      workspace: '/tmp/project-b',
+      project: '/tmp/project-b',
+      limit: 3
+    })).toEqual([])
+  })
+
+  it('rejects workspace/project memory tool writes when no workspace is active', async () => {
+    const store = createStore()
+    const host = new LocalToolHost({
+      registry: new CapabilityRegistry(buildMemoryToolProviders(store))
+    })
+    const result = await host.execute({
+      callId: 'call_1',
+      toolName: 'memory_create',
+      arguments: { content: 'Use Vitest in this project', scope: 'project' }
+    }, {
+      threadId: 'thr_1',
+      turnId: 'turn_1',
+      workspace: '',
+      approvalPolicy: 'on-request',
+      abortSignal: new AbortController().signal,
+      awaitApproval: async () => 'allow'
+    })
+
+    expect(result.item).toMatchObject({ kind: 'tool_result', isError: true })
+    expect(await store.list()).toEqual([])
+  })
+
   it('injects relevant memories into AgentLoop metadata and stops after deletion', async () => {
     const store = createStore()
     const memory = await store.create({
@@ -187,17 +289,16 @@ describe('Memory store and recall', () => {
     expect(misses).toEqual([])
   })
 
-  it('retrieves workspace-scope memories that have no workspace field (GUI-created)', async () => {
+  it('does not inject workspace-scope memories without a workspace into arbitrary workspaces', async () => {
     const store = createStore()
-    // GUI-created workspace memories may omit the workspace field. They should
-    // still be retrievable instead of being silently filtered out by inScope.
     const memory = await store.create({
       content: 'Workspace prefers tabs over spaces',
       scope: 'workspace'
     })
     expect(memory.workspace).toBeUndefined()
     const hits = await store.retrieve({ query: 'tabs spaces indentation', workspace: '/tmp/ws', limit: 3 })
-    expect(hits.map((item) => item.id)).toEqual([memory.id])
+    expect(hits).toEqual([])
+    expect((await store.list()).map((item) => item.id)).toEqual([memory.id])
   })
 
   it('injects user-scope memories on semantic queries with zero keyword overlap', async () => {
