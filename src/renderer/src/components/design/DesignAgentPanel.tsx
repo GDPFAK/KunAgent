@@ -1,5 +1,5 @@
-import type { ReactElement } from 'react'
-import { Send, Settings2 } from 'lucide-react'
+import { useState, type ReactElement } from 'react'
+import { ChevronDown, Send, Settings2 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { DESIGN_SYSTEM_PRESETS, type DesignSystemPreset } from '@shared/app-settings'
 import { useChatStore } from '../../store/chat-store'
@@ -16,6 +16,12 @@ type Props = {
 const fieldLabel = 'mb-1 block text-[11px] font-medium uppercase tracking-wide text-[#8b95a3] dark:text-white/45'
 const fieldInput =
   'w-full rounded-md border border-[var(--ds-sidebar-row-ring)] bg-transparent px-2 py-1 text-[13px] text-[#1f2733] outline-none focus-visible:border-[#3b82d8] dark:text-white/85'
+
+const HEX_RE = /^#[0-9a-fA-F]{6}$/
+/** A valid swatch color for <input type="color">, falling back to the accent. */
+function swatchValue(color?: string): string {
+  return color && HEX_RE.test(color) ? color : '#3b82d8'
+}
 
 function chipClass(active: boolean): string {
   return `rounded-full px-2.5 py-1 text-[12px] transition-colors ${
@@ -36,6 +42,10 @@ export function DesignAgentPanel({ value, onChange, onSubmit, onOpenSettings }: 
   const runtimeReady = useChatStore((s) => s.runtimeConnection === 'ready')
   const designContext = useDesignWorkspaceStore((s) => s.designContext)
   const updateDesignContext = useDesignWorkspaceStore((s) => s.updateDesignContext)
+  const activeArtifactTitle = useDesignWorkspaceStore(
+    (s) => s.artifacts.find((a) => a.id === s.activeArtifactId)?.title ?? ''
+  )
+  const [contextOpen, setContextOpen] = useState(true)
 
   const canSend = value.trim().length > 0 && !busy && runtimeReady
   const submit = (): void => {
@@ -64,49 +74,78 @@ export function DesignAgentPanel({ value, onChange, onSubmit, onOpenSettings }: 
         ) : null}
       </div>
 
-      <div className="shrink-0 space-y-3 px-3 py-3">
-        <label className="block">
-          <span className={fieldLabel}>{t('designAgentBrandColor')}</span>
-          <input
-            type="text"
-            value={designContext.brandColor ?? ''}
-            onChange={(e) => updateDesignContext({ brandColor: e.target.value })}
-            placeholder="#3b82d8"
-            className={fieldInput}
-          />
-        </label>
-        <div>
-          <span className={fieldLabel}>{t('designAgentTone')}</span>
-          <div className="flex flex-wrap gap-1">
-            {DESIGN_TONE_OPTIONS.map((tone) => (
-              <button
-                key={tone}
-                type="button"
-                onClick={() => toggleTone(tone)}
-                className={chipClass((designContext.tone ?? []).includes(tone))}
-              >
-                {tone}
-              </button>
-            ))}
+      <button
+        type="button"
+        onClick={() => setContextOpen((open) => !open)}
+        className="ds-no-drag flex shrink-0 items-center justify-between px-3 py-2 text-[11px] font-medium uppercase tracking-wide text-[#8b95a3] transition-colors hover:text-[#1f2733] dark:text-white/45 dark:hover:text-white/85"
+      >
+        <span>{t('designContextLabel')}</span>
+        <ChevronDown
+          className={`h-3.5 w-3.5 transition-transform ${contextOpen ? '' : '-rotate-90'}`}
+          strokeWidth={2}
+        />
+      </button>
+      {contextOpen ? (
+        <div className="shrink-0 space-y-3 px-3 pb-3">
+          <label className="block">
+            <span className={fieldLabel}>{t('designAgentBrandColor')}</span>
+            <div className="flex items-center gap-2">
+              <input
+                type="color"
+                value={swatchValue(designContext.brandColor)}
+                onChange={(e) => updateDesignContext({ brandColor: e.target.value })}
+                aria-label={t('designAgentBrandColor')}
+                className="h-7 w-9 shrink-0 cursor-pointer rounded border border-[var(--ds-sidebar-row-ring)] bg-transparent p-0.5"
+              />
+              <input
+                type="text"
+                value={designContext.brandColor ?? ''}
+                onChange={(e) => updateDesignContext({ brandColor: e.target.value })}
+                placeholder="#3b82d8"
+                className={fieldInput}
+              />
+            </div>
+          </label>
+          <div>
+            <span className={fieldLabel}>{t('designAgentTone')}</span>
+            <div className="flex flex-wrap gap-1">
+              {DESIGN_TONE_OPTIONS.map((tone) => (
+                <button
+                  key={tone}
+                  type="button"
+                  onClick={() => toggleTone(tone)}
+                  className={chipClass((designContext.tone ?? []).includes(tone))}
+                >
+                  {tone}
+                </button>
+              ))}
+            </div>
           </div>
+          <label className="block">
+            <span className={fieldLabel}>{t('designAgentSystem')}</span>
+            <select
+              value={designContext.designSystemPreset ?? 'none'}
+              onChange={(e) => updateDesignContext({ designSystemPreset: e.target.value as DesignSystemPreset })}
+              className={fieldInput}
+            >
+              {DESIGN_SYSTEM_PRESETS.map((preset) => (
+                <option key={preset} value={preset}>
+                  {preset === 'none' ? t('designSystem_none') : DESIGN_SYSTEM_DISPLAY[preset]}
+                </option>
+              ))}
+            </select>
+          </label>
         </div>
-        <label className="block">
-          <span className={fieldLabel}>{t('designAgentSystem')}</span>
-          <select
-            value={designContext.designSystemPreset ?? 'none'}
-            onChange={(e) => updateDesignContext({ designSystemPreset: e.target.value as DesignSystemPreset })}
-            className={fieldInput}
-          >
-            {DESIGN_SYSTEM_PRESETS.map((preset) => (
-              <option key={preset} value={preset}>
-                {preset === 'none' ? t('designSystem_none') : DESIGN_SYSTEM_DISPLAY[preset]}
-              </option>
-            ))}
-          </select>
-        </label>
-      </div>
+      ) : null}
 
       <div className="mt-auto shrink-0 px-3 pb-3">
+        <div className="mb-1 truncate text-[11px] text-[#8b95a3] dark:text-white/45">
+          {busy
+            ? t('designAgentBusy')
+            : activeArtifactTitle
+              ? t('designComposerIterate', { title: activeArtifactTitle })
+              : t('designComposerNew')}
+        </div>
         <textarea
           value={value}
           onChange={(e) => onChange(e.target.value)}

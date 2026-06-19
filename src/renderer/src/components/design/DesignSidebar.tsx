@@ -1,5 +1,5 @@
 import type { ReactElement } from 'react'
-import { Code2, FileCode2, FilePlus2, Network } from 'lucide-react'
+import { Code2, FileCode2, FilePlus2, Network, Trash2 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { WorkspaceModeTabs } from '../chat/WorkspaceModeTabs'
 import { useDesignWorkspaceStore } from '../../design/design-workspace-store'
@@ -27,6 +27,7 @@ export function DesignSidebar({
   const artifacts = useDesignWorkspaceStore((s) => s.artifacts)
   const activeArtifactId = useDesignWorkspaceStore((s) => s.activeArtifactId)
   const setActiveArtifact = useDesignWorkspaceStore((s) => s.setActiveArtifact)
+  const removeArtifact = useDesignWorkspaceStore((s) => s.removeArtifact)
 
   return (
     <div className="ds-no-drag flex h-full min-h-0 flex-col bg-ds-sidebar px-1 pt-2">
@@ -89,6 +90,9 @@ export function DesignSidebar({
                       <FileCode2 className="h-3.5 w-3.5 shrink-0 opacity-60" strokeWidth={1.9} />
                     )}
                     <span className="min-w-0 flex-1 truncate">{artifact.title}</span>
+                    {artifact.versions.length > 1 ? (
+                      <span className="shrink-0 text-[10px] text-[#8b95a3] dark:text-white/40">v{artifact.versions.length}</span>
+                    ) : null}
                     {implemented ? (
                       <span
                         title={drift ? t('designDrift') : t('designImplemented')}
@@ -106,6 +110,15 @@ export function DesignSidebar({
                     className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-[#8b95a3] opacity-0 transition-opacity hover:text-[#3b82d8] focus-visible:opacity-100 group-hover/row:opacity-100 dark:text-white/45 dark:hover:text-[#6fb0e8]"
                   >
                     <Code2 className="h-3.5 w-3.5" strokeWidth={1.9} />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => removeArtifact(artifact.id)}
+                    title={t('designDeleteArtifact')}
+                    aria-label={t('designDeleteArtifact')}
+                    className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-[#8b95a3] opacity-0 transition-opacity hover:text-[#c0392b] focus-visible:opacity-100 group-hover/row:opacity-100 dark:text-white/45"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" strokeWidth={1.9} />
                   </button>
                 </li>
               )

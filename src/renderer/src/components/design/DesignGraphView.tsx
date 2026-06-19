@@ -1,7 +1,7 @@
 import '@xyflow/react/dist/style.css'
 import type { ReactElement } from 'react'
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react'
-import { Loader2, MessageSquare, Play, Plus, Sparkles } from 'lucide-react'
+import { ExternalLink, Loader2, MessageSquare, Play, Plus, Sparkles, X } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import {
   Background,
@@ -37,9 +37,14 @@ type Props = { artifact: DesignArtifact; workspaceRoot: string }
 
 type GraphActions = {
   updateBrief: (id: string, brief: string) => void
-  openOutput: (path: string) => void
+  previewOutput: (path: string) => void
+  deleteNode: (id: string) => void
 }
-const GraphContext = createContext<GraphActions>({ updateBrief: () => {}, openOutput: () => {} })
+const GraphContext = createContext<GraphActions>({
+  updateBrief: () => {},
+  previewOutput: () => {},
+  deleteNode: () => {}
+})
 
 const btnGhost =
   'ds-no-drag inline-flex items-center gap-1 rounded-lg border border-[var(--ds-sidebar-row-ring)] bg-white/90 px-2.5 py-1.5 text-[12px] font-medium text-[#1f2733] shadow-sm transition-colors hover:bg-white dark:bg-[#1f242c]/90 dark:text-white/85'
@@ -66,15 +71,27 @@ function StatusBadge({ status }: { status?: DesignGraphNodeData['status'] }): Re
 
 function GraphNode({ id, data }: NodeProps): ReactElement {
   const { t } = useTranslation('common')
-  const { updateBrief, openOutput } = useContext(GraphContext)
+  const { updateBrief, previewOutput, deleteNode } = useContext(GraphContext)
   const d = nodeData(data)
   const isPrompt = d.kind === 'prompt'
   return (
     <div
-      className={`min-w-[170px] max-w-[230px] rounded-lg border bg-white px-2 py-1.5 shadow-sm dark:bg-[#1f242c] ${
+      className={`group relative min-w-[170px] max-w-[230px] rounded-lg border bg-white px-2 py-1.5 shadow-sm dark:bg-[#1f242c] ${
         isPrompt ? 'border-[#8b95a3]/45' : 'border-[#3b82d8]/55'
       }`}
     >
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation()
+          deleteNode(id)
+        }}
+        title={t('designDeleteNode')}
+        aria-label={t('designDeleteNode')}
+        className="nodrag absolute -right-1.5 -top-1.5 z-10 inline-flex h-4 w-4 items-center justify-center rounded-full bg-[#c0392b] text-white opacity-0 shadow transition-opacity group-hover:opacity-100"
+      >
+        <X className="h-2.5 w-2.5" strokeWidth={2.5} />
+      </button>
       <Handle type="target" position={Position.Left} className="!h-2 !w-2 !border-0 !bg-[#3b82d8]" />
       <div className="mb-1 flex items-center justify-between gap-1">
         <span className="inline-flex items-center gap-1 text-[10px] font-medium uppercase tracking-wide text-[#8b95a3]">
@@ -93,7 +110,7 @@ function GraphNode({ id, data }: NodeProps): ReactElement {
       {!isPrompt && d.outputPath ? (
         <button
           type="button"
-          onClick={() => openOutput(d.outputPath as string)}
+          onClick={() => previewOutput(d.outputPath as string)}
           className="nodrag mt-1 text-[11px] text-[#3b82d8] hover:underline"
         >
           {t('designNodeOpenOutput')}
@@ -183,11 +200,35 @@ export function DesignGraphView({ artifact, workspaceRoot }: Props): ReactElemen
     setNodes((ns) => ns.map((n) => (n.id === id ? { ...n, data: { ...n.data, ...patch } } : n)))
   }, [])
 
-  const openOutput = useCallback((path: string) => {
-    if (typeof window.kunGui?.openWritePrototype === 'function') {
-      void window.kunGui.openWritePrototype({ path, workspaceRoot })
+  const [previewPath, setPreviewPath] = useState('')
+  const [previewUrl, setPreviewUrl] = useState('')
+  useEffect(() => {
+    setPreviewUrl('')
+    if (!previewPath || !workspaceRoot || typeof window.kunGui?.authorizeWritePrototype !== 'function') return
+    let cancelled = false
+    void window.kunGui
+      .authorizeWritePrototype({ path: previewPath, workspaceRoot })
+      .then((r) => {
+        if (!cancelled && r.ok) setPreviewUrl(r.fileUrl)
+      })
+      .catch(() => undefined)
+    return () => {
+      cancelled = true
     }
-  }, [workspaceRoot])
+  }, [previewPath, workspaceRoot])
+  const openExternal = useCallback(() => {
+    if (previewPath && typeof window.kunGui?.openWritePrototype === 'function') {
+      void window.kunGui.openWritePrototype({ path: previewPath, workspaceRoot })
+    }
+  }, [previewPath, workspaceRoot])
+  const deleteNode = useCallback(
+    (id: string) => {
+      setNodes((ns) => ns.filter((n) => n.id !== id))
+      setEdges((es) => es.filter((e) => e.source !== id && e.target !== id))
+      persist()
+    },
+    [persist]
+  )
 
   const addNode = useCallback((kind: DesignGraphNodeKind) => {
     const count = nodesRef.current.length
@@ -245,8 +286,9 @@ export function DesignGraphView({ artifact, workspaceRoot }: Props): ReactElemen
   }, [running, artifact.relativePath, workspaceRoot, persist, patchNode, t])
 
   return (
-    <GraphContext.Provider value={{ updateBrief, openOutput }}>
-      <div className="relative min-h-0 flex-1">
+    <GraphContext.Provider value={{ updateBrief, previewOutput: setPreviewPath, deleteNode }}>
+      <div className="flex min-h-0 flex-1">
+        <div className="relative min-h-0 flex-1">
         <div className="ds-no-drag absolute left-3 top-3 z-10 flex items-center gap-1.5">
           <button type="button" onClick={() => addNode('prompt')} className={btnGhost}>
             <Plus className="h-3.5 w-3.5" strokeWidth={2} />
@@ -262,6 +304,11 @@ export function DesignGraphView({ artifact, workspaceRoot }: Props): ReactElemen
           </button>
           {runError ? <span className="text-[11px] text-[#c0392b]">{runError}</span> : null}
         </div>
+        {nodes.length === 0 ? (
+          <div className="pointer-events-none absolute inset-0 flex items-center justify-center px-6 text-center text-[13px] text-[#646e7c] dark:text-white/55">
+            {t('designGraphEmpty')}
+          </div>
+        ) : null}
         <ReactFlow
           nodes={nodes}
           edges={edges}
@@ -276,6 +323,51 @@ export function DesignGraphView({ artifact, workspaceRoot }: Props): ReactElemen
           <Background />
           <Controls />
         </ReactFlow>
+        </div>
+        {previewPath ? (
+          <div className="flex min-h-0 w-[380px] shrink-0 flex-col bg-ds-main shadow-[inset_1px_0_0_var(--ds-sidebar-row-ring)]">
+            <div className="flex shrink-0 items-center justify-between px-3 py-2 shadow-[inset_0_-1px_0_var(--ds-sidebar-row-ring)]">
+              <span className="truncate text-[12px] font-medium text-[#1f2733] dark:text-white">
+                {t('designNodeOutputPreview')}
+              </span>
+              <div className="flex items-center gap-0.5">
+                <button
+                  type="button"
+                  onClick={openExternal}
+                  title={t('designOpenExternal')}
+                  aria-label={t('designOpenExternal')}
+                  className="inline-flex h-6 w-6 items-center justify-center rounded-md text-[#8b95a3] transition-colors hover:text-[#1f2733] dark:text-white/45 dark:hover:text-white/85"
+                >
+                  <ExternalLink className="h-3.5 w-3.5" strokeWidth={1.9} />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPreviewPath('')}
+                  title={t('close')}
+                  aria-label={t('close')}
+                  className="inline-flex h-6 w-6 items-center justify-center rounded-md text-[#8b95a3] transition-colors hover:text-[#1f2733] dark:text-white/45 dark:hover:text-white/85"
+                >
+                  <X className="h-3.5 w-3.5" strokeWidth={2} />
+                </button>
+              </div>
+            </div>
+            <div className="min-h-0 flex-1 overflow-hidden bg-white">
+              {previewUrl ? (
+                <webview
+                  key={`graph-preview:${previewUrl}`}
+                  src={previewUrl}
+                  partition="kun-proto"
+                  webpreferences="contextIsolation=yes,nodeIntegration=no,sandbox=yes"
+                  className="h-full w-full border-0"
+                />
+              ) : (
+                <div className="flex h-full items-center justify-center text-[12px] text-[#646e7c] dark:text-white/55">
+                  …
+                </div>
+              )}
+            </div>
+          </div>
+        ) : null}
       </div>
     </GraphContext.Provider>
   )
