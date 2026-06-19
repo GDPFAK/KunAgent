@@ -1,4 +1,3 @@
-import { basename } from 'node:path'
 import type { MenuItemConstructorOptions } from 'electron'
 import type { AppSettingsV1 } from '../shared/app-settings'
 
@@ -100,7 +99,11 @@ function threadMenuItem(
 
 function projectLabel(workspace: string | undefined): string | undefined {
   const value = workspace?.trim().replace(/[\\/]+$/, '')
-  return value ? basename(value) : undefined
+  if (!value) return undefined
+  // Split on both POSIX '/' and Windows '\\' so the label is correct on every
+  // platform — node:path.basename only honors the host OS separator.
+  const segments = value.split(/[\\/]+/)
+  return segments[segments.length - 1] || value
 }
 
 function truncateMenuLabel(value: string): string {
