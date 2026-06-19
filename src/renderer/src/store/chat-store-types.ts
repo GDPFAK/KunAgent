@@ -83,6 +83,7 @@ export type SettingsRouteSection =
   | 'general'
   | 'providers'
   | 'write'
+  | 'design'
   | 'imageGeneration'
   | 'mediaGeneration'
   | 'speechToText'
@@ -95,7 +96,7 @@ export type SettingsRouteSection =
   | 'easterEgg'
   | 'claw'
   | 'updates'
-export type AppRoute = 'chat' | 'write' | 'settings' | 'plugins' | 'claw' | 'schedule'
+export type AppRoute = 'chat' | 'write' | 'design' | 'settings' | 'plugins' | 'claw' | 'schedule'
 export type PluginHostRoute = 'chat' | 'claw'
 
 /**
@@ -196,11 +197,14 @@ export type ChatState = {
   openCode: () => Promise<void>
   ensureWriteThreadForWorkspace: (workspaceRoot?: string) => Promise<string | null>
   createWriteThread: (workspaceRoot?: string) => Promise<string | null>
+  ensureDesignThreadForWorkspace: (workspaceRoot?: string) => Promise<string | null>
+  createDesignThread: (workspaceRoot?: string) => Promise<string | null>
   selectWriteThread: (threadId: string, workspaceRoot?: string) => Promise<void>
   openSettings: (section?: SettingsRouteSection) => void
   openPlugins: (host?: PluginHostRoute) => void
   openClaw: () => void
   openSchedule: () => void
+  openDesign: () => void
   refreshClawChannels: () => Promise<void>
   addClawChannel: (
     provider: ClawImProvider,

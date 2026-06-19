@@ -5,6 +5,7 @@ import { mkdtempSync } from 'node:fs'
 import { describe, expect, it, vi } from 'vitest'
 import {
   defaultClawSettings,
+  defaultDesignSettings,
   defaultKeyboardShortcuts,
   defaultKunRuntimeSettings,
   defaultModelProviderSettings,
@@ -52,6 +53,7 @@ function settings(dataDir: string, model = 'settings-model'): AppSettingsV1 {
     write: defaultWriteSettings(),
     claw: defaultClawSettings(),
     schedule: defaultScheduleSettings(),
+    design: defaultDesignSettings(),
     guiUpdate: { channel: 'stable' },
     codePromptPrefix: '',
     disabledSkillIds: []
@@ -202,6 +204,7 @@ describe('upstream model picker list', () => {
     const base = settings(dataDir)
     const imageCapableSettings: AppSettingsV1 = {
       ...base,
+      design: defaultDesignSettings(),
       provider: {
         ...base.provider,
         providers: base.provider.providers.map((provider) =>

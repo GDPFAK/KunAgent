@@ -59,6 +59,15 @@ import {
   writeWorkspaceForThreadId
 } from '../write/write-thread-registry'
 import {
+  DESIGN_ASSISTANT_THREAD_TITLE,
+  activeDesignThreadForWorkspace,
+  designWorkspaceKey,
+  isDesignThreadId,
+  markDesignThread,
+  readDesignThreadRegistry,
+  saveDesignThreadRegistry
+} from '../design/design-thread-registry'
+import {
   isSddAssistantThread,
   readSddThreadRegistry
 } from '../sdd/sdd-thread-registry'
@@ -104,7 +113,7 @@ let runtimeStatusUnsubscribe: (() => void) | null = null
 
 export function createNavigationActions(
   { set, get, sseAbortRef }: StoreActionContext
-): Pick<ChatState, 'openCode' | 'openWrite' | 'ensureWriteThreadForWorkspace' | 'createWriteThread' | 'selectWriteThread' | 'probeRuntime' | 'boot' | 'chooseWorkspace' | 'selectWorkspaceRoot' | 'clearWorkspace' | 'deleteWorkspace' | 'refreshThreads' | 'setThreadSearch' | 'setShowArchivedThreads'> {
+): Pick<ChatState, 'openCode' | 'openWrite' | 'ensureWriteThreadForWorkspace' | 'createWriteThread' | 'selectWriteThread' | 'ensureDesignThreadForWorkspace' | 'createDesignThread' | 'probeRuntime' | 'boot' | 'chooseWorkspace' | 'selectWorkspaceRoot' | 'clearWorkspace' | 'deleteWorkspace' | 'refreshThreads' | 'setThreadSearch' | 'setShowArchivedThreads'> {
   return {
   openCode: async () => {
     const state = get()
@@ -280,6 +289,77 @@ export function createNavigationActions(
     }
     set({ route: 'write' })
     await get().selectThread(targetId)
+  },
+
+  ensureDesignThreadForWorkspace: async (workspaceRoot) => {
+    const state = get()
+    const targetWorkspace =
+      normalizeWorkspaceRoot(workspaceRoot) || normalizeWorkspaceRoot(state.workspaceRoot)
+    if (!targetWorkspace) {
+      set({ error: i18n.t('common:workspaceRequiredToCreateThread') })
+      return null
+    }
+    if (state.runtimeConnection !== 'ready') {
+      set({ error: i18n.t('common:runtimeActionNeedsConnection') })
+      return null
+    }
+    const registry = readDesignThreadRegistry()
+    const activeThread = state.activeThreadId
+      ? state.threads.find((thread) => thread.id === state.activeThreadId) ?? null
+      : null
+    if (
+      activeThread &&
+      isDesignThreadId(activeThread.id, registry) &&
+      designWorkspaceKey(activeThread.workspace) === designWorkspaceKey(targetWorkspace)
+    ) {
+      set({ route: 'design', error: null })
+      return activeThread.id
+    }
+    const existing = activeDesignThreadForWorkspace(targetWorkspace, state.threads, registry)
+    if (existing) {
+      set({ route: 'design' })
+      await get().selectThread(existing.id)
+      return existing.id
+    }
+    return get().createDesignThread(targetWorkspace)
+  },
+
+  createDesignThread: async (workspaceRoot) => {
+    const targetWorkspace =
+      normalizeWorkspaceRoot(workspaceRoot) || normalizeWorkspaceRoot(get().workspaceRoot)
+    if (!targetWorkspace) {
+      set({ error: i18n.t('common:workspaceRequiredToCreateThread') })
+      return null
+    }
+    if (get().runtimeConnection !== 'ready') {
+      set({ error: i18n.t('common:runtimeActionNeedsConnection') })
+      return null
+    }
+    try {
+      const provider = getProvider()
+      const thread = await provider.createThread({
+        workspace: targetWorkspace,
+        title: DESIGN_ASSISTANT_THREAD_TITLE,
+        mode: 'agent'
+      })
+      saveDesignThreadRegistry(markDesignThread(targetWorkspace, thread.id))
+      set((s) => ({
+        route: 'design',
+        threads: s.threads.some((item) => item.id === thread.id) ? s.threads : [thread, ...s.threads],
+        error: null
+      }))
+      await get().refreshThreads()
+      await get().selectThread(thread.id)
+      return thread.id
+    } catch (e) {
+      set({
+        error: formatRuntimeError(e),
+        ...(shouldOpenSettingsForError(e)
+          ? { route: 'settings' as const, settingsSection: 'agents' as const }
+          : {})
+      })
+      return null
+    }
   },
 
   probeRuntime: async (mode = 'user', options) => {

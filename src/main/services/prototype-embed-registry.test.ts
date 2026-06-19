@@ -41,7 +41,7 @@ describe('prototype embed registry', () => {
     expect(txt.ok).toBe(false)
 
     const loose = await authorizePrototypePath(join(workspace, 'loose.html'), workspace)
-    expect(loose).toMatchObject({ ok: false, message: expect.stringContaining('proto directory') })
+    expect(loose).toMatchObject({ ok: false, message: expect.stringContaining('directory') })
   })
 
   it('rejects paths escaping the workspace and missing files', async () => {

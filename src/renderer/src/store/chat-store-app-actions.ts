@@ -42,6 +42,7 @@ export function createAppActions(options: CreateAppActionsOptions): Pick<
   | 'openPlugins'
   | 'openClaw'
   | 'openSchedule'
+  | 'openDesign'
   | 'openInitialSetup'
   | 'closeInitialSetup'
   | 'selectInspectorItem'
@@ -170,6 +171,10 @@ export function createAppActions(options: CreateAppActionsOptions): Pick<
 
     openSchedule: () => {
       set({ route: 'schedule' })
+    },
+
+    openDesign: () => {
+      set({ route: 'design' })
     },
 
     openInitialSetup: (mode: InitialSetupMode = 'required') =>

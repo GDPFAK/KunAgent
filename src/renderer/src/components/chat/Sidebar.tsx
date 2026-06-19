@@ -56,6 +56,7 @@ type Props = {
   onToggleConnectPhone: () => void
   onCodeOpen: () => void
   onWriteOpen: () => void
+  onDesignOpen: () => void
   onScheduleOpen: () => void
 }
 
@@ -85,6 +86,7 @@ export function Sidebar({
   onToggleConnectPhone,
   onCodeOpen,
   onWriteOpen,
+  onDesignOpen,
   onScheduleOpen
 }: Props): ReactElement {
   const { t, i18n } = useTranslation('common')
@@ -150,6 +152,7 @@ export function Sidebar({
           activeView={activeView}
           onCodeOpen={onCodeOpen}
           onWriteOpen={onWriteOpen}
+          onDesignOpen={onDesignOpen}
         />
 
         {activeView !== 'claw' && activeView !== 'schedule' ? (

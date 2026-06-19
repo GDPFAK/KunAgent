@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactElement } from 'react'
-import { ArrowRight, FileText, Loader2, Save, Sparkles, X } from 'lucide-react'
+import { ArrowRight, FileText, Loader2, Palette, Save, Sparkles, X } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { useShallow } from 'zustand/react/shallow'
 import { sddUnitImageDir, sddUnitProtoDir } from '@shared/sdd'
@@ -97,6 +97,8 @@ type Props = {
     displayText: string
     image?: { absolutePath: string; alt: string }
   }) => Promise<boolean>
+  /** Open design mode seeded with this requirement (requirement → design). */
+  onExploreInDesign?: () => void
   onNext: () => void
   onClose: () => void
   nextDisabled: boolean
@@ -295,6 +297,7 @@ export function SddDraftEditorView({
   onToggleAssistant,
   onAssistantQuote,
   onPrototypeTurn,
+  onExploreInDesign,
   onNext,
   onClose,
   nextDisabled
@@ -1125,6 +1128,18 @@ export function SddDraftEditorView({
                 onToggleAssistant={onToggleAssistant}
                 label={t('sddAssistant')}
               />
+              {onExploreInDesign ? (
+                <button
+                  type="button"
+                  onClick={onExploreInDesign}
+                  disabled={readOnly}
+                  className="ds-sidebar-toggle-button disabled:cursor-not-allowed disabled:opacity-45"
+                  title={t('designExploreInDesign')}
+                  aria-label={t('designExploreInDesign')}
+                >
+                  <Palette className="h-4 w-4" strokeWidth={1.85} />
+                </button>
+              ) : null}
               <button
                 type="button"
                 onClick={onNext}

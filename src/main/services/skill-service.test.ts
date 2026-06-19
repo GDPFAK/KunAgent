@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   defaultClawSettings,
+  defaultDesignSettings,
   defaultKeyboardShortcuts,
   defaultKunRuntimeSettings,
   defaultModelProviderSettings,
@@ -228,6 +229,7 @@ describe('skill-service', () => {
       write: defaultWriteSettings(),
       claw: defaultClawSettings(),
       schedule: defaultScheduleSettings(),
+      design: defaultDesignSettings(),
       guiUpdate: { channel: 'stable' },
       codePromptPrefix: '',
       disabledSkillIds: []

@@ -8,6 +8,7 @@ import {
   ExternalLink,
   FileCode2,
   Loader2,
+  Palette,
   PanelRightClose,
   X
 } from 'lucide-react'
@@ -48,6 +49,8 @@ type Props = {
   onSelectTarget?: (target: WorkspaceFileTarget) => void
   onCloseTarget?: (target: WorkspaceFileTarget) => void
   onClose: () => void
+  /** Redesign this file in design mode (code → design). */
+  onRedesign?: (path: string, workspaceRoot: string) => void
 }
 
 const COPY_RESET_MS = 1400
@@ -182,7 +185,8 @@ export function WorkspaceFilePreviewPanel({
   className,
   onSelectTarget,
   onCloseTarget,
-  onClose
+  onClose,
+  onRedesign
 }: Props): ReactElement {
   const { t } = useTranslation('common')
   const [result, setResult] = useState<WorkspaceFileReadResult | null>(null)
@@ -401,6 +405,17 @@ export function WorkspaceFilePreviewPanel({
         </div>
 
         <div className="ds-code-sidebar-actions">
+          {onRedesign && target ? (
+            <button
+              type="button"
+              onClick={() => onRedesign(target.path, target.workspaceRoot ?? workspaceRoot)}
+              className="ds-code-sidebar-icon-button"
+              title={t('designFromCode')}
+              aria-label={t('designFromCode')}
+            >
+              <Palette className="h-4 w-4" strokeWidth={1.75} />
+            </button>
+          ) : null}
           {isMarkdownFile ? (
             <button
               type="button"

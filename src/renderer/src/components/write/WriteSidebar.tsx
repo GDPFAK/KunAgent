@@ -42,6 +42,7 @@ type Props = {
   connectPhoneSidebarOpen: boolean
   onCodeOpen: () => void
   onWriteOpen: () => void
+  onDesignOpen: () => void
   onOpenSettings: (section?: SettingsRouteSection) => void
   onToggleConnectPhone: () => void
 }
@@ -59,6 +60,7 @@ export function WriteSidebar({
   connectPhoneSidebarOpen,
   onCodeOpen,
   onWriteOpen,
+  onDesignOpen,
   onOpenSettings,
   onToggleConnectPhone
 }: Props): ReactElement {
@@ -280,6 +282,7 @@ export function WriteSidebar({
           activeView={activeView}
           onCodeOpen={onCodeOpen}
           onWriteOpen={onWriteOpen}
+          onDesignOpen={onDesignOpen}
         />
         <SidebarCommandRow
           icon={<FilePlus2 className="h-4 w-4" strokeWidth={1.9} />}

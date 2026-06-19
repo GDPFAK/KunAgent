@@ -24,6 +24,7 @@ import {
   modelProviderModelProfilesForSettings,
   listModelProviderModelIds,
   modelSupportsImageInput,
+  defaultDesignSettings,
   normalizeModelProviderSettings,
   resolveKunImageGenerationSettings,
   resolveKunMusicGenerationSettings,
@@ -72,6 +73,7 @@ function settings(): AppSettingsV1 {
     write: defaultWriteSettings(),
     claw: defaultClawSettings(),
     schedule: defaultScheduleSettings(),
+    design: defaultDesignSettings(),
     guiUpdate: { channel: 'stable' },
     codePromptPrefix: '',
     disabledSkillIds: []

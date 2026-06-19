@@ -18,6 +18,7 @@ import {
   defaultKunRuntimeSettings,
   defaultScheduleSettings,
   defaultWriteSelectionAssistSettings,
+  defaultDesignSettings,
   defaultWriteSettings,
   getModelProviderPreset,
   defaultKeyboardShortcuts,
@@ -59,6 +60,7 @@ function settings(): AppSettingsV1 {
     write: defaultWriteSettings(),
     claw: defaultClawSettings(),
     schedule: defaultScheduleSettings(),
+    design: defaultDesignSettings(),
     guiUpdate: { channel: 'stable' },
     codePromptPrefix: '',
     disabledSkillIds: []

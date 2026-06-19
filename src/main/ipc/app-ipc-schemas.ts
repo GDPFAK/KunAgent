@@ -697,6 +697,13 @@ const scheduleSettingsPatchSchema = z.object({
   tasks: z.array(scheduledTaskPatchSchema).max(512).optional()
 }).strict()
 
+const designSettingsPatchSchema = z.object({
+  defaultWorkspaceRoot: defaultPathSchema,
+  brandColor: z.string().trim().max(32).optional(),
+  tone: z.array(trimmedString(32)).max(12).optional(),
+  designSystemPreset: z.enum(['none', 'shadcn', 'material', 'ios', 'fluent']).optional()
+}).strict()
+
 function stripLegacySettingsPatchKeys(payload: unknown): unknown {
   if (typeof payload !== 'object' || payload === null || Array.isArray(payload)) return payload
   const source = payload as Record<string, unknown>
@@ -736,6 +743,7 @@ const settingsPatchObjectSchema = z.object({
   write: writeSettingsPatchSchema.optional(),
   claw: clawSettingsPatchSchema.optional(),
   schedule: scheduleSettingsPatchSchema.optional(),
+  design: designSettingsPatchSchema.optional(),
   guiUpdate: z.object({
     channel: z.enum(GUI_UPDATE_CHANNELS).optional()
   }).strict().optional(),

@@ -800,6 +800,21 @@ export type WriteSettingsPatchV1 = Partial<Omit<WriteSettingsV1, 'inlineCompleti
   agentPresets?: Array<Partial<WriteAgentPresetV1>>
 }
 
+export type DesignSystemPreset = 'none' | 'shadcn' | 'material' | 'ios' | 'fluent'
+
+export type DesignSettingsV1 = {
+  /** Workspace root for design artifacts; empty = fall back to the active code/write workspace. */
+  defaultWorkspaceRoot: string
+  /** Anchor brand color (CSS color) injected into the design agent's context. */
+  brandColor: string
+  /** Free-form tone chips (e.g. 编辑风, 专业, 科技感). */
+  tone: string[]
+  /** Named design-system preset that seeds tokens/voice; 'none' = no preset. */
+  designSystemPreset: DesignSystemPreset
+}
+
+export type DesignSettingsPatchV1 = Partial<DesignSettingsV1>
+
 export type ClawGeneratedFileV1 = {
   path: string
   relativePath?: string
@@ -866,6 +881,7 @@ export type AppSettingsV1 = {
   write: WriteSettingsV1
   claw: ClawSettingsV1
   schedule: ScheduleSettingsV1
+  design: DesignSettingsV1
   guiUpdate: GuiUpdateConfigV1
   codePromptPrefix: string
   /** User-disabled skill IDs. Disabled skills are hidden from command surfaces. */
@@ -873,7 +889,7 @@ export type AppSettingsV1 = {
 }
 
 export type AppSettingsPatch = Partial<
-  Omit<AppSettingsV1, 'provider' | 'agents' | 'log' | 'notifications' | 'appBehavior' | 'keyboardShortcuts' | 'write' | 'claw' | 'schedule' | 'guiUpdate'>
+  Omit<AppSettingsV1, 'provider' | 'agents' | 'log' | 'notifications' | 'appBehavior' | 'keyboardShortcuts' | 'write' | 'claw' | 'schedule' | 'design' | 'guiUpdate'>
 > & {
   provider?: ModelProviderSettingsPatchV1
   agents?: KunSettingsEnvelopePatchV1
@@ -884,5 +900,6 @@ export type AppSettingsPatch = Partial<
   write?: WriteSettingsPatchV1
   claw?: ClawSettingsPatchV1
   schedule?: ScheduleSettingsPatchV1
+  design?: DesignSettingsPatchV1
   guiUpdate?: Partial<GuiUpdateConfigV1>
 }

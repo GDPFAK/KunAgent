@@ -9,29 +9,22 @@ describe('WorkspaceModeTabs', () => {
     await i18n.changeLanguage('en')
   })
 
-  function props(activeView: 'chat' | 'write' = 'chat') {
+  function props(activeView: 'chat' | 'write' | 'design' = 'chat') {
     return {
       activeView,
       onCodeOpen: vi.fn(),
-      onWriteOpen: vi.fn()
+      onWriteOpen: vi.fn(),
+      onDesignOpen: vi.fn()
     }
   }
 
-  it('renders two tab buttons', () => {
-    const onCodeOpen = vi.fn()
-    const onWriteOpen = vi.fn()
-
-    const html = renderToStaticMarkup(
-      createElement(WorkspaceModeTabs, {
-        activeView: 'chat',
-        onCodeOpen,
-        onWriteOpen
-      })
-    )
+  it('renders three tab buttons', () => {
+    const html = renderToStaticMarkup(createElement(WorkspaceModeTabs, props()))
 
     expect(html).toContain('Code')
     expect(html).toContain('Write')
-    expect(html.match(/role="tab"/g)?.length).toBe(2)
+    expect(html).toContain('Design')
+    expect(html.match(/role="tab"/g)?.length).toBe(3)
   })
 
   it('uses horizontal row layout not vertical column', () => {
@@ -50,14 +43,14 @@ describe('WorkspaceModeTabs', () => {
     )
 
     const flex1Matches = html.match(/flex-1/g)
-    expect(flex1Matches?.length).toBe(2)
+    expect(flex1Matches?.length).toBe(3)
   })
 
   it('marks active button with aria-selected true', () => {
-    for (const activeView of ['chat', 'write'] as const) {
+    for (const activeView of ['chat', 'write', 'design'] as const) {
       const html = renderToStaticMarkup(createElement(WorkspaceModeTabs, props(activeView)))
       expect(html.match(/aria-selected="true"/g)?.length).toBe(1)
-      expect(html.match(/aria-selected="false"/g)?.length).toBe(1)
+      expect(html.match(/aria-selected="false"/g)?.length).toBe(2)
     }
   })
 
@@ -67,7 +60,7 @@ describe('WorkspaceModeTabs', () => {
     )
 
     const truncateMatches = html.match(/truncate/g)
-    expect(truncateMatches?.length).toBe(2)
+    expect(truncateMatches?.length).toBe(3)
   })
 
   it('preserves min-w-0 on buttons for flex truncation', () => {
@@ -85,7 +78,7 @@ describe('WorkspaceModeTabs', () => {
     )
 
     expect(html).toContain('role="tablist"')
-    expect(html).toContain('Code / Write')
+    expect(html).toContain('Code / Write / Design')
   })
 
   it('does not render secondary switches in the sidebar mode tabs', () => {
@@ -94,6 +87,6 @@ describe('WorkspaceModeTabs', () => {
     )
 
     expect(html).not.toContain('role="switch"')
-    expect(html.match(/role="tab"/g)?.length).toBe(2)
+    expect(html.match(/role="tab"/g)?.length).toBe(3)
   })
 })

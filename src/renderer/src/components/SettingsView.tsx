@@ -58,8 +58,9 @@ import {
   UpdatesSettingsSection,
   WriteSettingsSection
 } from './settings-sections'
+import { DesignSettingsSection } from './settings-section-design'
 
-type SettingsCategory = 'general' | 'providers' | 'write' | 'mediaGeneration' | 'speechToText' | 'agents' | 'archives' | 'permissions' | 'worktree' | 'memory' | 'shortcuts' | 'easterEgg' | 'claw' | 'updates' | 'debug'
+type SettingsCategory = 'general' | 'providers' | 'write' | 'design' | 'mediaGeneration' | 'speechToText' | 'agents' | 'archives' | 'permissions' | 'worktree' | 'memory' | 'shortcuts' | 'easterEgg' | 'claw' | 'updates' | 'debug'
 type SaveStatus = 'idle' | 'saving' | 'saved' | 'error'
 type SettingsPatch = AppSettingsPatch
 type InlineNotice = {
@@ -258,6 +259,10 @@ export function SettingsView(): ReactElement {
       setCategory('write')
       return
     }
+    if (settingsSection === 'design') {
+      setCategory('design')
+      return
+    }
     if (settingsSection === 'imageGeneration') {
       setCategory('mediaGeneration')
       return
@@ -303,6 +308,7 @@ export function SettingsView(): ReactElement {
       settingsSection === 'general' ||
       settingsSection === 'providers' ||
       settingsSection === 'write' ||
+      settingsSection === 'design' ||
       settingsSection === 'imageGeneration' ||
       settingsSection === 'mediaGeneration' ||
       settingsSection === 'speechToText' ||
@@ -316,7 +322,7 @@ export function SettingsView(): ReactElement {
       return
     }
     const refs: Record<
-      Exclude<SettingsRouteSection, 'general' | 'providers' | 'write' | 'imageGeneration' | 'mediaGeneration' | 'speechToText' | 'archives' | 'claw' | 'shortcuts' | 'easterEgg' | 'updates'>,
+      Exclude<SettingsRouteSection, 'general' | 'providers' | 'write' | 'design' | 'imageGeneration' | 'mediaGeneration' | 'speechToText' | 'archives' | 'claw' | 'shortcuts' | 'easterEgg' | 'updates'>,
       HTMLDivElement | null
     > = {
       agents: agentsSectionRef.current,
@@ -988,6 +994,7 @@ export function SettingsView(): ReactElement {
           {category === 'general' ? <GeneralSettingsSection ctx={settingsSectionContext} /> : null}
           {category === 'providers' ? <ProvidersSettingsSection ctx={settingsSectionContext} /> : null}
           {category === 'write' ? <WriteSettingsSection ctx={settingsSectionContext} /> : null}
+          {category === 'design' ? <DesignSettingsSection ctx={settingsSectionContext} /> : null}
           {category === 'mediaGeneration' ? <MediaGenerationSettingsSection ctx={settingsSectionContext} /> : null}
           {category === 'speechToText' ? <SpeechToTextSettingsSection ctx={settingsSectionContext} /> : null}
           {category === 'agents' || category === 'permissions' ? <AgentsSettingsSection ctx={settingsSectionContext} /> : null}

@@ -1,17 +1,19 @@
 import type { ReactElement } from 'react'
-import { Code2, PencilLine } from 'lucide-react'
+import { Code2, Palette, PencilLine } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
 type Props = {
-  activeView: 'chat' | 'write' | 'claw' | 'schedule'
+  activeView: 'chat' | 'write' | 'design' | 'claw' | 'schedule'
   onCodeOpen: () => void
   onWriteOpen: () => void
+  onDesignOpen: () => void
 }
 
 export function WorkspaceModeTabs({
   activeView,
   onCodeOpen,
-  onWriteOpen
+  onWriteOpen,
+  onDesignOpen
 }: Props): ReactElement {
   const { t } = useTranslation('common')
 
@@ -32,7 +34,7 @@ export function WorkspaceModeTabs({
   return (
     <div
       role="tablist"
-      aria-label={`${t('code')} / ${t('write')}`}
+      aria-label={`${t('code')} / ${t('write')} / ${t('design')}`}
       className="mb-1.5 flex flex-row gap-1 rounded-[8px] bg-[color-mix(in_srgb,var(--ds-sidebar-field-bg)_72%,transparent)] p-0.5 shadow-[inset_0_0_0_1px_var(--ds-sidebar-row-ring)] dark:bg-white/[0.045] dark:shadow-[inset_0_0_0_1px_rgba(255,255,255,0.05)]"
     >
       <button
@@ -56,6 +58,17 @@ export function WorkspaceModeTabs({
       >
         <PencilLine className={iconClass(activeView === 'write')} strokeWidth={1.9} />
         <span className="truncate">{t('write')}</span>
+      </button>
+      <button
+        type="button"
+        data-cursor-spotlight-target
+        role="tab"
+        aria-selected={activeView === 'design'}
+        onClick={onDesignOpen}
+        className={tabClass(activeView === 'design')}
+      >
+        <Palette className={iconClass(activeView === 'design')} strokeWidth={1.9} />
+        <span className="truncate">{t('design')}</span>
       </button>
     </div>
   )

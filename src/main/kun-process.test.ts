@@ -7,6 +7,7 @@ import { configureLogger } from './logger'
 import {
   defaultClawSettings,
   DEFAULT_LOG_RETENTION_DAYS,
+  defaultDesignSettings,
   defaultKeyboardShortcuts,
   defaultKunRuntimeSettings,
   defaultModelProviderSettings,
@@ -48,6 +49,7 @@ function createSettings(binaryPath: string): AppSettingsV1 {
     write: defaultWriteSettings(),
     claw: defaultClawSettings(),
     schedule: defaultScheduleSettings(),
+    design: defaultDesignSettings(),
     guiUpdate: { channel: 'stable' },
     codePromptPrefix: '',
     disabledSkillIds: []

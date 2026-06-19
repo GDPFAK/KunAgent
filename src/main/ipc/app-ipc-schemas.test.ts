@@ -171,6 +171,11 @@ describe('app-ipc-schemas', () => {
           ]
         }
       },
+      design: {
+        brandColor: '#3b82d8',
+        tone: ['专业', '科技感'],
+        designSystemPreset: 'shadcn'
+      },
       disabledSkillIds: ['test-skill-08']
     })
 
@@ -181,6 +186,8 @@ describe('app-ipc-schemas', () => {
     expect(payload.write?.inlineCompletion?.model).toBe('deepseek-v4-pro')
     expect(payload.write?.selectionAssist?.infographicPrompt).toBe('手绘风格信息图。')
     expect(payload.write?.selectionAssist?.quickActions).toHaveLength(2)
+    expect(payload.design?.brandColor).toBe('#3b82d8')
+    expect(payload.design?.designSystemPreset).toBe('shadcn')
     expect(payload.disabledSkillIds).toEqual(['test-skill-08'])
   })
 

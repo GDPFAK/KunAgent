@@ -5,6 +5,7 @@ import {
   type AppBehaviorConfigV1,
   type AppSettingsV1,
   type ClawSettingsPatchV1,
+  type DesignSettingsPatchV1,
   type GuiUpdateConfigV1,
   type NotificationConfigV1,
   type ScheduleSettingsPatchV1,
@@ -28,6 +29,7 @@ import { normalizeDeepseekBaseUrl } from './app-settings-normalizers'
 import { normalizeClawSettings } from './app-settings-claw'
 import { normalizeScheduleSettings } from './app-settings-schedule'
 import { normalizeWriteSettings } from './app-settings-write'
+import { normalizeDesignSettings } from './app-settings-design'
 
 export function normalizeAppSettings(settings: AppSettingsV1): AppSettingsV1 {
   const migrated = shouldMigrateLegacySettings(settings)
@@ -41,6 +43,7 @@ export function normalizeAppSettings(settings: AppSettingsV1): AppSettingsV1 {
     write?: WriteSettingsPatchV1
     claw?: ClawSettingsPatchV1
     schedule?: ScheduleSettingsPatchV1
+    design?: DesignSettingsPatchV1
     guiUpdate?: Partial<GuiUpdateConfigV1>
   }
   const providerSettings = normalizeModelProviderSettings(maybeSettings.provider)
@@ -92,6 +95,7 @@ export function normalizeAppSettings(settings: AppSettingsV1): AppSettingsV1 {
     write: normalizeWriteSettings(maybeSettings.write),
     claw: normalizeClawSettings(maybeSettings.claw),
     schedule: normalizeScheduleSettings(maybeSettings.schedule),
+    design: normalizeDesignSettings(maybeSettings.design),
     guiUpdate: {
       channel: normalizeGuiUpdateChannel(
         maybeSettings.guiUpdate?.channel ?? DEFAULT_GUI_UPDATE_CHANNEL

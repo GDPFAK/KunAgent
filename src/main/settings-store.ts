@@ -11,6 +11,7 @@ import {
   defaultClawSettings,
   defaultKunRuntimeSettings,
   defaultModelProviderSettings,
+  defaultDesignSettings,
   defaultScheduleSettings,
   getKunRuntimeSettings,
   mergeKunRuntimeSettings,
@@ -18,6 +19,7 @@ import {
   defaultWriteSettings,
   mergeClawSettings,
   mergeAppBehaviorSettings,
+  mergeDesignSettings,
   mergeScheduleSettings,
   mergeWriteSettings,
   normalizeAppBehaviorSettings,
@@ -219,7 +221,8 @@ const defaultSettings = (): AppSettingsV1 => ({
   disabledSkillIds: [],
   write: defaultWriteSettings(),
   claw: defaultClawSettings(),
-  schedule: defaultScheduleSettings()
+  schedule: defaultScheduleSettings(),
+  design: defaultDesignSettings()
 })
 
 function buildMergedSettings(parsed: Partial<AppSettingsV1>): AppSettingsV1 {
@@ -239,6 +242,7 @@ function buildMergedSettings(parsed: Partial<AppSettingsV1>): AppSettingsV1 {
     write: mergeWriteSettings(defaults.write, migrated.write),
     claw: mergeClawSettings(defaults.claw, migrated.claw),
     schedule: mergeScheduleSettings(defaults.schedule, migrated.schedule),
+    design: mergeDesignSettings(defaults.design, migrated.design),
     guiUpdate: { ...defaults.guiUpdate, ...migrated.guiUpdate },
     codePromptPrefix: typeof migrated.codePromptPrefix === 'string' ? migrated.codePromptPrefix : '',
     disabledSkillIds: normalizeDisabledSkillIds(migrated.disabledSkillIds)
@@ -427,6 +431,7 @@ export class JsonSettingsStore {
       write: mergeWriteSettings(cur.write, partial.write),
       claw: mergeClawSettings(cur.claw, partial.claw),
       schedule: mergeScheduleSettings(cur.schedule, partial.schedule),
+      design: mergeDesignSettings(cur.design, partial.design),
       guiUpdate: { ...cur.guiUpdate, ...(partial.guiUpdate ?? {}) }
     })
     await this.save(next)
