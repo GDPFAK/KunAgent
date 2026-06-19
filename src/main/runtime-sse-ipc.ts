@@ -203,18 +203,41 @@ export function registerRuntimeSseIpc(options: {
               continue
             }
             reconnectDelayMs = SSE_RECONNECT_BASE_MS
-            const reader = res.body.getReader()
+                        const reader = res.body.getReader()
             const dec = new TextDecoder()
             let buffer = ''
+            
+            // 新增：消息节流队列和定时器
+            let pendingEvents: Record<string, unknown>[] = []
+            let throttleTimer: any = null
+
+            const flushEvents = () => {
+              if (throttleTimer) {
+                clearTimeout(throttleTimer)
+                throttleTimer = null
+              }
+              if (state.stoppedByClient || ac.signal.aborted) {
+                pendingEvents = []
+                return false
+              }
+              if (pendingEvents.length === 0) return true
+              const batch = pendingEvents
+              pendingEvents = []
+              if (!sendSseMessage(wc, 'runtime:sse-event', { streamId: id, events: batch })) {
+                state.stoppedByClient = true
+                ac.abort()
+                return false
+              }
+              return true
+            }
+
             while (true) {
               const { done, value } = await reader.read()
               if (done) break
               buffer += dec.decode(value, { stream: true })
-              // Batch every event parsed from this network chunk into one IPC
-              // message — streaming turns otherwise pay a structured-clone
-              // send per token delta.
-              const batch: Record<string, unknown>[] = []
+              
               let next: { block: string; rest: string } | null
+              let hasNewEvents = false
               while ((next = takeSseBlock(buffer)) !== null) {
                 const block = next.block
                 buffer = next.rest
@@ -224,14 +247,17 @@ export function registerRuntimeSseIpc(options: {
                   if (typeof payload.seq === 'number') {
                     nextSinceSeq = Math.max(nextSinceSeq, payload.seq)
                   }
-                  batch.push(payload)
+                  pendingEvents.push(payload)
+                  hasNewEvents = true
                 }
               }
-              if (batch.length > 0) {
-                if (!sendSseMessage(wc, 'runtime:sse-event', { streamId: id, events: batch })) {
-                  state.stoppedByClient = true
-                  ac.abort()
-                  return
+              if (hasNewEvents) {
+                // 如果当前没有定时器，则开启一个 100ms 的定时器，到期后统一刷入前端
+                if (!throttleTimer) {
+                  throttleTimer = setTimeout(() => {
+                    throttleTimer = null
+                    flushEvents()
+                  }, 100)
                 }
               }
             }
@@ -244,13 +270,11 @@ export function registerRuntimeSseIpc(options: {
                 if (typeof payload.seq === 'number') {
                   nextSinceSeq = Math.max(nextSinceSeq, payload.seq)
                 }
-                if (!sendSseMessage(wc, 'runtime:sse-event', { streamId: id, events: [payload] })) {
-                  state.stoppedByClient = true
-                  ac.abort()
-                  return
-                }
+                pendingEvents.push(payload)
               }
             }
+            // 确保流结束时，将队列里剩余的事件立即刷入前端
+            flushEvents()
           } catch (e) {
             if (state.stoppedByClient || ac.signal.aborted) return
             const msg = e instanceof Error ? e.message : String(e)
