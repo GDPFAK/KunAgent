@@ -15,6 +15,15 @@ export type DesignWorkspaceState = {
   assistantModel: string
   assistantProviderId: string
   designContext: DesignContext
+  // settings-driven runtime knobs (loaded from settings.design)
+  canvasBackground: 'light' | 'dark'
+  liveRefresh: boolean
+  deviceFrame: boolean
+  generationPrompt: string
+  reasoningEffort: string
+  implementStackHint: string
+  injectIntoCode: boolean
+  publishDesignSystem: boolean
   settingsLoaded: boolean
   fileError: string | null
 
@@ -22,6 +31,7 @@ export type DesignWorkspaceState = {
   setCanvasView: (view: DesignCanvasView) => void
   setViewport: (viewport: DesignViewport) => void
   setDevPreviewUrl: (url: string) => void
+  setCanvasBackground: (background: 'light' | 'dark') => void
   setActiveArtifact: (artifactId: string | null) => void
   /** Insert a new artifact (or replace one with the same id) and make it active. */
   upsertArtifact: (artifact: DesignArtifact) => void

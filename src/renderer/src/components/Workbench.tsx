@@ -2144,15 +2144,18 @@ export function Workbench(): ReactElement {
         text,
         artifactRelativePath: relativePath,
         workspaceRoot: designWorkspaceRoot,
+        customPrompt: store.generationPrompt || undefined,
         designContext: store.designContext
       })
       const model = store.assistantModel.trim()
       const providerId =
         store.assistantProviderId.trim() || providerIdForComposerModel(composerModelGroups, model)
+      const reasoningEffort = store.reasoningEffort.trim()
       void sendMessage(prompt, 'agent', {
         displayText: text,
         ...(model ? { model } : {}),
-        ...(providerId ? { providerId } : {})
+        ...(providerId ? { providerId } : {}),
+        ...(reasoningEffort ? { reasoningEffort } : {})
       })
     })()
   }
@@ -2169,21 +2172,25 @@ export function Workbench(): ReactElement {
     }
     void (async () => {
       let designSystemRelativePath: string | undefined
-      try {
-        const path = '.kun-design/DESIGN_SYSTEM.md'
-        const res = await window.kunGui.writeWorkspaceFile({
-          path,
-          workspaceRoot: designWorkspaceRoot,
-          content: formatDesignSystemMarkdown(designState.designContext)
-        })
-        if (res.ok) designSystemRelativePath = path
-      } catch {
-        // non-fatal: implement without the published design-system file
+      if (designState.publishDesignSystem) {
+        try {
+          const path = '.kun-design/DESIGN_SYSTEM.md'
+          const res = await window.kunGui.writeWorkspaceFile({
+            path,
+            workspaceRoot: designWorkspaceRoot,
+            content: formatDesignSystemMarkdown(designState.designContext)
+          })
+          if (res.ok) designSystemRelativePath = path
+        } catch {
+          // non-fatal: implement without the published design-system file
+        }
       }
       const prompt = buildImplementDesignPrompt({
         artifactTitle: artifact.title,
         artifactRelativePath: artifact.relativePath,
         designSystemRelativePath,
+        stackHint: designState.implementStackHint || undefined,
+        referenceDesignSystem: designState.injectIntoCode,
         workspaceRoot: designWorkspaceRoot,
         designContext: designState.designContext
       })

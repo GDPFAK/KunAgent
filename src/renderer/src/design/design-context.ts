@@ -16,6 +16,8 @@ export type DesignContext = {
   tone?: string[]
   /** Named design-system preset that seeds tokens/voice; undefined / 'none' = no preset. */
   designSystemPreset?: DesignSystemPreset
+  /** Free-form additional design rules (from settings.design.designGuidelines). */
+  designGuidelines?: string
 }
 
 /** Suggested tone chips offered in the design-context form. */
@@ -60,6 +62,7 @@ export function formatDesignContextLines(ctx: DesignContext | undefined): string
   if (ctx.designSystemPreset && ctx.designSystemPreset !== 'none') {
     parts.push(`- Design system: ${DESIGN_SYSTEM_LABEL[ctx.designSystemPreset]}`)
   }
+  if (ctx.designGuidelines?.trim()) parts.push(`- Additional rules: ${ctx.designGuidelines.trim()}`)
   if (parts.length === 0) return []
   return [
     'Design context (honor it in every visual decision):',

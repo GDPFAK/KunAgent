@@ -32,6 +32,14 @@ export const useDesignWorkspaceStore = create<DesignWorkspaceState>((set) => ({
   assistantModel: '',
   assistantProviderId: '',
   designContext: {},
+  canvasBackground: 'light',
+  liveRefresh: true,
+  deviceFrame: true,
+  generationPrompt: '',
+  reasoningEffort: '',
+  implementStackHint: '',
+  injectIntoCode: true,
+  publishDesignSystem: true,
   settingsLoaded: false,
   fileError: null,
 
@@ -48,6 +56,8 @@ export const useDesignWorkspaceStore = create<DesignWorkspaceState>((set) => ({
   },
 
   setDevPreviewUrl: (url) => set({ devPreviewUrl: url }),
+
+  setCanvasBackground: (background) => set({ canvasBackground: background }),
 
   setActiveArtifact: (artifactId) => set({ activeArtifactId: artifactId }),
 
@@ -106,11 +116,27 @@ export const useDesignWorkspaceStore = create<DesignWorkspaceState>((set) => ({
     try {
       const settings = await rendererRuntimeClient.getSettings()
       const design = settings.design
+      const hasStoredViewport = readBrowserStorageItem(VIEWPORT_KEY) !== null
+      const hasStoredView = readBrowserStorageItem(CANVAS_VIEW_KEY) !== null
       set((state) => ({
         settingsLoaded: true,
         workspaceRoot: state.workspaceRoot || design.defaultWorkspaceRoot || settings.workspaceRoot || '',
+        assistantModel: state.assistantModel || design.model,
+        assistantProviderId: state.assistantProviderId || design.providerId,
+        canvasBackground: design.canvasBackground,
+        liveRefresh: design.liveRefresh,
+        deviceFrame: design.deviceFrame,
+        generationPrompt: design.generationPrompt,
+        reasoningEffort: design.reasoningEffort,
+        implementStackHint: design.implementStackHint,
+        injectIntoCode: design.injectIntoCode,
+        publishDesignSystem: design.publishDesignSystem,
+        viewport: hasStoredViewport ? state.viewport : design.defaultViewport,
+        canvasView: hasStoredView ? state.canvasView : design.defaultCanvasView,
         designContext: {
           ...state.designContext,
+          designType: state.designContext.designType ?? (design.designType || undefined),
+          designGuidelines: state.designContext.designGuidelines || design.designGuidelines || undefined,
           brandColor: state.designContext.brandColor || design.brandColor || undefined,
           tone:
             state.designContext.tone && state.designContext.tone.length > 0

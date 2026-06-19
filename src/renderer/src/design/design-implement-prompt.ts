@@ -6,6 +6,10 @@ export type ImplementDesignOptions = {
   artifactRelativePath: string
   /** Workspace-relative path to the published design system, if any. */
   designSystemRelativePath?: string
+  /** Target stack hint, e.g. "React + Tailwind + shadcn"; empty = auto-detect. */
+  stackHint?: string
+  /** Reference the published design system in the prompt. */
+  referenceDesignSystem?: boolean
   workspaceRoot: string
   designContext?: DesignContext
 }
@@ -21,11 +25,15 @@ export function buildImplementDesignPrompt(options: ImplementDesignOptions): str
     `Implement the approved design "${options.artifactTitle}" in this project.`,
     `Workspace: ${options.workspaceRoot}`,
     `Design source (a standalone HTML mockup): ${options.artifactRelativePath}`,
-    options.designSystemRelativePath ? `Project design system: ${options.designSystemRelativePath}` : '',
+    options.referenceDesignSystem && options.designSystemRelativePath
+      ? `Project design system: ${options.designSystemRelativePath}`
+      : '',
     '',
     'How to proceed:',
     `- First read \`${options.artifactRelativePath}\` to understand its layout, components, states and interactions.`,
-    "- Detect this project's stack (framework, styling, component library) from its files and config; do NOT introduce a new stack or dependency unless necessary.",
+    options.stackHint?.trim()
+      ? `- Target stack: ${options.stackHint.trim()}. Use it; only deviate if the project clearly uses something else.`
+      : "- Detect this project's stack (framework, styling, component library) from its files and config; do NOT introduce a new stack or dependency unless necessary.",
     '- Reuse existing components, design tokens and conventions where they exist; only create new ones when needed.',
     "- Reproduce the design's structure and visual intent faithfully — it is the visual contract — but express it idiomatically in the project's real code, not by pasting the mockup's inline HTML/CSS verbatim.",
     '- Wire up the implied interactions and states.',

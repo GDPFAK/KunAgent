@@ -801,16 +801,52 @@ export type WriteSettingsPatchV1 = Partial<Omit<WriteSettingsV1, 'inlineCompleti
 }
 
 export type DesignSystemPreset = 'none' | 'shadcn' | 'material' | 'ios' | 'fluent'
+export type DesignSurfaceSetting = '' | 'brand' | 'product'
+export type DesignViewportSetting = 'mobile' | 'tablet' | 'desktop'
+export type DesignCanvasViewSetting = 'preview' | 'code'
+export type DesignCanvasBackgroundSetting = 'light' | 'dark'
 
 export type DesignSettingsV1 = {
   /** Workspace root for design artifacts; empty = fall back to the active code/write workspace. */
   defaultWorkspaceRoot: string
+
+  // --- Design system (shared source of truth for design + code) ---
   /** Anchor brand color (CSS color) injected into the design agent's context. */
   brandColor: string
   /** Free-form tone chips (e.g. 编辑风, 专业, 科技感). */
   tone: string[]
   /** Named design-system preset that seeds tokens/voice; 'none' = no preset. */
   designSystemPreset: DesignSystemPreset
+  /** Default surface type for new designs; '' = unset. */
+  designType: DesignSurfaceSetting
+  /** Free-form additional design rules injected alongside the preset and written to DESIGN_SYSTEM.md. */
+  designGuidelines: string
+
+  // --- Design agent ---
+  /** Default model for design turns; '' = inherit runtime default. */
+  model: string
+  providerId: string
+  /** Reasoning effort for design turns; '' = default. */
+  reasoningEffort: string
+  /** Custom override of the single-file HTML generation contract; '' = built-in default. */
+  generationPrompt: string
+
+  // --- Design → code integration ---
+  /** Target stack hint for "implement this design", e.g. "React + Tailwind + shadcn". */
+  implementStackHint: string
+  /** Tell the coding agent to honor the published design system. */
+  injectIntoCode: boolean
+  /** Publish DESIGN_SYSTEM.md to the workspace when implementing. */
+  publishDesignSystem: boolean
+
+  // --- Canvas defaults ---
+  defaultViewport: DesignViewportSetting
+  defaultCanvasView: DesignCanvasViewSetting
+  canvasBackground: DesignCanvasBackgroundSetting
+  /** Auto-refresh the canvas as the agent writes. */
+  liveRefresh: boolean
+  /** Show a device frame for mobile/tablet viewports. */
+  deviceFrame: boolean
 }
 
 export type DesignSettingsPatchV1 = Partial<DesignSettingsV1>
