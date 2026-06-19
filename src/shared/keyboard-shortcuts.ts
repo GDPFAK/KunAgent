@@ -1,3 +1,12 @@
+type KeyboardShortcutDefaultPlatform = 'darwin' | 'win32' | 'linux'
+type KeyboardShortcutCommandDefinition = {
+  id: string
+  labelKey: string
+  descriptionKey: string
+  defaultBindings: readonly string[]
+  platformDefaultBindings?: Partial<Record<KeyboardShortcutDefaultPlatform, readonly string[]>>
+}
+
 export const KEYBOARD_SHORTCUT_COMMANDS = [
   {
     id: 'toggle-plan-mode',
@@ -16,6 +25,15 @@ export const KEYBOARD_SHORTCUT_COMMANDS = [
     labelKey: 'shortcutChooseWorkspace',
     descriptionKey: 'shortcutChooseWorkspaceDesc',
     defaultBindings: ['Ctrl+O']
+  },
+  {
+    id: 'toggle-terminal',
+    labelKey: 'shortcutToggleTerminal',
+    descriptionKey: 'shortcutToggleTerminalDesc',
+    defaultBindings: ['Ctrl+`'],
+    platformDefaultBindings: {
+      darwin: ['Meta+`']
+    }
   },
   {
     id: 'settings',
@@ -113,7 +131,7 @@ export const KEYBOARD_SHORTCUT_COMMANDS = [
     descriptionKey: 'shortcutToggleMaximizeDesc',
     defaultBindings: []
   }
-] as const
+] as const satisfies readonly KeyboardShortcutCommandDefinition[]
 
 export type KeyboardShortcutCommand = typeof KEYBOARD_SHORTCUT_COMMANDS[number]
 export type KeyboardShortcutCommandId = KeyboardShortcutCommand['id']
@@ -121,6 +139,7 @@ export type KeyboardShortcutBindingsV1 = Partial<Record<KeyboardShortcutCommandI
 export type KeyboardShortcutsConfigV1 = {
   bindings: KeyboardShortcutBindingsV1
 }
+export type KeyboardShortcutPlatform = 'darwin' | 'win32' | 'linux' | string
 
 export type KeyboardShortcutEventLike = {
   key: string
@@ -168,7 +187,8 @@ export function normalizeKeyboardShortcuts(
 }
 
 export function resolveKeyboardShortcutBindings(
-  settings?: Partial<KeyboardShortcutsConfigV1> | null
+  settings?: Partial<KeyboardShortcutsConfigV1> | null,
+  platform?: KeyboardShortcutPlatform | null
 ): Required<KeyboardShortcutBindingsV1> {
   const normalized = normalizeKeyboardShortcuts(settings)
   const bindings: Required<KeyboardShortcutBindingsV1> = {} as Required<KeyboardShortcutBindingsV1>
@@ -176,9 +196,26 @@ export function resolveKeyboardShortcutBindings(
     const configured = normalized.bindings[command.id]
     bindings[command.id] = configured && configured.length > 0
       ? configured
-      : [...command.defaultBindings]
+      : defaultBindingsForCommand(command, platform)
   }
   return bindings
+}
+
+function defaultBindingsForCommand(
+  command: KeyboardShortcutCommand,
+  platform?: KeyboardShortcutPlatform | null
+): string[] {
+  const definition = command as KeyboardShortcutCommandDefinition
+  const platformDefaults = isKeyboardShortcutDefaultPlatform(platform)
+    ? definition.platformDefaultBindings?.[platform]
+    : undefined
+  return [...(platformDefaults ?? command.defaultBindings)]
+}
+
+function isKeyboardShortcutDefaultPlatform(
+  platform?: KeyboardShortcutPlatform | null
+): platform is KeyboardShortcutDefaultPlatform {
+  return platform === 'darwin' || platform === 'win32' || platform === 'linux'
 }
 
 export function normalizeKeyboardShortcut(value: unknown): string | null {

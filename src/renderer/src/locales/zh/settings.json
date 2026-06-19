@@ -174,6 +174,8 @@
   "shortcutNewChatDesc": "在当前工作区开始新会话。",
   "shortcutChooseWorkspace": "选择工作区",
   "shortcutChooseWorkspaceDesc": "打开工作区选择器。",
+  "shortcutToggleTerminal": "切换终端",
+  "shortcutToggleTerminalDesc": "打开或关闭终端面板。",
   "shortcutSettings": "设置",
   "shortcutSettingsDesc": "打开设置。",
   "shortcutQuit": "退出",

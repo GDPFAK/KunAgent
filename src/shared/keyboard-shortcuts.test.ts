@@ -15,6 +15,7 @@ describe('keyboard shortcuts', () => {
     expect(normalizeKeyboardShortcut('ctrl+=')).toBe('Ctrl++')
     expect(normalizeKeyboardShortcut('ctrl+shift++')).toBe('Ctrl++')
     expect(normalizeKeyboardShortcut('control + shift + i')).toBe('Ctrl+Shift+I')
+    expect(normalizeKeyboardShortcut('command + `')).toBe('Meta+`')
   })
 
   it('converts keyboard events to shortcut strings', () => {
@@ -22,6 +23,7 @@ describe('keyboard shortcuts', () => {
     expect(keyboardEventToShortcut({ key: '+', ctrlKey: true })).toBe('Ctrl++')
     expect(keyboardEventToShortcut({ key: '=', ctrlKey: true })).toBe('Ctrl++')
     expect(keyboardEventToShortcut({ key: '+', ctrlKey: true, shiftKey: true })).toBe('Ctrl++')
+    expect(keyboardEventToShortcut({ key: '`', metaKey: true })).toBe('Meta+`')
     expect(keyboardEventToShortcut({ key: 'Shift', shiftKey: true })).toBeNull()
   })
 
@@ -35,6 +37,11 @@ describe('keyboard shortcuts', () => {
 
     expect(bindings['toggle-plan-mode']).toEqual(['Ctrl+Shift+P'])
     expect(bindings['new-chat']).toEqual(['Ctrl+N'])
+  })
+
+  it('uses platform defaults for the terminal toggle shortcut', () => {
+    expect(resolveKeyboardShortcutBindings(undefined, 'darwin')['toggle-terminal']).toEqual(['Meta+`'])
+    expect(resolveKeyboardShortcutBindings(undefined, 'win32')['toggle-terminal']).toEqual(['Ctrl+`'])
   })
 
   it('ignores unknown commands and detects conflicts', () => {

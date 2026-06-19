@@ -72,7 +72,7 @@ export function supportsDesktopTitleBar(platform: string): boolean {
 export function buildWindowsTitleBarMenuSections(
   t: TitleBarTranslate,
   actions: WindowsTitleBarActions,
-  shortcuts: Required<KeyboardShortcutBindingsV1> = resolveKeyboardShortcutBindings()
+  shortcuts: Required<KeyboardShortcutBindingsV1> = resolveKeyboardShortcutBindings(undefined, currentPlatform())
 ): WindowsTitleBarMenuSection[] {
   const command = (desktopCommand: DesktopCommand): MenuAction =>
     () => actions.runDesktopCommand(desktopCommand)
@@ -182,8 +182,8 @@ export function WindowsTitleBar({ platform, actions }: Props): ReactElement | nu
   const openSettings = useChatStore((s) => s.openSettings)
   const keyboardShortcuts = useKeyboardShortcutSettings()
   const keyboardShortcutBindings = useMemo(
-    () => resolveKeyboardShortcutBindings(keyboardShortcuts),
-    [keyboardShortcuts]
+    () => resolveKeyboardShortcutBindings(keyboardShortcuts, resolvedPlatform),
+    [keyboardShortcuts, resolvedPlatform]
   )
   const [activeMenuId, setActiveMenuId] = useState<string | null>(null)
   const [isMaximized, setIsMaximized] = useState(false)

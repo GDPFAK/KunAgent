@@ -16,10 +16,11 @@ export function KeyboardShortcutsSettingsSection({ ctx }: { ctx: Record<string, 
   const [query, setQuery] = useState('')
   const [capturingCommandId, setCapturingCommandId] = useState<KeyboardShortcutCommandId | null>(null)
   const [notice, setNotice] = useState<{ tone: 'error' | 'info'; message: string } | null>(null)
+  const shortcutPlatform = typeof window === 'undefined' ? undefined : window.kunGui?.platform
   const normalized = useMemo(() => normalizeKeyboardShortcuts(form.keyboardShortcuts), [form.keyboardShortcuts])
   const effectiveBindings = useMemo(
-    () => resolveKeyboardShortcutBindings(form.keyboardShortcuts),
-    [form.keyboardShortcuts]
+    () => resolveKeyboardShortcutBindings(form.keyboardShortcuts, shortcutPlatform),
+    [form.keyboardShortcuts, shortcutPlatform]
   )
 
   const commandLabel = useCallback((commandId: KeyboardShortcutCommandId): string => {
