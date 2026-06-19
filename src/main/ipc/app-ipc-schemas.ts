@@ -1125,7 +1125,23 @@ const workflowSettingsPatchSchema = z
     webhookSecret: z.string().max(MAX_BODY_BYTES).optional(),
     workflows: z.array(workflowPatchSchema).max(200).optional(),
     presets: z.array(workflowNodePresetSchema).max(100).optional(),
-    modules: z.array(workflowCustomModuleSchema).max(100).optional()
+    modules: z.array(workflowCustomModuleSchema).max(100).optional(),
+    hookTriggers: z
+      .array(
+        z
+          .object({
+            id: z.string().max(MAX_ID_LENGTH).optional(),
+            enabled: z.boolean().optional(),
+            workflowId: z.string().max(MAX_ID_LENGTH).optional(),
+            phase: z.enum(['PreToolUse', 'PostToolUse', 'UserPromptSubmit', 'TurnStart', 'TurnEnd', 'PreCompact']).optional(),
+            toolNames: z.array(z.string().max(128)).max(50).optional(),
+            mode: z.enum(['observe', 'block', 'rewrite']).optional(),
+            timeoutMs: z.number().int().min(0).max(3_600_000).optional()
+          })
+          .strict()
+      )
+      .max(50)
+      .optional()
   })
   .strict()
 

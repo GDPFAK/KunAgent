@@ -1093,6 +1093,39 @@ export type WorkflowNodePresetV1 = {
   config: WorkflowNodeV1['config']
 }
 
+/** The kun agent hook phases a workflow can be bound to. Mirrors kun's HOOK_PHASES. */
+export const WORKFLOW_HOOK_PHASES = [
+  'PreToolUse',
+  'PostToolUse',
+  'UserPromptSubmit',
+  'TurnStart',
+  'TurnEnd',
+  'PreCompact'
+] as const
+export type WorkflowHookPhase = (typeof WORKFLOW_HOOK_PHASES)[number]
+
+/** How a bound workflow's output maps back to the hook result. */
+export const WORKFLOW_HOOK_MODES = ['observe', 'block', 'rewrite'] as const
+export type WorkflowHookMode = (typeof WORKFLOW_HOOK_MODES)[number]
+
+/** Binds a Create Loop workflow to a kun agent hook phase (reactive automation). */
+export type WorkflowHookTriggerV1 = {
+  id: string
+  enabled: boolean
+  /** Workflow to run when the phase fires. */
+  workflowId: string
+  phase: WorkflowHookPhase
+  /** Exact tool names to match (tool phases only); empty matches all tools. */
+  toolNames: string[]
+  /**
+   * observe = run, change nothing; block = deny the action if the workflow fails/says DENY;
+   * rewrite = fold the workflow output into the tool result / injected context.
+   */
+  mode: WorkflowHookMode
+  /** Hook timeout in ms; 0 uses the kun default. */
+  timeoutMs: number
+}
+
 export type WorkflowSettingsV1 = {
   enabled: boolean
   defaultWorkspaceRoot: string
@@ -1110,6 +1143,8 @@ export type WorkflowSettingsV1 = {
   presets: WorkflowNodePresetV1[]
   /** User-defined script-backed modules. */
   modules: WorkflowCustomModuleV1[]
+  /** Workflows bound to kun agent hook phases (reactive automation in code mode). */
+  hookTriggers: WorkflowHookTriggerV1[]
 }
 
 export type WorkflowSettingsPatchV1 = Partial<Omit<WorkflowSettingsV1, 'workflows'>> & {

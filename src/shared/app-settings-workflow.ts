@@ -7,7 +7,12 @@ import {
   type WorkflowCustomModuleV1,
   type WorkflowEnvVarV1,
   type WorkflowFieldV1,
+  WORKFLOW_HOOK_MODES,
+  WORKFLOW_HOOK_PHASES,
   type WorkflowClassifierCategoryV1,
+  type WorkflowHookMode,
+  type WorkflowHookPhase,
+  type WorkflowHookTriggerV1,
   type WorkflowInputFieldType,
   type WorkflowInputFieldV1,
   type WorkflowManualTriggerConfigV1,
@@ -194,6 +199,33 @@ export function normalizeWorkflowInputSchema(value: unknown): WorkflowInputField
       }
     })
     .filter((field) => field.key.length > 0)
+    .slice(0, 50)
+}
+
+function normalizeHookTriggers(value: unknown): WorkflowHookTriggerV1[] {
+  if (!Array.isArray(value)) return []
+  return value
+    .map((entry, index): WorkflowHookTriggerV1 => {
+      const h = record(entry)
+      const phase = WORKFLOW_HOOK_PHASES.includes(h.phase as WorkflowHookPhase)
+        ? (h.phase as WorkflowHookPhase)
+        : 'PostToolUse'
+      const mode = WORKFLOW_HOOK_MODES.includes(h.mode as WorkflowHookMode) ? (h.mode as WorkflowHookMode) : 'observe'
+      return {
+        id: asTrimmed(h.id) || `hook-${index + 1}`,
+        enabled: normalizeBoolean(h.enabled, false),
+        workflowId: asTrimmed(h.workflowId),
+        phase,
+        toolNames: Array.isArray(h.toolNames)
+          ? h.toolNames
+              .map((name) => asTrimmed(name))
+              .filter((name) => name.length > 0)
+              .slice(0, 50)
+          : [],
+        mode,
+        timeoutMs: normalizePositiveInteger(h.timeoutMs, 0, 0, 3_600_000)
+      }
+    })
     .slice(0, 50)
 }
 
@@ -638,7 +670,8 @@ export function defaultWorkflowSettings(): WorkflowSettingsV1 {
     webhookSecret: '',
     workflows: [],
     presets: [],
-    modules: []
+    modules: [],
+    hookTriggers: []
   }
 }
 
@@ -684,7 +717,8 @@ export function normalizeWorkflowSettings(input: WorkflowSettingsPatchV1 | undef
           .map((module, index) => normalizeCustomModule(module, index))
           .filter((module): module is WorkflowCustomModuleV1 => module !== null)
           .slice(0, MAX_WORKFLOW_PRESETS)
-      : []
+      : [],
+    hookTriggers: normalizeHookTriggers(source.hookTriggers)
   }
 }
 
@@ -698,6 +732,7 @@ export function mergeWorkflowSettings(
     ...patch,
     workflows: patch.workflows ?? current.workflows,
     presets: patch.presets ?? current.presets,
-    modules: patch.modules ?? current.modules
+    modules: patch.modules ?? current.modules,
+    hookTriggers: patch.hookTriggers ?? current.hookTriggers
   })
 }
