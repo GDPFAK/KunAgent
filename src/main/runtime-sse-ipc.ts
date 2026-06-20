@@ -203,15 +203,14 @@ export function registerRuntimeSseIpc(options: {
               continue
             }
             reconnectDelayMs = SSE_RECONNECT_BASE_MS
-                        const reader = res.body.getReader()
+            const reader = res.body.getReader()
             const dec = new TextDecoder()
             let buffer = ''
-            
-            // 新增：消息节流队列和定时器
+
             let pendingEvents: Record<string, unknown>[] = []
             let throttleTimer: any = null
 
-            const flushEvents = () => {
+            const flushEvents = (): boolean => {
               if (throttleTimer) {
                 clearTimeout(throttleTimer)
                 throttleTimer = null
@@ -221,6 +220,14 @@ export function registerRuntimeSseIpc(options: {
                 return false
               }
               if (pendingEvents.length === 0) return true
+
+              let batchMaxSeq = nextSinceSeq
+              for (const event of pendingEvents) {
+                if (typeof event.seq === 'number') {
+                  batchMaxSeq = Math.max(batchMaxSeq, event.seq)
+                }
+              }
+
               const batch = pendingEvents
               pendingEvents = []
               if (!sendSseMessage(wc, 'runtime:sse-event', { streamId: id, events: batch })) {
@@ -228,53 +235,53 @@ export function registerRuntimeSseIpc(options: {
                 ac.abort()
                 return false
               }
+              nextSinceSeq = batchMaxSeq
               return true
             }
 
-            while (true) {
-              const { done, value } = await reader.read()
-              if (done) break
-              buffer += dec.decode(value, { stream: true })
-              
-              let next: { block: string; rest: string } | null
-              let hasNewEvents = false
-              while ((next = takeSseBlock(buffer)) !== null) {
-                const block = next.block
-                buffer = next.rest
-                const parsed = parseSseData(block)
+            try {
+              while (true) {
+                const { done, value } = await reader.read()
+                if (done) break
+                buffer += dec.decode(value, { stream: true })
+
+                let next: { block: string; rest: string } | null
+                let hasNewEvents = false
+                while ((next = takeSseBlock(buffer)) !== null) {
+                  const block = next.block
+                  buffer = next.rest
+                  const parsed = parseSseData(block)
+                  if (parsed !== null) {
+                    const payload = coerceSsePayload(parsed)
+                    pendingEvents.push(payload)
+                    hasNewEvents = true
+                  }
+                }
+                if (hasNewEvents) {
+                  if (!throttleTimer) {
+                    throttleTimer = setTimeout(() => {
+                      throttleTimer = null
+                      flushEvents()
+                    }, 100)
+                  }
+                }
+              }
+              buffer += dec.decode()
+              const trailing = buffer.trim()
+              if (trailing) {
+                const parsed = parseSseData(trailing)
                 if (parsed !== null) {
                   const payload = coerceSsePayload(parsed)
-                  if (typeof payload.seq === 'number') {
-                    nextSinceSeq = Math.max(nextSinceSeq, payload.seq)
-                  }
                   pendingEvents.push(payload)
-                  hasNewEvents = true
                 }
               }
-              if (hasNewEvents) {
-                // 如果当前没有定时器，则开启一个 100ms 的定时器，到期后统一刷入前端
-                if (!throttleTimer) {
-                  throttleTimer = setTimeout(() => {
-                    throttleTimer = null
-                    flushEvents()
-                  }, 100)
-                }
+            } finally {
+              if (throttleTimer) {
+                clearTimeout(throttleTimer)
+                throttleTimer = null
               }
+              flushEvents()
             }
-            buffer += dec.decode()
-            const trailing = buffer.trim()
-            if (trailing) {
-              const parsed = parseSseData(trailing)
-              if (parsed !== null) {
-                const payload = coerceSsePayload(parsed)
-                if (typeof payload.seq === 'number') {
-                  nextSinceSeq = Math.max(nextSinceSeq, payload.seq)
-                }
-                pendingEvents.push(payload)
-              }
-            }
-            // 确保流结束时，将队列里剩余的事件立即刷入前端
-            flushEvents()
           } catch (e) {
             if (state.stoppedByClient || ac.signal.aborted) return
             const msg = e instanceof Error ? e.message : String(e)
