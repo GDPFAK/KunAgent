@@ -28,6 +28,10 @@ export type DesignWorkspaceState = {
   fileError: string | null
   /** Hash of the current published .kun-design/DESIGN_SYSTEM.md ('' = none). */
   designSystemHash: string
+  /** When true, the design page shows the in-page code-implement assistant. */
+  implementOpen: boolean
+  /** Title of the artifact being implemented (panel header). */
+  implementTitle: string
 
   setWorkspaceRoot: (workspaceRoot: string) => void
   setCanvasView: (view: DesignCanvasView) => void
@@ -47,6 +51,9 @@ export type DesignWorkspaceState = {
   /** Set or clear the design-mode error banner. */
   setFileError: (error: string | null) => void
   setAgentPanelOpen: (open: boolean) => void
+  /** Open the in-page "implement in code" assistant for an artifact. */
+  openImplementPanel: (title: string) => void
+  closeImplementPanel: () => void
   setAssistantModel: (model: string, providerId?: string) => void
   updateDesignContext: (patch: Partial<DesignContext>) => void
   /** Hydrate workspace root + design context defaults from persisted settings. */

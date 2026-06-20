@@ -57,6 +57,8 @@ export const useDesignWorkspaceStore = create<DesignWorkspaceState>((set, get) =
   settingsLoaded: false,
   fileError: null,
   designSystemHash: '',
+  implementOpen: false,
+  implementTitle: '',
 
   setWorkspaceRoot: (workspaceRoot) => set({ workspaceRoot }),
 
@@ -150,6 +152,10 @@ export const useDesignWorkspaceStore = create<DesignWorkspaceState>((set, get) =
     writeBrowserStorageItem(AGENT_PANEL_KEY, open ? '1' : '0')
     set({ agentPanelOpen: open })
   },
+
+  openImplementPanel: (title) => set({ implementOpen: true, implementTitle: title }),
+
+  closeImplementPanel: () => set({ implementOpen: false }),
 
   setAssistantModel: (model, providerId) =>
     set({ assistantModel: model, assistantProviderId: providerId ?? '' }),
@@ -251,5 +257,6 @@ export const useDesignWorkspaceStore = create<DesignWorkspaceState>((set, get) =
     set({ designSystemHash: res && res.ok ? hashDesignSystem(res.content) : '' })
   },
 
-  resetWorkspace: () => set({ artifacts: [], activeArtifactId: null, fileError: null, designSystemHash: '' })
+  resetWorkspace: () =>
+    set({ artifacts: [], activeArtifactId: null, fileError: null, designSystemHash: '', implementOpen: false })
 }))

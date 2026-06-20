@@ -26,6 +26,7 @@ export function DesignWorkspaceView({
 }: Props): ReactElement {
   const { t } = useTranslation('common')
   const agentPanelOpen = useDesignWorkspaceStore((s) => s.agentPanelOpen)
+  const implementOpen = useDesignWorkspaceStore((s) => s.implementOpen)
   const loadDesignSettings = useDesignWorkspaceStore((s) => s.loadDesignSettings)
   const fileError = useDesignWorkspaceStore((s) => s.fileError)
   const setFileError = useDesignWorkspaceStore((s) => s.setFileError)
@@ -51,7 +52,7 @@ export function DesignWorkspaceView({
       ) : null}
       <div className="flex min-h-0 flex-1">
         <DesignCanvas />
-        {agentPanelOpen ? (
+        {agentPanelOpen && !implementOpen ? (
           <div className="min-h-0 w-[360px] shrink-0 shadow-[inset_1px_0_0_var(--ds-sidebar-row-ring)]">
             <DesignAgentPanel
               value={input}

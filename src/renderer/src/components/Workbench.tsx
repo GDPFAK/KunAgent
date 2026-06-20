@@ -57,6 +57,7 @@ import { WriteWorkspaceView } from './write/WriteWorkspaceView'
 import { WriteAssistantPanel } from './write/WriteAssistantPanel'
 import { WriteSidebar } from './write/WriteSidebar'
 import { DesignWorkspaceView } from './design/DesignWorkspaceView'
+import { DesignImplementPanel } from './design/DesignImplementPanel'
 import { DesignSidebar } from './design/DesignSidebar'
 import { useDesignWorkspaceStore } from '../design/design-workspace-store'
 import { buildDesignFromCodePrompt, buildDesignTurnPrompt } from '../design/design-turn-prompt'
@@ -487,6 +488,8 @@ export function Workbench(): ReactElement {
   const [planPanelOverlayPreferred, setPlanPanelOverlayPreferred] = useState(false)
   const writeAssistantOpen = useWriteWorkspaceStore((s) => s.assistantOpen)
   const setWriteAssistantOpen = useWriteWorkspaceStore((s) => s.setAssistantOpen)
+  const designImplementOpen = useDesignWorkspaceStore((s) => s.implementOpen)
+  const designImplementTitle = useDesignWorkspaceStore((s) => s.implementTitle)
   const writeAssistantModel = useWriteWorkspaceStore((s) => s.assistantModel)
   const writeAssistantProviderId = useWriteWorkspaceStore((s) => s.assistantProviderId)
   const setWriteAssistantModel = useWriteWorkspaceStore((s) => s.setAssistantModel)
@@ -2283,7 +2286,8 @@ export function Workbench(): ReactElement {
         designContext: designState.designContext
       })
       await createThread({ workspaceRoot: designWorkspaceRoot })
-      setRoute('chat')
+      // Stay on the design page; run the implement turn in the in-page assistant.
+      designState.openImplementPanel(artifact.title)
       const ok = await sendMessage(prompt, 'agent', {
         displayText: t('designImplementDisplay', { title: artifact.title })
       })
@@ -2751,14 +2755,57 @@ export function Workbench(): ReactElement {
             />
           </Suspense>
         ) : route === 'design' ? (
-          <DesignWorkspaceView
-            leftSidebarCollapsed={leftSidebarCollapsed}
-            onToggleLeftSidebar={toggleLeftSidebar}
-            input={input}
-            setInput={setInput}
-            onSubmitPrompt={sendDesignTurn}
-            onOpenAgentSettings={() => openSettings('design')}
-          />
+          <div className="flex min-h-0 flex-1">
+            <DesignWorkspaceView
+              leftSidebarCollapsed={leftSidebarCollapsed}
+              onToggleLeftSidebar={toggleLeftSidebar}
+              input={input}
+              setInput={setInput}
+              onSubmitPrompt={sendDesignTurn}
+              onOpenAgentSettings={() => openSettings('design')}
+            />
+            {designImplementOpen ? (
+              <div className="min-h-0 w-[360px] shrink-0">
+                <DesignImplementPanel
+                  title={designImplementTitle}
+                  workspaceRoot={workspaceRoot}
+                  input={input}
+                  setInput={setInput}
+                  mode={mode}
+                  setMode={setMode}
+                  busy={busy}
+                  runtimeConnection={runtimeConnection}
+                  activeThreadId={activeThreadId}
+                  blocks={blocks}
+                  liveReasoning={liveReasoning}
+                  liveAssistant={liveAssistant}
+                  composerModel={composerModel}
+                  composerProviderId={composerProviderId}
+                  composerPickList={composerPickList}
+                  composerModelGroups={composerModelGroups}
+                  composerReasoningEffort={composerReasoningEffort}
+                  setComposerModel={setComposerModel}
+                  setComposerReasoningEffort={setComposerReasoningEffort}
+                  queuedMessages={queuedMessages}
+                  removeQueuedMessage={removeQueuedMessage}
+                  attachments={composerAttachments}
+                  attachmentUploadEnabled={attachmentUploadEnabled}
+                  attachmentUploadBusy={attachmentUploadBusy}
+                  attachmentUploadError={attachmentUploadError}
+                  onPickAttachments={(files) => void handlePickAttachments(files)}
+                  onPasteClipboardImage={(options) => void handlePasteClipboardImage(options)}
+                  onRemoveAttachment={removeComposerAttachment}
+                  onSend={handleSend}
+                  onInterrupt={(options) => void interrupt(options)}
+                  onRetryConnection={() => void probeRuntime('user', { restart: true })}
+                  onOpenSettings={() => openSettings('agents')}
+                  onConfigureProviders={() => openSettings('providers')}
+                  onClose={() => useDesignWorkspaceStore.getState().closeImplementPanel()}
+                  className="h-full w-full"
+                />
+              </div>
+            ) : null}
+          </div>
         ) : route === 'write' ? (
           <>
             {writeRuntimeBannerMessage ? renderRuntimeBanner(writeRuntimeBannerMessage, visibleRuntimeErrorDetail) : null}
