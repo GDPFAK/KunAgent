@@ -70,7 +70,7 @@ export function FloatingComposerExecutionPicker({
     const button = menu === 'approval' ? approvalButtonRef.current : sandboxButtonRef.current
     const rect = button?.getBoundingClientRect()
     if (!rect) return
-    const menuWidth = menu === 'approval' ? 190 : 210
+    const menuWidth = menu === 'approval' ? 156 : 184
     const estimatedMenuHeight = menu === 'approval' ? 228 : 190
     const menuHeight = menuRef.current?.offsetHeight ?? estimatedMenuHeight
     const anchorLeft = rect.left + (rect.width / 2) - (menuWidth / 2)
@@ -214,7 +214,7 @@ function ExecutionRow({
       role="menuitemradio"
       aria-checked={selected}
       onClick={onClick}
-      className={`flex w-full cursor-pointer items-center justify-between gap-3 rounded-xl px-2.5 py-2 text-left text-ds-ink transition ${
+      className={`flex w-full cursor-pointer items-center gap-1.5 rounded-xl px-2.5 py-2 text-left text-ds-ink transition ${
         selected ? 'bg-ds-hover' : 'hover:bg-ds-hover/70'
       }`}
     >

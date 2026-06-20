@@ -165,7 +165,7 @@ describe('chat-store-thread-actions queued messages', () => {
     }
     registryMock.getProvider.mockReturnValue(provider)
     const saveSettingsSilent = vi.fn(async () => ({
-      agents: { kun: { providerId: 'xiaomi-token-plan', model: 'mimo-v2-flash' } },
+      agents: { kun: { providerId: 'xiaomi-token-plan', model: 'mimo-v2.5' } },
       codePromptPrefix: ''
     }))
     const restartRuntime = vi.fn(async () => undefined)
@@ -182,20 +182,20 @@ describe('chat-store-thread-actions queued messages', () => {
     })
     const { actions, state } = buildHarness()
     state.busy = false
-    state.composerModel = 'mimo-v2-flash'
+    state.composerModel = 'mimo-v2.5'
     state.composerProviderId = 'xiaomi-token-plan'
 
     await expect(actions.sendMessage('hello', 'agent')).resolves.toBe(true)
 
     expect(saveSettingsSilent).toHaveBeenCalledWith({
-      agents: { kun: { providerId: 'xiaomi-token-plan', model: 'mimo-v2-flash' } }
+      agents: { kun: { providerId: 'xiaomi-token-plan', model: 'mimo-v2.5' } }
     })
     expect(restartRuntime).toHaveBeenCalledTimes(1)
     expect(provider.connect).toHaveBeenCalledTimes(1)
     expect(provider.sendUserMessage).toHaveBeenCalledWith(
       'thr_existing',
       'hello',
-      expect.objectContaining({ model: 'mimo-v2-flash' })
+      expect.objectContaining({ model: 'mimo-v2.5' })
     )
   })
 

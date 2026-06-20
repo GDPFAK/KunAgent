@@ -191,6 +191,7 @@ export const PLAN_MODE_INSTRUCTION = [
   'When you understand the task well enough, call the `create_plan` tool to save a complete implementation plan as Markdown.',
   'Use `operation: "draft"` for the first plan, and `operation: "refine"` when revising an existing plan; you may call `create_plan` multiple times as the plan evolves.',
   'Write concrete, actionable steps (summary, implementation steps, tests, risks) rather than vague intentions.',
+  'Favor the smallest plan that fully solves the task: question whether each proposed component, abstraction, dependency, config knob, or new file needs to exist at all (YAGNI), and prefer the standard library, a native platform feature, or an already-present dependency over new custom code. Do NOT trim correctness, input validation, error handling, security, or accessibility to make a plan smaller.',
   'After saving, give the user a short summary of the plan and what to review.'
 ].join('\n')
 
@@ -1204,6 +1205,7 @@ export class AgentLoop {
       threadId,
       turnId,
       model,
+      ...(thread?.providerId?.trim() ? { providerId: thread.providerId.trim() } : {}),
       systemPrompt: this.opts.prefix.systemPrompt,
       ...(planTurnActive ? { modeInstruction: PLAN_MODE_INSTRUCTION } : {}),
       ...(contextInstructions.length ? { contextInstructions } : {}),

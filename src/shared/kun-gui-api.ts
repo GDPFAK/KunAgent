@@ -8,7 +8,13 @@ import type {
   ModelProviderModelProfileV1,
   ScheduleRunResult,
   ScheduleRuntimeStatus,
-  ScheduleTaskFromTextResult
+  ScheduleTaskFromTextResult,
+  WorkflowApprovalDecision,
+  WorkflowCodeCheckResult,
+  WorkflowCodeLanguage,
+  WorkflowNodeTestResult,
+  WorkflowRunResult,
+  WorkflowRuntimeStatus
 } from './app-settings'
 import type { EditorListResult, EditorOpenResult, OpenEditorPathOptions } from './editor'
 import type { GitBranchesResult, GitBranchWorktreesResult, GitWorktreeCheckoutResult } from './git-branches'
@@ -279,6 +285,13 @@ export type KunGuiApi = {
   runClawTask: (taskId: string) => Promise<ClawRunResult>
   getScheduleStatus: () => Promise<ScheduleRuntimeStatus>
   runScheduleTask: (taskId: string) => Promise<ScheduleRunResult>
+  getWorkflowStatus: () => Promise<WorkflowRuntimeStatus>
+  runWorkflow: (workflowId: string, input?: unknown) => Promise<WorkflowRunResult>
+  stopWorkflow: (workflowId: string) => Promise<WorkflowRunResult>
+  runWorkflowNode: (workflowId: string, nodeId: string) => Promise<WorkflowRunResult>
+  testWorkflowNode: (workflowId: string, nodeId: string, mockJson: string) => Promise<WorkflowNodeTestResult>
+  resolveWorkflowApproval: (token: string, decision: WorkflowApprovalDecision) => Promise<{ ok: boolean }>
+  checkWorkflowCode: (language: WorkflowCodeLanguage, code: string) => Promise<WorkflowCodeCheckResult>
   startClawImInstallQr: (
     provider: 'feishu' | 'weixin',
     options?: { isLark?: boolean }

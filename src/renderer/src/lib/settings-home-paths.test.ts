@@ -5,6 +5,7 @@ import {
   defaultKunRuntimeSettings,
   defaultModelProviderSettings,
   defaultScheduleSettings,
+  defaultWorkflowSettings,
   defaultWriteSettings,
   type AppSettingsV1,
   type ClawImChannelV1,
@@ -136,6 +137,7 @@ function settings(): AppSettingsV1 {
       },
       tasks: [scheduledTask('~/schedule/task-1')]
     },
+    workflow: defaultWorkflowSettings(),
     guiUpdate: { channel: 'stable' },
     codePromptPrefix: '',
     disabledSkillIds: []

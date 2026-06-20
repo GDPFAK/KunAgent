@@ -39,9 +39,10 @@ describe('keyboard shortcuts', () => {
     expect(bindings['new-chat']).toEqual(['Ctrl+N'])
   })
 
-  it('uses platform defaults for the terminal toggle shortcut', () => {
-    expect(resolveKeyboardShortcutBindings(undefined, 'darwin')['toggle-terminal']).toEqual(['Meta+`'])
+  it('uses Ctrl+` for the terminal toggle shortcut on every platform', () => {
+    expect(resolveKeyboardShortcutBindings(undefined, 'darwin')['toggle-terminal']).toEqual(['Ctrl+`'])
     expect(resolveKeyboardShortcutBindings(undefined, 'win32')['toggle-terminal']).toEqual(['Ctrl+`'])
+    expect(resolveKeyboardShortcutBindings(undefined, 'linux')['toggle-terminal']).toEqual(['Ctrl+`'])
   })
 
   it('ignores unknown commands and detects conflicts', () => {

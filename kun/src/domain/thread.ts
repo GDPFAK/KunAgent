@@ -25,6 +25,7 @@ export function createThreadRecord(input: {
   title: string
   workspace: string
   model: string
+  providerId?: string
   mode?: ThreadMode
   status?: ThreadStatus
   approvalPolicy?: ApprovalPolicy
@@ -48,6 +49,7 @@ export function createThreadRecord(input: {
     title: input.title,
     workspace: input.workspace,
     model: input.model,
+    ...(input.providerId ? { providerId: input.providerId } : {}),
     mode: input.mode ?? 'agent',
     status: input.status ?? 'idle',
     approvalPolicy: input.approvalPolicy ?? DEFAULT_APPROVAL_POLICY,
@@ -77,7 +79,7 @@ export function toThreadSummary(
   thread: ThreadEntity
 ): Pick<
   ThreadEntity,
-  'id' | 'title' | 'workspace' | 'model' | 'mode' | 'status' | 'approvalPolicy' | 'sandboxMode' | 'createdAt' | 'updatedAt'
+  'id' | 'title' | 'workspace' | 'model' | 'providerId' | 'mode' | 'status' | 'approvalPolicy' | 'sandboxMode' | 'createdAt' | 'updatedAt'
   | 'costBudgetUsd' | 'costBudgetWarningSent'
   | 'relation' | 'parentThreadId'
   | 'forkedFromThreadId' | 'forkedFromTitle' | 'forkedAt' | 'forkedFromMessageCount' | 'forkedFromTurnCount'
@@ -88,6 +90,7 @@ export function toThreadSummary(
     title: thread.title,
     workspace: thread.workspace,
     model: thread.model,
+    ...(thread.providerId ? { providerId: thread.providerId } : {}),
     mode: thread.mode,
     status: thread.status,
     approvalPolicy: thread.approvalPolicy,

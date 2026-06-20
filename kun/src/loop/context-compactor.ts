@@ -182,8 +182,11 @@ export class ContextCompactor {
         replacedTokens: 0
       }
     }
-    const head = keepRecent === 0 ? history : history.slice(0, history.length - keepRecent)
-    const tail = keepRecent === 0 ? [] : history.slice(-keepRecent)
+    const tailStart = keepRecent === 0
+      ? history.length
+      : repairTailStartForToolResults(history, history.length - keepRecent)
+    const head = history.slice(0, tailStart)
+    const tail = history.slice(tailStart)
     const replacedTokens = this.estimator.estimateItems(head)
     const sourceDigest = computeShortHash(compactedItemsDigestSource(head))
     const digestMarker = createToolDigestMarker(sourceDigest)
@@ -233,6 +236,24 @@ export function trimTrailingToolCalls(history: TurnItem[]): TurnItem[] {
     end -= 1
   }
   return end === history.length ? history : history.slice(0, end)
+}
+
+function repairTailStartForToolResults(history: TurnItem[], start: number): number {
+  const tailStart = Math.max(0, Math.min(history.length, start))
+  const tail = history.slice(tailStart)
+  if (!hasOrphanToolResult(tail)) return tailStart
+  for (let index = tailStart - 1; index >= 0; index -= 1) {
+    if (history[index].kind === 'user_message') return index > 0 ? index : tailStart
+  }
+  return tailStart
+}
+
+function hasOrphanToolResult(items: TurnItem[]): boolean {
+  const callIds = new Set<string>()
+  for (const item of items) {
+    if (item.kind === 'tool_call') callIds.add(item.callId)
+  }
+  return items.some((item) => item.kind === 'tool_result' && !callIds.has(item.callId))
 }
 
 function aggressiveCompactionThreshold(thresholds: ModelContextThresholds): number {

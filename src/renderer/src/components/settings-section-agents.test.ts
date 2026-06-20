@@ -285,6 +285,10 @@ function baseCtx(): Record<string, unknown> {
     logPath: '',
     logDirOpenError: '',
     setLogDirOpenError: noop,
+    compactHomePath: (path: string) => path,
+    expandHomePath: (path: string) => path,
+    compactHomePathList: (values: readonly string[]) => values.join('\n'),
+    expandHomePathList: (value: string) => value.split('\n').filter(Boolean),
     pickWriteWorkspace: asyncNoop,
     resetWriteWorkspaceToDefault: noop,
     writeWorkspacePickerError: '',
@@ -405,7 +409,7 @@ describe('AgentsSettingsSection Kun diagnostics smoke', () => {
         id: 'xiaomi',
         baseUrl: 'https://api.xiaomimimo.com/v1',
         endpointFormat: 'chat_completions',
-        models: expect.arrayContaining(['mimo-v2-flash'])
+        models: expect.arrayContaining(['mimo-v2.5'])
       })
     ]))
     expect(patch.agents?.kun).toEqual(expect.objectContaining({
@@ -647,20 +651,20 @@ describe('AgentsSettingsSection Kun diagnostics smoke', () => {
 
   it('defines coding provider presets for the Providers menu', () => {
     const expected = [
-      ['zhipu-coding-plan', 'Zhipu Coding Plan', 'https://open.bigmodel.cn/api/coding/paas/v4'],
-      ['zai-coding-plan', 'Z.ai Coding Plan', 'https://api.z.ai/api/coding/paas/v4'],
+      ['zhipu-coding-plan', 'Zhipu Coding Plan', 'https://open.bigmodel.cn/api/coding/paas/v4/chat/completions', 'custom_endpoint'],
+      ['zai-coding-plan', 'Z.ai Coding Plan', 'https://api.z.ai/api/coding/paas/v4/chat/completions', 'custom_endpoint'],
       ['kimi-code', 'Kimi Code', 'https://api.kimi.com/coding/v1'],
       ['moonshot-cn', 'Moonshot CN', 'https://api.moonshot.cn/v1'],
       ['moonshot-global', 'Moonshot Global', 'https://api.moonshot.ai/v1']
     ] as const
 
-    for (const [id, name, baseUrl] of expected) {
+    for (const [id, name, baseUrl, endpointFormat = 'chat_completions'] of expected) {
       const preset = getModelProviderPreset(id)
       expect(preset && modelProviderPresetProfile(preset)).toMatchObject({
         id,
         name,
         baseUrl,
-        endpointFormat: 'chat_completions'
+        endpointFormat
       })
     }
   })

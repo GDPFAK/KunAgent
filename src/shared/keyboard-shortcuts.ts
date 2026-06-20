@@ -30,10 +30,7 @@ export const KEYBOARD_SHORTCUT_COMMANDS = [
     id: 'toggle-terminal',
     labelKey: 'shortcutToggleTerminal',
     descriptionKey: 'shortcutToggleTerminalDesc',
-    defaultBindings: ['Ctrl+`'],
-    platformDefaultBindings: {
-      darwin: ['Meta+`']
-    }
+    defaultBindings: ['Ctrl+`']
   },
   {
     id: 'settings',

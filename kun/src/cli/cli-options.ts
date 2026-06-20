@@ -12,6 +12,7 @@ import {
   ModelConfigSchema,
   QualityConfigSchema,
   RuntimeTuningConfigSchema,
+  ServeProviderConfigSchema,
   StorageConfigSchema,
   TokenEconomyConfigSchema
 } from '../config/kun-config.js'
@@ -54,6 +55,7 @@ export const ServeOptionsSchema = z.object({
   tokenEconomy: TokenEconomyConfigSchema.optional(),
   insecure: z.boolean().default(false),
   storage: StorageConfigSchema.default(DEFAULT_STORAGE_CONFIG),
+  providers: z.record(z.string().min(1), ServeProviderConfigSchema).optional(),
   models: ModelConfigSchema.optional(),
   contextCompaction: ContextCompactionConfigSchema.optional(),
   runtime: RuntimeTuningConfigSchema.optional(),

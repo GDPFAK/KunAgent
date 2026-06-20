@@ -9,9 +9,12 @@ import { promisify } from 'node:util'
 import {
   defaultKunTokenEconomySettings,
   isKunRuntimeInsecure,
+  getKunRuntimeSettings,
+  getModelProviderSettings,
   resolveModelProviderProxyUrl,
   resolveKunRuntimeSettings,
   type ModelProviderModelProfileV1,
+  type ModelProviderProfileV1,
   type KunRuntimeSettingsV1,
   type AppSettingsV1
 } from '../shared/app-settings'
@@ -27,6 +30,7 @@ import {
   QualityConfigSchema,
   RuntimeTuningConfigSchema
 } from '../../kun/src/config/kun-config.js'
+import { HooksConfigSchema } from '../../kun/src/hooks/hook-config.js'
 import {
   AttachmentsCapabilityConfig,
   ComputerUseCapabilityConfig,
@@ -430,11 +434,21 @@ export async function syncGuiManagedKunConfig(
   const storage = storageConfigForRuntime(runtime.storage)
   const mcpSearch = runtime.mcpSearch
   const skillCapability = await skillCapabilityConfigForRuntime(skills, options?.scheduleMcp?.settings)
+  const workflowHookEntries = buildWorkflowHookEntries(options?.scheduleMcp?.settings.workflow)
+  // Mirror every configured GUI provider (apiKey + baseUrl + endpointFormat)
+  // into the kun config so the runtime's MultiProviderModelClient can route
+  // per-request `providerId` overrides (workflow / scheduled task / IM
+  // bridge) without restart. Empty when no GUI settings are reachable, in
+  // which case the runtime stays single-provider.
+  const providers = options?.scheduleMcp?.settings
+    ? providersConfigForRuntime(options.scheduleMcp.settings)
+    : undefined
   const next = {
     serve: {
       ...serve,
       storage,
-      tokenEconomy: tokenEconomyConfigForRuntime(runtime.tokenEconomy, existingTokenEconomy)
+      tokenEconomy: tokenEconomyConfigForRuntime(runtime.tokenEconomy, existingTokenEconomy),
+      ...(providers && Object.keys(providers).length ? { providers } : {})
     },
     models: modelConfigForRuntime(existingModels, runtime.modelProfiles),
     contextCompaction: contextCompactionConfigForRuntime(runtime.contextCompaction, existingContextCompaction),
@@ -488,7 +502,8 @@ export async function syncGuiManagedKunConfig(
           minScore: mcpSearch.minScore
         }
       }
-    }
+    },
+    ...(workflowHookEntries.length ? { hooks: workflowHookEntries } : {})
   }
   const parsedNext = KunConfigSchema.safeParse(next)
   if (!parsedNext.success) {
@@ -711,6 +726,39 @@ function modelConfigProfilesFromProviderProfiles(
       messageParts: profile.messageParts,
       ...(profile.reasoning ? { reasoning: profile.reasoning } : {}),
       ...(profile.endpointFormat ? { endpointFormat: profile.endpointFormat } : {})
+    }
+  }
+  return out
+}
+
+/**
+ * Mirror every configured GUI provider (apiKey + baseUrl + endpointFormat
+ * + per-provider proxy) into the kun config's `serve.providers` map so the
+ * runtime's MultiProviderModelClient can route a workflow / scheduled-task
+ * / IM-bridge turn to a non-runtime provider per request. Skips entries
+ * whose baseUrl is empty — those couldn't be reached anyway.
+ *
+ * The kun runtime's own bound provider is included too; the wrapper's
+ * default client handles it identically, so duplicate entries are
+ * idempotent.
+ */
+function providersConfigForRuntime(settings: AppSettingsV1): Record<string, Record<string, unknown>> {
+  const out: Record<string, Record<string, unknown>> = {}
+  const runtimeProviderId = getKunRuntimeSettings(settings).providerId.trim()
+  const proxyUrl = resolveModelProviderProxyUrl(settings)
+  for (const provider of getModelProviderSettings(settings).providers as ModelProviderProfileV1[]) {
+    const id = provider.id?.trim()
+    const baseUrl = provider.baseUrl?.trim()
+    if (!id || !baseUrl) continue
+    // The runtime's own provider is already wired via the default CLI args;
+    // skipping it keeps the map smaller and avoids paying twice for one
+    // provider that happens to be the active runtime binding.
+    if (id === runtimeProviderId) continue
+    out[id] = {
+      apiKey: provider.apiKey?.trim() ?? '',
+      baseUrl,
+      ...(provider.endpointFormat ? { endpointFormat: provider.endpointFormat } : {}),
+      ...(proxyUrl ? { modelProxyUrl: proxyUrl } : {})
     }
   }
   return out
@@ -976,10 +1024,35 @@ function sanitizeKunCapabilitiesConfig(value: unknown): Record<string, unknown> 
   return next
 }
 
+/** Validate the GUI-managed `hooks` array (workflow + command entries). Array, not an object. */
+function parseKunHooksSection(value: unknown): unknown[] {
+  const parsed = HooksConfigSchema.safeParse(Array.isArray(value) ? value : [])
+  return parsed.success ? parsed.data : []
+}
+
+/** Build kun `hooks` entries from the GUI's workflow hook triggers (workflow-backed hooks). */
+function buildWorkflowHookEntries(workflow: AppSettingsV1['workflow'] | undefined): unknown[] {
+  if (!workflow) return []
+  const baseUrl = `http://127.0.0.1:${workflow.webhookPort}`
+  const secret = workflow.webhookSecret.trim()
+  return (workflow.hookTriggers ?? [])
+    .filter((trigger) => trigger.enabled && trigger.workflowId)
+    .map((trigger) => ({
+      phase: trigger.phase,
+      ...(trigger.toolNames.length ? { toolNames: trigger.toolNames } : {}),
+      workflow: trigger.workflowId,
+      mode: trigger.mode,
+      baseUrl,
+      ...(secret ? { secret } : {}),
+      ...(trigger.timeoutMs > 0 ? { timeoutMs: trigger.timeoutMs } : {})
+    }))
+}
+
 function sanitizeKunConfigSections(
   existing: Record<string, unknown> | null
 ): Record<string, unknown> | null {
   if (!existing) return null
+  const hooks = parseKunHooksSection(existing.hooks)
   return {
     serve: parseKunConfigSection(KunServeConfigSchema, existing.serve),
     models: parseKunConfigSection(ModelConfigSchema, existing.models),
@@ -989,7 +1062,8 @@ function sanitizeKunConfigSections(
     ),
     runtime: parseKunConfigSection(RuntimeTuningConfigSchema, existing.runtime),
     quality: parseKunConfigSection(QualityConfigSchema, existing.quality),
-    capabilities: sanitizeKunCapabilitiesConfig(existing.capabilities)
+    capabilities: sanitizeKunCapabilitiesConfig(existing.capabilities),
+    ...(hooks.length ? { hooks } : {})
   }
 }
 

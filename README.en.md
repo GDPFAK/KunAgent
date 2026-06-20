@@ -194,6 +194,7 @@ npm install --registry=https://registry.npmmirror.com
 | [docs/kun-architecture.en.md](docs/kun-architecture.en.md) | Runtime architecture and GUI integration |
 | [docs/kun-cache-optimization.en.md](docs/kun-cache-optimization.en.md) | Cache optimization and token economy |
 | [docs/model-provider-presets.md](docs/model-provider-presets.md) | Model provider presets |
+| [docs/workflow-loop.en.md](docs/workflow-loop.en.md) | The Loop node and the loop-agent idea (Create Loop workflows) |
 | [docs/CONTRIBUTING.en.md](docs/CONTRIBUTING.en.md) | Contribution guide |
 | [docs/DEVELOPMENT.en.md](docs/DEVELOPMENT.en.md) | Local development workflow |
 | [SECURITY.md](SECURITY.md) | Security disclosure policy |

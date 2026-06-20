@@ -121,6 +121,7 @@ export class ThreadService {
       title: options.title ?? (request.title?.trim() || 'New chat'),
       workspace: request.workspace,
       model: request.model,
+      ...(request.providerId?.trim() ? { providerId: request.providerId.trim() } : {}),
       mode: request.mode,
       approvalPolicy: request.approvalPolicy,
       sandboxMode: request.sandboxMode,

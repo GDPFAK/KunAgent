@@ -43,6 +43,7 @@ export function createAppActions(options: CreateAppActionsOptions): Pick<
   | 'openPlugins'
   | 'openClaw'
   | 'openSchedule'
+  | 'openWorkflow'
   | 'openInitialSetup'
   | 'closeInitialSetup'
   | 'selectInspectorItem'
@@ -186,6 +187,10 @@ export function createAppActions(options: CreateAppActionsOptions): Pick<
 
     openSchedule: () => {
       set({ route: 'schedule' })
+    },
+
+    openWorkflow: () => {
+      set({ route: 'workflow' })
     },
 
     openInitialSetup: (mode: InitialSetupMode = 'required') =>

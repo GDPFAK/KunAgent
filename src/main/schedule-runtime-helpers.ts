@@ -1,9 +1,20 @@
+import { mkdir } from 'node:fs/promises'
 import type { IncomingMessage, ServerResponse } from 'node:http'
+import {
+  DEFAULT_SCHEDULE_MODEL,
+  getKunRuntimeSettings,
+  getModelProviderSettings,
+  modelProviderModelProfile,
+  normalizeScheduleReasoningEffort,
+  DEFAULT_SCHEDULE_REASONING_EFFORT
+} from '../shared/app-settings'
 import type {
   AppSettingsV1,
   ClawImChannelV1,
+  ModelProviderProfileV1,
   ScheduleReasoningEffort,
   ScheduleRunMode,
+  ScheduleRunResult,
   ScheduledTaskV1
 } from '../shared/app-settings'
 import type { JsonSettingsStore } from './settings-store'
@@ -62,6 +73,8 @@ export type RunPromptOptions = {
   title: string
   workspaceRoot: string
   model: string
+  /** Optional provider id; routed via Kun's MultiProviderModelClient. */
+  providerId?: string
   reasoningEffort: ScheduleReasoningEffort
   mode: ScheduleRunMode
   clawChannel?: ClawImChannelV1 | null
@@ -209,4 +222,209 @@ export function internalUrl(settings: AppSettingsV1): string {
 
 export function hasEnabledScheduledTask(settings: AppSettingsV1): boolean {
   return settings.schedule.tasks.some((task) => task.enabled && task.schedule.kind !== 'manual')
+}
+
+// ---------------------------------------------------------------------------
+// Shared model resolution + prompt execution primitives.
+//
+// These were extracted from ScheduleRuntime so the WorkflowRuntime AI-agent
+// node runs a prompt through the exact same Kun-runtime path as a scheduled
+// task. ScheduleRuntime now delegates to them (behavior-preserving).
+// ---------------------------------------------------------------------------
+
+export type ScheduleModelConfig = {
+  providerId: string
+  model: string
+  reasoningEffort: ScheduleReasoningEffort
+}
+
+const SCHEDULE_REASONING_EFFORT_SET = new Set<ScheduleReasoningEffort>([
+  'auto',
+  'off',
+  'low',
+  'medium',
+  'high',
+  'max'
+])
+
+function isScheduleReasoningEffort(value: string): value is ScheduleReasoningEffort {
+  return SCHEDULE_REASONING_EFFORT_SET.has(value as ScheduleReasoningEffort)
+}
+
+function modelIdsMatch(left: string, right: string): boolean {
+  return left.trim().toLowerCase() === right.trim().toLowerCase()
+}
+
+function providerHasModel(provider: Pick<ModelProviderProfileV1, 'models'>, model: string): boolean {
+  return provider.models.some((candidate) => modelIdsMatch(candidate, model))
+}
+
+function firstConcreteProviderModel(provider: Pick<ModelProviderProfileV1, 'models'> | null): string {
+  return provider?.models.find((model) => normalizeTaskModel(model))?.trim() ?? DEFAULT_SCHEDULE_MODEL
+}
+
+function resolveReasoningForModel(
+  provider: Pick<ModelProviderProfileV1, 'modelProfiles'> | null,
+  model: string,
+  reasoningEffort: ScheduleReasoningEffort | string | null | undefined
+): ScheduleReasoningEffort {
+  const requested = normalizeScheduleReasoningEffort(reasoningEffort)
+  const profile = provider ? modelProviderModelProfile(provider, model) : undefined
+  const supported = profile?.reasoning?.supportedEfforts.filter(isScheduleReasoningEffort) ?? []
+  if (supported.length === 0) return requested
+  if (supported.includes(requested)) return requested
+  const profileDefault = profile?.reasoning?.defaultEffort
+  if (profileDefault && isScheduleReasoningEffort(profileDefault) && supported.includes(profileDefault)) {
+    return profileDefault
+  }
+  return supported.includes(DEFAULT_SCHEDULE_REASONING_EFFORT)
+    ? DEFAULT_SCHEDULE_REASONING_EFFORT
+    : supported[0] ?? DEFAULT_SCHEDULE_REASONING_EFFORT
+}
+
+/**
+ * Resolve provider/model/reasoning for a prompt run. `fallbackProviderId` lets
+ * callers supply a feature-specific default (schedule vs workflow) consulted
+ * after the requested/runtime providers.
+ */
+export function resolveScheduleModelConfig(
+  settings: AppSettingsV1,
+  input: {
+    providerId?: string | null
+    model?: string | null
+    reasoningEffort?: ScheduleReasoningEffort | string | null
+  },
+  fallbackProviderId = ''
+): ScheduleModelConfig {
+  const providers = getModelProviderSettings(settings).providers
+  const requestedProviderId = input.providerId?.trim() || ''
+  const requestedModel = normalizeTaskModel(input.model ?? '')
+  const runtimeProviderId = getKunRuntimeSettings(settings).providerId.trim()
+  const extraProviderId = fallbackProviderId.trim()
+  const provider =
+    providers.find((item) => item.id === requestedProviderId) ??
+    (requestedModel ? providers.find((item) => providerHasModel(item, requestedModel)) : undefined) ??
+    providers.find((item) => item.id === runtimeProviderId) ??
+    (extraProviderId ? providers.find((item) => item.id === extraProviderId) : undefined) ??
+    providers[0] ??
+    null
+  const model =
+    requestedModel && (!provider || providerHasModel(provider, requestedModel))
+      ? requestedModel
+      : firstConcreteProviderModel(provider)
+  return {
+    providerId: provider?.id ?? requestedProviderId,
+    model,
+    reasoningEffort: resolveReasoningForModel(provider, model, input.reasoningEffort)
+  }
+}
+
+export type RunPromptViaRuntimeOptions = {
+  /** Final prompt to send (callers apply any prefixing/persona). */
+  prompt: string
+  title: string
+  /** Resolved workspace path (callers apply the default fallback). */
+  workspaceRoot: string
+  model: string
+  /**
+   * Optional provider id override. Forwarded to Kun's `POST /v1/threads` so
+   * the thread (and every turn on it) routes its model request through the
+   * kun-config `serve.providers[providerId]` HTTP client. Omitted or
+   * matching the runtime's bound provider → use the runtime default (no
+   * behavior change).
+   */
+  providerId?: string
+  reasoningEffort: ScheduleReasoningEffort | ''
+  mode: ScheduleRunMode
+  waitForResult: boolean
+  responseTimeoutMs: number
+}
+
+export async function runPromptViaRuntime(
+  deps: { runtimeRequest: RuntimeRequestFn },
+  settings: AppSettingsV1,
+  options: RunPromptViaRuntimeOptions
+): Promise<ScheduleRunResult> {
+  const workspace = options.workspaceRoot.trim()
+  if (workspace) {
+    await mkdir(workspace, { recursive: true })
+  }
+  const model = normalizeTaskModel(options.model) ?? (settings.agents.kun.model.trim() || DEFAULT_SCHEDULE_MODEL)
+  const providerId = options.providerId?.trim()
+  const create = await deps.runtimeRequest(settings, '/v1/threads', {
+    method: 'POST',
+    body: JSON.stringify({
+      workspace,
+      model,
+      mode: options.mode,
+      ...(providerId ? { providerId } : {}),
+      ...(options.title.trim() ? { title: options.title.trim() } : {})
+    })
+  })
+  if (!create.ok) return { ok: false, message: runtimeErrorMessage(create, 'Failed to create thread.') }
+  const thread = JSON.parse(create.body) as ThreadRecordJson
+
+  const turnBody: Record<string, unknown> = {
+    prompt: options.prompt,
+    mode: options.mode,
+    // Headless turns — nobody can answer a user_input prompt; a turn that asks
+    // one hangs until the response timeout.
+    disableUserInput: true
+  }
+  if (model) turnBody.model = model
+  if (options.reasoningEffort) turnBody.reasoningEffort = options.reasoningEffort
+  const turn = await deps.runtimeRequest(
+    settings,
+    `/v1/threads/${encodeURIComponent(thread.id)}/turns`,
+    { method: 'POST', body: JSON.stringify(turnBody) }
+  )
+  if (!turn.ok) return { ok: false, message: runtimeErrorMessage(turn, 'Failed to start turn.') }
+
+  const parsedTurn = parseJsonObject(turn.body)
+  const turnId = asString(nestedRecord(parsedTurn?.turn).id) || asString(parsedTurn?.turnId)
+  if (!turnId) {
+    return { ok: false, message: 'Failed to start turn: missing turn id.' }
+  }
+  if (!options.waitForResult) {
+    return { ok: true, threadId: thread.id, turnId, message: 'Started' }
+  }
+
+  const text = await waitForAssistantTextViaRuntime(deps, settings, thread.id, turnId, options.responseTimeoutMs)
+  return { ok: true, threadId: thread.id, turnId, text, message: text || 'Completed' }
+}
+
+export async function waitForAssistantTextViaRuntime(
+  deps: { runtimeRequest: RuntimeRequestFn },
+  settings: AppSettingsV1,
+  threadId: string,
+  turnId: string,
+  timeoutMs: number
+): Promise<string> {
+  const deadline = Date.now() + timeoutMs
+  let lastText = ''
+  while (Date.now() < deadline) {
+    await sleep(1_500)
+    const detailRes = await deps.runtimeRequest(
+      settings,
+      `/v1/threads/${encodeURIComponent(threadId)}`,
+      { method: 'GET' }
+    )
+    if (!detailRes.ok) {
+      throw new Error(runtimeErrorMessage(detailRes, 'Failed to read thread result.'))
+    }
+    const detail = JSON.parse(detailRes.body) as ThreadDetailJson
+    lastText = latestAssistantText(detail, { turnId }) || lastText
+    const targetTurn = Array.isArray(detail.turns)
+      ? detail.turns.find((turn) => turn.id === turnId)
+      : undefined
+    if (!targetTurn) continue
+    if (isRunningStatus(targetTurn.status)) continue
+    if (targetTurn.status === 'failed' || targetTurn.status === 'aborted') {
+      const error = targetTurn.error?.trim()
+      throw new Error(error || `Agent turn ${targetTurn.status}.`)
+    }
+    if (targetTurn.status === 'completed' && lastText) return lastText
+  }
+  if (lastText) return lastText
+  throw new Error('Timed out waiting for agent response.')
 }

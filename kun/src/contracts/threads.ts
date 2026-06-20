@@ -95,6 +95,13 @@ export const ThreadSchema = z.object({
   title: z.string(),
   workspace: z.string(),
   model: z.string(),
+  /**
+   * Optional provider id. When set, every turn on this thread routes its
+   * model request to the matching per-provider client; absent → use the
+   * runtime's default provider. Lets workflow / scheduled-task / IM
+   * bridges pin a non-runtime provider per thread.
+   */
+  providerId: z.string().optional(),
   mode: ThreadMode,
   status: ThreadStatus,
   approvalPolicy: ApprovalPolicySchema.default(DEFAULT_APPROVAL_POLICY),
@@ -121,6 +128,7 @@ export const ThreadSummarySchema = ThreadSchema.pick({
   title: true,
   workspace: true,
   model: true,
+  providerId: true,
   mode: true,
   status: true,
   approvalPolicy: true,
@@ -145,6 +153,13 @@ export const CreateThreadRequest = z.object({
   title: z.string().optional(),
   workspace: z.string().min(1),
   model: z.string().min(1),
+  /**
+   * Optional provider id. The runtime keeps using its default provider
+   * when omitted (backwards compatible). When set to a configured
+   * non-default provider, every turn on this thread routes through that
+   * provider's HTTP client.
+   */
+  providerId: z.string().optional(),
   mode: ThreadMode.default('agent'),
   approvalPolicy: ApprovalPolicySchema.optional(),
   sandboxMode: SandboxModeSchema.optional(),

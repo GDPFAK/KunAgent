@@ -20,6 +20,7 @@ import {
   defaultKunRuntimeSettings,
   defaultModelProviderSettings,
   defaultScheduleSettings,
+  defaultWorkflowSettings,
   defaultWriteSettings,
   type AppSettingsV1
 } from '../shared/app-settings'
@@ -54,6 +55,7 @@ function createSettings(patch: Partial<AppSettingsV1['schedule']['internal']> = 
         ...patch
       }
     },
+    workflow: defaultWorkflowSettings(),
     guiUpdate: {
       channel: 'stable'
     },
@@ -115,7 +117,9 @@ describe('claw schedule MCP config', () => {
           '--base-url',
           'http://127.0.0.1:9787',
           '--secret',
-          'top-secret'
+          'top-secret',
+          '--workflow-base-url',
+          'http://127.0.0.1:8799'
         ],
         env: {
           ELECTRON_RUN_AS_NODE: '1'
@@ -232,7 +236,9 @@ describe('claw schedule MCP config', () => {
             resolveClawScheduleMcpNodeEntryPath(launch),
             '--gui-schedule-mcp-server',
             '--base-url',
-            'http://127.0.0.1:8788'
+            'http://127.0.0.1:8788',
+            '--workflow-base-url',
+            'http://127.0.0.1:8799'
           ],
           env: {
             ELECTRON_RUN_AS_NODE: '1'

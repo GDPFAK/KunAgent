@@ -5,10 +5,12 @@ import { useChatStore } from '../../store/chat-store'
 import { workspaceLabelFromPath } from '../../lib/workspace-label'
 import {
   isClawWorkspacePath,
+  isInternalDeepSeekGuiWorkspace,
   isInternalTemporaryWorkspace,
   normalizeWorkspaceRoot,
   workspaceRootIdentityKey
 } from '../../lib/workspace-path'
+import { readThreadWorktreeRegistry, type ThreadWorktreeRecord } from '../../lib/thread-worktree-registry'
 
 type Props = {
   /** The directory new conversations will target (active thread's workspace or the global root). */
@@ -21,6 +23,7 @@ type WorkspaceOption = {
   /** Parent folder, shown muted to disambiguate same-named projects. */
   context: string
 }
+type WorkspaceProjectPickerWorktrees = Record<string, Pick<ThreadWorktreeRecord, 'projectPath' | 'worktreePath'>>
 
 // Parent folder name, mirrors the sidebar's secondary project label. Hidden when
 // it would just repeat the folder name.
@@ -29,6 +32,55 @@ function workspaceContext(root: string, label: string): string {
   if (parts.length < 2) return ''
   const parent = parts[parts.length - 2] ?? ''
   return !parent || parent.toLowerCase() === label.toLowerCase() ? '' : parent
+}
+
+function workspaceProjectRootForPicker(
+  workspacePath: string,
+  threadWorktrees: WorkspaceProjectPickerWorktrees = {}
+): string {
+  const normalized = normalizeWorkspaceRoot(workspacePath)
+  const key = workspaceRootIdentityKey(normalized)
+  if (!key) return ''
+  for (const record of Object.values(threadWorktrees)) {
+    const worktreePath = normalizeWorkspaceRoot(record.worktreePath)
+    if (workspaceRootIdentityKey(worktreePath) === key) {
+      return normalizeWorkspaceRoot(record.projectPath) || normalized
+    }
+  }
+  return normalized
+}
+
+function isWorkspaceProjectPickerRoot(root: string): boolean {
+  const normalized = normalizeWorkspaceRoot(root)
+  if (!normalized) return false
+  if (isInternalTemporaryWorkspace(normalized)) return false
+  if (isInternalDeepSeekGuiWorkspace(normalized)) return false
+  if (isClawWorkspacePath(normalized)) return false
+  return true
+}
+
+export function buildWorkspaceProjectPickerOptions(options: {
+  currentWorkspaceRoot: string
+  workspaceRoots: readonly string[]
+  threadWorktrees?: WorkspaceProjectPickerWorktrees
+}): { currentRoot: string, options: WorkspaceOption[] } {
+  const threadWorktrees = options.threadWorktrees ?? {}
+  const currentRoot = workspaceProjectRootForPicker(options.currentWorkspaceRoot, threadWorktrees)
+  const seen = new Set<string>()
+  const out: WorkspaceOption[] = []
+  for (const raw of [currentRoot, ...options.workspaceRoots]) {
+    const root = workspaceProjectRootForPicker(raw, threadWorktrees)
+    if (!isWorkspaceProjectPickerRoot(root)) continue
+    const key = workspaceRootIdentityKey(root)
+    if (seen.has(key)) continue
+    seen.add(key)
+    const label = workspaceLabelFromPath(root)
+    out.push({ root, label, context: workspaceContext(root, label) })
+  }
+  return {
+    currentRoot,
+    options: out.sort((a, b) => a.label.localeCompare(b.label))
+  }
 }
 
 export function WorkspaceProjectPicker({ currentWorkspaceRoot }: Props): ReactElement {
@@ -45,19 +97,12 @@ export function WorkspaceProjectPicker({ currentWorkspaceRoot }: Props): ReactEl
   const wrapRef = useRef<HTMLDivElement | null>(null)
   const inputRef = useRef<HTMLInputElement | null>(null)
 
-  const options = useMemo<WorkspaceOption[]>(() => {
-    const seen = new Set<string>()
-    const out: WorkspaceOption[] = []
-    for (const raw of [current, ...codeWorkspaceRoots]) {
-      const root = normalizeWorkspaceRoot(raw)
-      if (!root || isInternalTemporaryWorkspace(root) || isClawWorkspacePath(root)) continue
-      const key = workspaceRootIdentityKey(root)
-      if (seen.has(key)) continue
-      seen.add(key)
-      const label = workspaceLabelFromPath(root)
-      out.push({ root, label, context: workspaceContext(root, label) })
-    }
-    return out.sort((a, b) => a.label.localeCompare(b.label))
+  const { currentRoot, options } = useMemo(() => {
+    return buildWorkspaceProjectPickerOptions({
+      currentWorkspaceRoot: current,
+      workspaceRoots: codeWorkspaceRoots,
+      threadWorktrees: readThreadWorktreeRegistry().worktrees
+    })
   }, [codeWorkspaceRoots, current])
 
   const filtered = useMemo(() => {
@@ -89,11 +134,11 @@ export function WorkspaceProjectPicker({ currentWorkspaceRoot }: Props): ReactEl
     return () => window.removeEventListener('pointerdown', onPointerDown)
   }, [open, showSearch])
 
-  const label = current ? workspaceLabelFromPath(current) : t('selectWorkspace')
+  const label = currentRoot ? workspaceLabelFromPath(currentRoot) : t('selectWorkspace')
 
   const handleSelect = async (root: string): Promise<void> => {
     if (acting) return
-    if (workspaceRootIdentityKey(root) === workspaceRootIdentityKey(current)) {
+    if (workspaceRootIdentityKey(root) === workspaceRootIdentityKey(currentRoot)) {
       setOpen(false)
       return
     }
@@ -167,7 +212,7 @@ export function WorkspaceProjectPicker({ currentWorkspaceRoot }: Props): ReactEl
             </div>
 
             {filtered.map((option) => {
-              const isCurrent = workspaceRootIdentityKey(option.root) === workspaceRootIdentityKey(current)
+              const isCurrent = workspaceRootIdentityKey(option.root) === workspaceRootIdentityKey(currentRoot)
               return (
                 <button
                   key={option.root}

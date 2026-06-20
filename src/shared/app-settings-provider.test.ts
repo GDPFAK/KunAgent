@@ -16,6 +16,7 @@ import {
   modelProviderPresetProfile,
   modelProviderTokenPlanProfile,
   defaultScheduleSettings,
+  defaultWorkflowSettings,
   defaultWriteSettings,
   listMusicGenerationProviderProfiles,
   listSpeechToTextProviderProfiles,
@@ -72,6 +73,7 @@ function settings(): AppSettingsV1 {
     write: defaultWriteSettings(),
     claw: defaultClawSettings(),
     schedule: defaultScheduleSettings(),
+    workflow: defaultWorkflowSettings(),
     guiUpdate: { channel: 'stable' },
     codePromptPrefix: '',
     disabledSkillIds: []
@@ -177,7 +179,7 @@ describe('model provider settings', () => {
       name: 'Xiaomi',
       baseUrl: 'https://api.xiaomimimo.com/v1',
       endpointFormat: 'chat_completions',
-      models: expect.arrayContaining(['mimo-v2-flash', 'mimo-v2.5-pro']),
+      models: expect.arrayContaining(['mimo-v2.5-pro']),
       modelProfiles: {
         'mimo-v2.5': expect.objectContaining({
           inputModalities: expect.arrayContaining(['image']),
@@ -713,7 +715,7 @@ describe('model provider settings', () => {
             apiKey: 'tp-key',
             baseUrl: 'https://token-plan-cn.xiaomimimo.com/v1',
             endpointFormat: 'chat_completions',
-            models: ['mimo-v2-flash', 'mimo-v2-omni', 'mimo-v2.5', 'mimo-v2.5-pro'],
+            models: ['mimo-v2-omni', 'mimo-v2.5', 'mimo-v2.5-pro'],
             modelProfiles: {}
           }
         ]
@@ -722,7 +724,6 @@ describe('model provider settings', () => {
 
     expect(modelSupportsImageInput(resolved.modelProfiles['mimo-v2.5'])).toBe(true)
     expect(modelSupportsImageInput(resolved.modelProfiles['mimo-v2-omni'])).toBe(true)
-    expect(modelSupportsImageInput(resolved.modelProfiles['mimo-v2-flash'])).toBe(false)
     expect(resolved.modelProfiles['mimo-v2.5-pro']).toBeDefined()
   })
 
@@ -963,8 +964,8 @@ describe('provider presets', () => {
     expect(zhipu && modelProviderPresetProfile(zhipu)).toMatchObject({
       id: 'zhipu-coding-plan',
       name: 'Zhipu Coding Plan',
-      baseUrl: 'https://open.bigmodel.cn/api/coding/paas/v4',
-      endpointFormat: 'chat_completions',
+      baseUrl: 'https://open.bigmodel.cn/api/coding/paas/v4/chat/completions',
+      endpointFormat: 'custom_endpoint',
       models: ['glm-5.2', 'glm-5.1', 'glm-5-turbo', 'glm-4.7', 'glm-4.5-air'],
       modelProfiles: {
         'glm-5.2': expect.objectContaining({
@@ -988,10 +989,15 @@ describe('provider presets', () => {
     expect(zai && modelProviderPresetProfile(zai)).toMatchObject({
       id: 'zai-coding-plan',
       name: 'Z.ai Coding Plan',
-      baseUrl: 'https://api.z.ai/api/coding/paas/v4',
-      endpointFormat: 'chat_completions',
-      models: ['glm-5.1', 'glm-5', 'glm-5-turbo', 'glm-4.7', 'glm-4.5-air'],
+      baseUrl: 'https://api.z.ai/api/coding/paas/v4/chat/completions',
+      endpointFormat: 'custom_endpoint',
+      models: ['glm-5.2', 'glm-5.1', 'glm-5', 'glm-5-turbo', 'glm-4.7', 'glm-4.5-air'],
       modelProfiles: {
+        'glm-5.2': expect.objectContaining({
+          contextWindowTokens: 1_000_000,
+          supportsToolCalling: true,
+          inputModalities: ['text']
+        }),
         'glm-5': expect.objectContaining({
           contextWindowTokens: 200_000,
           supportsToolCalling: true,
@@ -999,7 +1005,7 @@ describe('provider presets', () => {
         })
       }
     })
-    expect(zai && modelProviderPresetProfile(zai).modelProfiles['glm-5'].reasoning)
+    expect(zai && modelProviderPresetProfile(zai).modelProfiles['glm-5.2'].reasoning)
       .toEqual({
         supportedEfforts: ['off', 'high', 'max'],
         defaultEffort: 'max',
@@ -1055,14 +1061,14 @@ describe('provider presets', () => {
 
   it('resolves new OpenAI-compatible presets through the selected provider', () => {
     const cases = [
-      ['zhipu-coding-plan', 'https://open.bigmodel.cn/api/coding/paas/v4', 'glm-5.2'],
-      ['zai-coding-plan', 'https://api.z.ai/api/coding/paas/v4', 'glm-5.1'],
+      ['zhipu-coding-plan', 'https://open.bigmodel.cn/api/coding/paas/v4/chat/completions', 'glm-5.2', 'custom_endpoint'],
+      ['zai-coding-plan', 'https://api.z.ai/api/coding/paas/v4/chat/completions', 'glm-5.1', 'custom_endpoint'],
       ['kimi-code', 'https://api.kimi.com/coding/v1', 'kimi-for-coding'],
       ['moonshot-cn', 'https://api.moonshot.cn/v1', 'kimi-k2.7-code'],
       ['moonshot-global', 'https://api.moonshot.ai/v1', 'kimi-k2.7-code']
     ] as const
 
-    for (const [presetId, baseUrl, model] of cases) {
+    for (const [presetId, baseUrl, model, endpointFormat = 'chat_completions'] of cases) {
       const preset = getModelProviderPreset(presetId)
       expect(preset).not.toBeNull()
       const profile = modelProviderPresetProfile(preset!, `sk-${presetId}`)
@@ -1087,7 +1093,7 @@ describe('provider presets', () => {
       expect(resolved).toEqual(expect.objectContaining({
         apiKey: `sk-${presetId}`,
         baseUrl,
-        endpointFormat: 'chat_completions',
+        endpointFormat,
         model
       }))
       expect(resolved.modelProfiles[model]).toEqual(expect.objectContaining({

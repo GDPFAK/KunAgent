@@ -23,6 +23,14 @@ export type ModelRequest = {
   threadId: string
   turnId: string
   model: string
+  /**
+   * Optional provider id override. Routed by `MultiProviderModelClient`
+   * to a per-provider HTTP client when set; falls back to the runtime's
+   * default provider when omitted or unknown. Lets a workflow / scheduled
+   * task / IM bridge pick a non-runtime provider per request while
+   * reusing the single Kun process (kun#workflow-multi-provider).
+   */
+  providerId?: string
   systemPrompt?: string
   /**
    * Optional mode-scoped instruction (e.g. Plan mode guidance). Emitted

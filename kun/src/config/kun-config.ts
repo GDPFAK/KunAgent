@@ -199,6 +199,25 @@ export const DEFAULT_STORAGE_CONFIG: StorageConfig = {
   backend: 'hybrid'
 }
 
+/**
+ * Per-`providerId` HTTP credentials. Lets the runtime route a thread's turns
+ * to a non-default provider without restart — the workflow / scheduled task
+ * UI picks a provider per request, the loop puts the id on `ModelRequest`,
+ * and `MultiProviderModelClient` resolves it against this map.
+ */
+export const ServeProviderConfigSchema = z
+  .object({
+    apiKey: z.string().default(''),
+    baseUrl: z.string().min(1),
+    endpointFormat: z
+      .preprocess(normalizeModelEndpointFormat, z.enum(MODEL_ENDPOINT_FORMATS))
+      .default(DEFAULT_MODEL_ENDPOINT_FORMAT)
+      .optional(),
+    modelProxyUrl: z.string().optional()
+  })
+  .strict()
+export type ServeProviderConfig = z.infer<typeof ServeProviderConfigSchema>
+
 export const KunServeConfigSchema = z
   .object({
     host: z.string().optional(),
@@ -218,7 +237,14 @@ export const KunServeConfigSchema = z
     tokenEconomyMode: z.boolean().optional(),
     tokenEconomy: TokenEconomyConfigSchema.optional(),
     insecure: z.boolean().optional(),
-    storage: StorageConfigSchema.optional()
+    storage: StorageConfigSchema.optional(),
+    /**
+     * Extra providers the runtime can route to per request. Keys are
+     * provider ids (matched against `ModelRequest.providerId`); values
+     * hold the same HTTP credentials shape as the runtime defaults. When
+     * empty/absent, the runtime stays single-provider.
+     */
+    providers: z.record(z.string().min(1), ServeProviderConfigSchema).optional()
   })
   .strict()
 

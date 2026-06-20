@@ -17,6 +17,7 @@ import {
   mergeScheduleSettings,
   defaultKunRuntimeSettings,
   defaultScheduleSettings,
+  defaultWorkflowSettings,
   defaultWriteSelectionAssistSettings,
   defaultWriteSettings,
   getModelProviderPreset,
@@ -59,6 +60,7 @@ function settings(): AppSettingsV1 {
     write: defaultWriteSettings(),
     claw: defaultClawSettings(),
     schedule: defaultScheduleSettings(),
+    workflow: defaultWorkflowSettings(),
     guiUpdate: { channel: 'stable' },
     codePromptPrefix: '',
     disabledSkillIds: []

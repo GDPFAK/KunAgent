@@ -1,10 +1,16 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
-import { homedir } from 'node:os'
 import type { KunGuiApi } from '../shared/kun-gui-api'
+
+// The preload runs sandboxed (webPreferences.sandbox = true), so it cannot
+// require node built-ins like node:os. The home dir is passed in from the main
+// process via additionalArguments and read off process.argv instead.
+const HOME_DIR_ARG = '--kun-home-dir='
+const homeDirFromArgs =
+  process.argv.find((arg) => arg.startsWith(HOME_DIR_ARG))?.slice(HOME_DIR_ARG.length) ?? ''
 
 const api = {
   platform: process.platform,
-  homeDir: homedir(),
+  homeDir: homeDirFromArgs,
   getSettings: () => ipcRenderer.invoke('settings:get'),
   setSettings: (partial) =>
     ipcRenderer.invoke('settings:set', partial),
@@ -21,6 +27,16 @@ const api = {
   getScheduleStatus: () => ipcRenderer.invoke('schedule:status'),
   runScheduleTask: (taskId) =>
     ipcRenderer.invoke('schedule:task:run', taskId),
+  getWorkflowStatus: () => ipcRenderer.invoke('workflow:status'),
+  runWorkflow: (workflowId, input) => ipcRenderer.invoke('workflow:run', workflowId, input),
+  stopWorkflow: (workflowId) => ipcRenderer.invoke('workflow:stop', workflowId),
+  runWorkflowNode: (workflowId, nodeId) =>
+    ipcRenderer.invoke('workflow:node:run', { workflowId, nodeId }),
+  testWorkflowNode: (workflowId, nodeId, mockJson) =>
+    ipcRenderer.invoke('workflow:node:test', { workflowId, nodeId, mockJson }),
+  resolveWorkflowApproval: (token, decision) =>
+    ipcRenderer.invoke('workflow:approval:resolve', { token, decision }),
+  checkWorkflowCode: (language, code) => ipcRenderer.invoke('workflow:code:check', { language, code }),
   startClawImInstallQr: (provider, options) =>
     ipcRenderer.invoke('claw:im-install:qrcode', { provider, isLark: options?.isLark }),
   pollClawImInstall: (provider, deviceCode) =>

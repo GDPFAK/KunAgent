@@ -1,11 +1,9 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import { randomUUID } from 'node:crypto'
 import { URL } from 'node:url'
-import { mkdir } from 'node:fs/promises'
 import type {
   AppSettingsV1,
   ClawImChannelV1,
-  ModelProviderProfileV1,
   ScheduleReasoningEffort,
   ScheduleRunMode,
   ScheduleRunResult,
@@ -17,11 +15,7 @@ import {
   DEFAULT_SCHEDULE_MODEL,
   DEFAULT_SCHEDULE_REASONING_EFFORT,
   buildClawRuntimePrompt,
-  buildScheduleRuntimePrompt,
-  getKunRuntimeSettings,
-  getModelProviderSettings,
-  modelProviderModelProfile,
-  normalizeScheduleReasoningEffort
+  buildScheduleRuntimePrompt
 } from '../shared/app-settings'
 import {
   buildScheduledTaskFromDetectedRequest,
@@ -34,20 +28,17 @@ import {
   computeScheduleNextRunAt,
   hasEnabledScheduledTask,
   internalUrl,
-  isRunningStatus,
-  latestAssistantText,
   nestedRecord,
-  normalizeTaskModel,
   parseJsonObject,
   readRequestBody,
-  runtimeErrorMessage,
-  sleep,
+  resolveScheduleModelConfig,
+  runPromptViaRuntime,
   summarizeTaskResult,
+  waitForAssistantTextViaRuntime,
   writeJson,
   type RunPromptOptions,
-  type ScheduleRuntimeDeps,
-  type ThreadDetailJson,
-  type ThreadRecordJson
+  type ScheduleModelConfig,
+  type ScheduleRuntimeDeps
 } from './schedule-runtime-helpers'
 
 export { computeScheduleNextRunAt } from './schedule-runtime-helpers'
@@ -57,56 +48,6 @@ export function scheduledThreadTitle(title: string): string {
   const prefix = '[Scheduled task]'
   const suffix = Array.from(trimmed).slice(0, 4).join('')
   return suffix ? `${prefix} ${suffix}` : prefix
-}
-
-const SCHEDULE_REASONING_EFFORT_SET = new Set<ScheduleReasoningEffort>([
-  'auto',
-  'off',
-  'low',
-  'medium',
-  'high',
-  'max'
-])
-
-type ScheduleModelConfig = {
-  providerId: string
-  model: string
-  reasoningEffort: ScheduleReasoningEffort
-}
-
-function modelIdsMatch(left: string, right: string): boolean {
-  return left.trim().toLowerCase() === right.trim().toLowerCase()
-}
-
-function isScheduleReasoningEffort(value: string): value is ScheduleReasoningEffort {
-  return SCHEDULE_REASONING_EFFORT_SET.has(value as ScheduleReasoningEffort)
-}
-
-function providerHasModel(provider: Pick<ModelProviderProfileV1, 'models'>, model: string): boolean {
-  return provider.models.some((candidate) => modelIdsMatch(candidate, model))
-}
-
-function firstConcreteProviderModel(provider: Pick<ModelProviderProfileV1, 'models'> | null): string {
-  return provider?.models.find((model) => normalizeTaskModel(model))?.trim() ?? DEFAULT_SCHEDULE_MODEL
-}
-
-function resolveReasoningForModel(
-  provider: Pick<ModelProviderProfileV1, 'modelProfiles'> | null,
-  model: string,
-  reasoningEffort: ScheduleReasoningEffort | string | null | undefined
-): ScheduleReasoningEffort {
-  const requested = normalizeScheduleReasoningEffort(reasoningEffort)
-  const profile = provider ? modelProviderModelProfile(provider, model) : undefined
-  const supported = profile?.reasoning?.supportedEfforts.filter(isScheduleReasoningEffort) ?? []
-  if (supported.length === 0) return requested
-  if (supported.includes(requested)) return requested
-  const profileDefault = profile?.reasoning?.defaultEffort
-  if (profileDefault && isScheduleReasoningEffort(profileDefault) && supported.includes(profileDefault)) {
-    return profileDefault
-  }
-  return supported.includes(DEFAULT_SCHEDULE_REASONING_EFFORT)
-    ? DEFAULT_SCHEDULE_REASONING_EFFORT
-    : supported[0] ?? DEFAULT_SCHEDULE_REASONING_EFFORT
 }
 
 export class ScheduleRuntime {
@@ -129,27 +70,7 @@ export class ScheduleRuntime {
       reasoningEffort?: ScheduleReasoningEffort | string | null
     }
   ): ScheduleModelConfig {
-    const providers = getModelProviderSettings(settings).providers
-    const requestedProviderId = input.providerId?.trim() || ''
-    const requestedModel = normalizeTaskModel(input.model ?? '')
-    const runtimeProviderId = getKunRuntimeSettings(settings).providerId.trim()
-    const scheduleProviderId = settings.schedule.providerId?.trim() || ''
-    const provider =
-      providers.find((item) => item.id === requestedProviderId) ??
-      (requestedModel ? providers.find((item) => providerHasModel(item, requestedModel)) : undefined) ??
-      providers.find((item) => item.id === runtimeProviderId) ??
-      providers.find((item) => item.id === scheduleProviderId) ??
-      providers[0] ??
-      null
-    const model =
-      requestedModel && (!provider || providerHasModel(provider, requestedModel))
-        ? requestedModel
-        : firstConcreteProviderModel(provider)
-    return {
-      providerId: provider?.id ?? requestedProviderId,
-      model,
-      reasoningEffort: resolveReasoningForModel(provider, model, input.reasoningEffort)
-    }
+    return resolveScheduleModelConfig(settings, input, settings.schedule.providerId?.trim() || '')
   }
 
   sync(settings: AppSettingsV1): void {
@@ -458,6 +379,7 @@ export class ScheduleRuntime {
         title: scheduledThreadTitle(task.title),
         workspaceRoot: this.resolveTaskWorkspaceRoot(settings, task, clawChannel),
         model: modelConfig.model,
+        ...(modelConfig.providerId ? { providerId: modelConfig.providerId } : {}),
         reasoningEffort: modelConfig.reasoningEffort,
         mode: task.mode,
         clawChannel,
@@ -546,58 +468,24 @@ export class ScheduleRuntime {
     }
   }
 
-  private async runPrompt(settings: AppSettingsV1, options: RunPromptOptions): Promise<ScheduleRunResult> {
-    const workspace = options.workspaceRoot.trim() || this.resolveDefaultWorkspaceRoot(settings)
-    if (workspace) {
-      await mkdir(workspace, { recursive: true })
-    }
-    const model = normalizeTaskModel(options.model) ?? (settings.agents.kun.model.trim() || DEFAULT_SCHEDULE_MODEL)
-    const create = await this.deps.runtimeRequest(settings, '/v1/threads', {
-      method: 'POST',
-      body: JSON.stringify({
-        workspace,
-        model,
-        mode: options.mode,
-        ...(options.title.trim() ? { title: options.title.trim() } : {})
-      })
-    })
-    if (!create.ok) return { ok: false, message: runtimeErrorMessage(create, 'Failed to create thread.') }
-    const thread = JSON.parse(create.body) as ThreadRecordJson
-
-    const turnBody: Record<string, unknown> = {
-      prompt: options.clawChannel
-        ? buildClawRuntimePrompt(settings, options.prompt, { channel: options.clawChannel })
-        : buildScheduleRuntimePrompt(settings, options.prompt),
+  private runPrompt(settings: AppSettingsV1, options: RunPromptOptions): Promise<ScheduleRunResult> {
+    const prompt = options.clawChannel
+      ? buildClawRuntimePrompt(settings, options.prompt, { channel: options.clawChannel })
+      : buildScheduleRuntimePrompt(settings, options.prompt)
+    return runPromptViaRuntime(this.deps, settings, {
+      prompt,
+      title: options.title,
+      workspaceRoot: options.workspaceRoot.trim() || this.resolveDefaultWorkspaceRoot(settings),
+      model: options.model,
+      ...(options.providerId ? { providerId: options.providerId } : {}),
+      reasoningEffort: options.reasoningEffort,
       mode: options.mode,
-      // Scheduled turns are headless — nobody can answer a user_input
-      // prompt, and a turn that asks one hangs until the response timeout.
-      disableUserInput: true
-    }
-    if (model) turnBody.model = model
-    if (options.reasoningEffort) {
-      turnBody.reasoningEffort = options.reasoningEffort
-    }
-    const turn = await this.deps.runtimeRequest(
-      settings,
-      `/v1/threads/${encodeURIComponent(thread.id)}/turns`,
-      { method: 'POST', body: JSON.stringify(turnBody) }
-    )
-    if (!turn.ok) return { ok: false, message: runtimeErrorMessage(turn, 'Failed to start turn.') }
-
-    const parsedTurn = parseJsonObject(turn.body)
-    const turnId = asString(nestedRecord(parsedTurn?.turn).id) || asString(parsedTurn?.turnId)
-    if (!turnId) {
-      return { ok: false, message: 'Failed to start turn: missing turn id.' }
-    }
-    if (!options.waitForResult) {
-      return { ok: true, threadId: thread.id, turnId, message: 'Started' }
-    }
-
-    const text = await this.waitForAssistantText(settings, thread.id, turnId, options.responseTimeoutMs, workspace)
-    return { ok: true, threadId: thread.id, turnId, text, message: text || 'Completed' }
+      waitForResult: options.waitForResult,
+      responseTimeoutMs: options.responseTimeoutMs
+    })
   }
 
-  private async waitForAssistantText(
+  private waitForAssistantText(
     settings: AppSettingsV1,
     threadId: string,
     turnId: string,
@@ -605,33 +493,7 @@ export class ScheduleRuntime {
     workspaceRoot?: string
   ): Promise<string> {
     void workspaceRoot
-    const deadline = Date.now() + timeoutMs
-    let lastText = ''
-    while (Date.now() < deadline) {
-      await sleep(1_500)
-      const detailRes = await this.deps.runtimeRequest(
-        settings,
-        `/v1/threads/${encodeURIComponent(threadId)}`,
-        { method: 'GET' }
-      )
-      if (!detailRes.ok) {
-        throw new Error(runtimeErrorMessage(detailRes, 'Failed to read thread result.'))
-      }
-      const detail = JSON.parse(detailRes.body) as ThreadDetailJson
-      lastText = latestAssistantText(detail, { turnId }) || lastText
-      const targetTurn = Array.isArray(detail.turns)
-        ? detail.turns.find((turn) => turn.id === turnId)
-        : undefined
-      if (!targetTurn) continue
-      if (isRunningStatus(targetTurn.status)) continue
-      if (targetTurn.status === 'failed' || targetTurn.status === 'aborted') {
-        const error = targetTurn.error?.trim()
-        throw new Error(error || `Agent turn ${targetTurn.status}.`)
-      }
-      if (targetTurn.status === 'completed' && lastText) return lastText
-    }
-    if (lastText) return lastText
-    throw new Error('Timed out waiting for agent response.')
+    return waitForAssistantTextViaRuntime(this.deps, settings, threadId, turnId, timeoutMs)
   }
 
   private resolveDefaultWorkspaceRoot(settings: AppSettingsV1): string {

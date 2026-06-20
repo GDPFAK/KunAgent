@@ -5,6 +5,8 @@ import { z } from 'zod'
 type McpLaunchOptions = {
   baseUrl: string
   secret: string
+  workflowBaseUrl: string
+  workflowSecret: string
 }
 
 function parseArgValue(argv: string[], flag: string): string {
@@ -17,11 +19,13 @@ function parseLaunchOptions(argv: string[]): McpLaunchOptions | null {
   if (!argv.includes('--gui-schedule-mcp-server') && !argv.includes('--claw-schedule-mcp-server')) return null
   const baseUrl = parseArgValue(argv, '--base-url').trim() || 'http://127.0.0.1:8787'
   const secret = parseArgValue(argv, '--secret').trim()
-  return { baseUrl, secret }
+  const workflowBaseUrl = parseArgValue(argv, '--workflow-base-url').trim()
+  const workflowSecret = parseArgValue(argv, '--workflow-secret').trim()
+  return { baseUrl, secret, workflowBaseUrl, workflowSecret }
 }
 
 async function postJson(
-  options: McpLaunchOptions,
+  options: { baseUrl: string; secret: string },
   path: string,
   body: Record<string, unknown>
 ): Promise<Record<string, unknown>> {
@@ -238,6 +242,92 @@ export async function runClawScheduleMcpServerFromArgv(argv: string[]): Promise<
   // The `gui_plan_create` MCP tool has been retired in favour of the
   // native Kun `create_plan` tool. See RETIRED_CLAW_GUI_PLAN_TOOL_NAMES
   // for the list of removed tool names.
+
+  // Workflow tools — the same bridge exposes the GUI's node-based workflows that
+  // the user marked "callable by agent", by calling the WorkflowRuntime's local
+  // /workflow/internal/* endpoints.
+  if (options.workflowBaseUrl) {
+    const wf = { baseUrl: options.workflowBaseUrl, secret: options.workflowSecret }
+    const RUN_WORKFLOW_BASE_DESC =
+      "Run one of the user's saved \"Create Loop\" workflows by name (or id) and wait for it to finish; returns its final output. When the user's request matches a saved workflow below, prefer running it over doing the steps manually."
+
+    const buildCatalog = (result: Record<string, unknown>): string => {
+      const workflows = Array.isArray(result.workflows) ? result.workflows : []
+      const lines = workflows
+        .map((item: { name?: unknown; description?: unknown }) => {
+          const name = typeof item.name === 'string' ? item.name : ''
+          const desc = typeof item.description === 'string' ? item.description : ''
+          return name ? `- "${name}"${desc ? ` — ${desc}` : ''}` : ''
+        })
+        .filter((line) => line.length > 0)
+      return lines.length
+        ? `\n\nWorkflows the user has saved (run by name; call list_workflows for inputs):\n${lines.join('\n')}`
+        : ''
+    }
+
+    server.registerTool('list_workflows', {
+      description:
+        'List the GUI "Create Loop" workflows the user marked callable by the agent. Returns each workflow id, name, a short description, and its required inputs. Check this whenever a request might be satisfied by a saved workflow.'
+    }, async () => {
+      try {
+        const result = await postJson(wf, '/workflow/internal/list', {})
+        const workflows = Array.isArray(result.workflows) ? result.workflows : []
+        return textResult(
+          workflows.length
+            ? `Found ${workflows.length} callable workflow(s).`
+            : 'No workflows are marked callable by the agent.',
+          { workflows }
+        )
+      } catch (error) {
+        return errorResult(`Failed to list workflows: ${error instanceof Error ? error.message : String(error)}`)
+      }
+    })
+
+    const runWorkflowTool = server.registerTool('run_workflow', {
+      description: RUN_WORKFLOW_BASE_DESC,
+      inputSchema: {
+        workflow: z.string().min(1).describe('Workflow name or id from list_workflows'),
+        input: z.string().optional().describe('Optional input passed to the trigger; available to nodes as {{text}}'),
+        workspace_root: z.string().optional().describe('Optional working directory override for this run')
+      }
+    }, async (args) => {
+      try {
+        const result = await postJson(wf, '/workflow/internal/run', {
+          workflow: args.workflow,
+          input: args.input,
+          workspaceRoot: args.workspace_root
+        })
+        const status = typeof result.status === 'string' ? result.status : 'done'
+        const output = typeof result.output === 'string' ? result.output : ''
+        const message = typeof result.message === 'string' ? result.message : ''
+        return textResult(
+          `Workflow "${args.workflow}" finished (${status}).${message ? ` ${message}` : ''}${output ? `\n\nOutput:\n${output}` : ''}`,
+          { status, output, message }
+        )
+      } catch (error) {
+        return errorResult(`Failed to run workflow: ${error instanceof Error ? error.message : String(error)}`)
+      }
+    })
+
+    // Keep run_workflow's description (the workflow catalog the agent sees) fresh:
+    // without needing a kun restart: re-fetch on an interval and update the tool
+    // only when the list actually changes. update() emits tools/list_changed, so
+    // the agent re-reads the current catalog on its next turn.
+    let lastCatalog = ' '
+    const refreshCatalog = async (): Promise<void> => {
+      try {
+        const catalog = buildCatalog(await postJson(wf, '/workflow/internal/list', {}))
+        if (catalog === lastCatalog) return
+        lastCatalog = catalog
+        runWorkflowTool.update({ description: RUN_WORKFLOW_BASE_DESC + catalog })
+      } catch {
+        /* ignore — list_workflows still works live */
+      }
+    }
+    await refreshCatalog() // seed the catalog before connect so the first tools/list carries it
+    const catalogTimer = setInterval(() => void refreshCatalog(), 30_000)
+    catalogTimer.unref?.()
+  }
 
   const transport = new StdioServerTransport()
   await server.connect(transport)

@@ -10,6 +10,7 @@ import { InMemoryEventBus } from '../adapters/in-memory-event-bus.js'
 import { FileSessionStore, FileThreadStore } from '../adapters/file/index.js'
 import { HybridSessionStore, HybridThreadStore } from '../adapters/hybrid/index.js'
 import { CompatModelClient } from '../adapters/model/compat-model-client.js'
+import { MultiProviderModelClient } from '../adapters/model/multi-provider-model-client.js'
 import { CapabilityRegistry } from '../adapters/tool/capability-registry.js'
 import { buildGoalLocalTools } from '../adapters/tool/goal-tools.js'
 import { buildTodoLocalTools } from '../adapters/tool/todo-tools.js'
@@ -48,6 +49,7 @@ import {
   expandHomePath,
   type QualityConfig,
   type RuntimeTuningConfig,
+  type ServeProviderConfig,
   type StorageConfig
 } from '../config/kun-config.js'
 import { buildBuiltinHooks } from '../hooks/builtins/index.js'
@@ -85,6 +87,15 @@ export type KunServeRuntimeOptions = {
   baseUrl: string
   modelProxyUrl?: string
   endpointFormat?: ModelEndpointFormat
+  /**
+   * Extra providers the runtime can route to per request. Keyed by
+   * provider id (matched against `ModelRequest.providerId`); each entry
+   * supplies its own HTTP credentials. Threads created with a
+   * `providerId` matching a key here route their turns to that client;
+   * any unrecognized id falls back to the default credentials above.
+   * Empty/absent → runtime stays single-provider (current behavior).
+   */
+  providers?: Record<string, ServeProviderConfig>
   model: string
   approvalPolicy: ApprovalPolicy
   sandboxMode: SandboxMode
@@ -154,7 +165,11 @@ export async function createKunServeRuntime(
   })
   const modelCapabilities = (model: string) => modelCapabilitiesForModel(model, modelProfiles)
   const llmDebug = new LlmDebugRecorder()
-  const modelClient = new CompatModelClient({
+  const streamIdleOverride =
+    options.runtime?.streamIdleTimeoutMs !== undefined
+      ? { streamIdleTimeoutMs: options.runtime.streamIdleTimeoutMs }
+      : {}
+  const defaultModelClient = new CompatModelClient({
     baseUrl: options.baseUrl,
     apiKey: options.apiKey,
     modelProxyUrl: options.modelProxyUrl,
@@ -162,9 +177,33 @@ export async function createKunServeRuntime(
     model: options.model,
     modelCapabilities,
     debugSink: llmDebug,
-    ...(options.runtime?.streamIdleTimeoutMs !== undefined
-      ? { streamIdleTimeoutMs: options.runtime.streamIdleTimeoutMs }
-      : {})
+    ...streamIdleOverride
+  })
+  // Per-provider HTTP clients (workflow/scheduled task can pick a non-default
+  // provider per request via `ModelRequest.providerId`). The wrapper falls
+  // back to the default client when the id is absent or unknown, so behavior
+  // is unchanged for single-provider deployments.
+  const providerClients = new Map<string, CompatModelClient>()
+  for (const [providerId, provider] of Object.entries(options.providers ?? {})) {
+    const trimmedId = providerId.trim()
+    if (!trimmedId) continue
+    providerClients.set(
+      trimmedId,
+      new CompatModelClient({
+        baseUrl: provider.baseUrl,
+        apiKey: provider.apiKey,
+        modelProxyUrl: provider.modelProxyUrl ?? options.modelProxyUrl,
+        endpointFormat: provider.endpointFormat ?? options.endpointFormat ?? DEFAULT_MODEL_ENDPOINT_FORMAT,
+        model: options.model,
+        modelCapabilities,
+        debugSink: llmDebug,
+        ...streamIdleOverride
+      })
+    )
+  }
+  const modelClient = new MultiProviderModelClient({
+    default: defaultModelClient,
+    providers: providerClients
   })
   // Independent I/O; all must still finish before the server listens.
   const [mcpProviders, skillRuntime] = await Promise.all([

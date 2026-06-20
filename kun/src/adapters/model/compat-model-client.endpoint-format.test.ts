@@ -120,4 +120,30 @@ describe('CompatModelClient per-model endpointFormat', () => {
     expect(headerCalls[1]['x-api-key']).toBeUndefined()
     expect(headerCalls[1].Authorization).toBe('Bearer sk-test')
   })
+
+  it('uses the exact URL for custom full endpoint chat completions providers', async () => {
+    const calls: CapturedCall[] = []
+    for (const baseUrl of [
+      'https://open.bigmodel.cn/api/coding/paas/v4/chat/completions',
+      'https://api.z.ai/api/coding/paas/v4/chat/completions'
+    ]) {
+      const client = new CompatModelClient({
+        baseUrl,
+        apiKey: 'sk-test',
+        model: 'glm-5.2',
+        endpointFormat: 'custom_endpoint',
+        nonStreaming: true,
+        fetchImpl: fakeFetch(calls),
+        modelCapabilities: modelCapabilities({})
+      })
+
+      await drain(client.stream(request('glm-5.2')))
+    }
+
+    expect(calls.map((call) => call.url)).toEqual([
+      'https://open.bigmodel.cn/api/coding/paas/v4/chat/completions',
+      'https://api.z.ai/api/coding/paas/v4/chat/completions'
+    ])
+    expect(calls.every((call) => call.body.messages)).toBe(true)
+  })
 })

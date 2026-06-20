@@ -14,6 +14,7 @@ import { effectiveHistoryAfterLatestCompaction } from '../src/loop/compaction-hi
 import { resolveModelContextProfile } from '../src/loop/model-context-profile.js'
 import {
   makeApprovalItem,
+  makeAssistantReasoningItem,
   makeAssistantTextItem,
   makeToolCallItem,
   makeToolResultItem,
@@ -2138,6 +2139,62 @@ describe('AgentLoop', () => {
     expect(result.next.some((item) => item.kind === 'tool_call')).toBe(false)
     expect(result.summaryItem.kind === 'compaction' ? result.summaryItem.summary : '')
       .toContain('Active Skill: documents (documents)')
+  })
+
+  it('keeps the latest user turn when force compaction would orphan a tool result', () => {
+    const compactor = new ContextCompactor({ softThreshold: 1, hardThreshold: 2 })
+    const prefix = createImmutablePrefix({ systemPrompt: 'system' })
+    const result = compactor.compact({
+      threadId: 'thr_1',
+      turnId: 'turn_2',
+      prefix,
+      keepRecent: 1,
+      history: [
+        makeUserItem({ id: 'u1', turnId: 'turn_1', threadId: 'thr_1', text: 'fold this old request' }),
+        makeAssistantTextItem({
+          id: 'a1',
+          turnId: 'turn_1',
+          threadId: 'thr_1',
+          text: 'old answer',
+          status: 'completed'
+        }),
+        makeUserItem({ id: 'u2', turnId: 'turn_2', threadId: 'thr_1', text: 'keep this current request' }),
+        makeAssistantReasoningItem({
+          id: 'r2',
+          turnId: 'turn_2',
+          threadId: 'thr_1',
+          text: 'need read before answering',
+          status: 'completed'
+        }),
+        makeToolCallItem({
+          id: 'call_2',
+          turnId: 'turn_2',
+          threadId: 'thr_1',
+          callId: 'call_2',
+          toolName: 'read',
+          arguments: { path: 'current.ts' },
+          status: 'completed'
+        }),
+        makeToolResultItem({
+          id: 'result_2',
+          turnId: 'turn_2',
+          threadId: 'thr_1',
+          callId: 'call_2',
+          toolName: 'read',
+          output: 'current file content'
+        })
+      ]
+    })
+
+    expect(result.next.map((item) => item.id)).toEqual([
+      result.summaryItem.id,
+      'u2',
+      'r2',
+      'call_2',
+      'result_2'
+    ])
+    expect(result.summaryItem.kind === 'compaction' ? result.summaryItem.sourceItemIds : [])
+      .toEqual(['u1', 'a1'])
   })
 
   it('embeds a digest marker and skips frozen messages when compacting history', () => {

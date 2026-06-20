@@ -50,7 +50,7 @@ Xiaomi:
 - base URL: `https://api.xiaomimimo.com/v1`
 - endpoint format: OpenAI Chat Completions
 - initial models: `mimo-v2-omni`, `mimo-v2.5-pro-ultraspeed`,
-  `mimo-v2-pro`, `mimo-v2.5`, `mimo-v2-flash`, `mimo-v2.5-pro`
+  `mimo-v2-pro`, `mimo-v2.5`, `mimo-v2.5-pro`
 
 MiniMax:
 

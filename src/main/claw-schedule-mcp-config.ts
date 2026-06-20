@@ -57,6 +57,14 @@ export function buildClawScheduleMcpArgs(
   if (secret) {
     args.push('--secret', secret)
   }
+  // Also advertise the workflow tools (list_workflows / run_workflow), which the
+  // same bridge serves by calling the WorkflowRuntime's local /workflow/internal/*
+  // endpoints (hosted on the workflow webhook port + secret).
+  args.push('--workflow-base-url', `http://127.0.0.1:${settings.workflow.webhookPort}`)
+  const workflowSecret = settings.workflow.webhookSecret.trim()
+  if (workflowSecret) {
+    args.push('--workflow-secret', workflowSecret)
+  }
   return args
 }
 
@@ -215,7 +223,9 @@ async function cleanupLegacyTomlConfig(path: string): Promise<void> {
 export function clawScheduleMcpSettingsChanged(prev: AppSettingsV1, next: AppSettingsV1): boolean {
   return (
     prev.schedule.internal.port !== next.schedule.internal.port ||
-    prev.schedule.internal.secret.trim() !== next.schedule.internal.secret.trim()
+    prev.schedule.internal.secret.trim() !== next.schedule.internal.secret.trim() ||
+    prev.workflow.webhookPort !== next.workflow.webhookPort ||
+    prev.workflow.webhookSecret.trim() !== next.workflow.webhookSecret.trim()
   )
 }
 
