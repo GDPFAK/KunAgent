@@ -186,7 +186,7 @@ type ToolCatalogDrift =
  */
 export const PLAN_MODE_INSTRUCTION = [
   'You are in Plan mode.',
-  'Investigate the task first using read-only tools: prefer `read`, `grep`, `find`, and `ls` to gather the facts you need.',
+  'Investigate the task first using read-only tools: prefer `repo_map`, `read`, `grep`, `find`, and `ls` to gather the facts you need.',
   'Do NOT modify project files, apply edits, run shell commands, or run mutating commands in this mode.',
   'When you understand the task well enough, call the `create_plan` tool to save a complete implementation plan as Markdown.',
   'Use `operation: "draft"` for the first plan, and `operation: "refine"` when revising an existing plan; you may call `create_plan` multiple times as the plan evolves.',
@@ -201,6 +201,7 @@ export const PLAN_MODE_INSTRUCTION = [
  * it can execute arbitrary commands and its policy is `on-request` which
  * auto-approves under `approvalPolicy: auto`. */
 const PLAN_READ_ONLY_TOOL_NAMES = new Set([
+  'repo_map',
   'read',
   'ls',
   'find',

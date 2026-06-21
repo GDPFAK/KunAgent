@@ -14,6 +14,7 @@ function spec(name: string): ModelToolSpec {
 }
 
 const ALL_TOOLS: ModelToolSpec[] = [
+  spec('repo_map'),
   spec('read'),
   spec('write'),
   spec('edit'),
@@ -92,6 +93,7 @@ describe('resolvePlanModeToolSpecs', () => {
     // Default set excludes bash
     expect(names).not.toContain('bash')
     expect(names).toContain('create_plan')
+    expect(names).toContain('repo_map')
     expect(names).toContain('read')
   })
 

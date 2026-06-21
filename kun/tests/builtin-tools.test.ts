@@ -107,6 +107,7 @@ describe('Kun built-in tools', () => {
     const tools = await host.listTools(buildContext(workspace))
     const toolNames = new Set(tools.map((tool) => tool.name))
     expect([...allBuiltinToolNames].every((name) => toolNames.has(name))).toBe(true)
+    expect(toolNames.has('repo_map')).toBe(true)
   })
 
   it('converts a throwing tool execute into an error tool result instead of failing the turn', async () => {

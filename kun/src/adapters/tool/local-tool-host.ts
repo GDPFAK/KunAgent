@@ -27,6 +27,7 @@ import {
   type ReadTrackerOptions
 } from './read-tracker.js'
 import { sandboxBlockForTool, type SandboxBlock } from './sandbox-policy.js'
+import { repoMapTool } from './repo-map-tool.js'
 
 /**
  * A single registered tool. Tools are pure functions that observe the
@@ -451,6 +452,7 @@ export const requestUserInputTool: LocalTool = createUserInputTool('request_user
 
 export const defaultLocalTools: LocalTool[] = [
   ...buildBuiltinLocalTools(),
+  repoMapTool,
   echoTool,
   userInputTool,
   requestUserInputTool
