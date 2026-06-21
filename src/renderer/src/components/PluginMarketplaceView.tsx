@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next'
 import {
   Check,
   ChevronDown,
+  Download,
   FolderOpen,
   Info,
   Loader2,
@@ -739,6 +740,13 @@ export function PluginMarketplaceView(): ReactElement {
   const [busyId, setBusyId] = useState<string | null>(null)
   const [notice, setNotice] = useState<Notice | null>(null)
   const [customOpen, setCustomOpen] = useState(false)
+  const [githubImportOpen, setGithubImportOpen] = useState(false)
+  const [githubImportUrl, setGithubImportUrl] = useState('')
+  const [githubImportBusy, setGithubImportBusy] = useState(false)
+  const [githubImportSummary, setGithubImportSummary] = useState<{
+    count: number
+    names: string[]
+  } | null>(null)
   const [customName, setCustomName] = useState('')
   const [customDescription, setCustomDescription] = useState('')
   const [customCommand, setCustomCommand] = useState('')
@@ -901,6 +909,8 @@ export function PluginMarketplaceView(): ReactElement {
   useEffect(() => {
     setNotice(null)
     setCustomOpen(false)
+    setGithubImportOpen(false)
+    setGithubImportSummary(null)
   }, [activeKind])
 
   const markInstalled = (key: string): void => {
@@ -1177,6 +1187,38 @@ export function PluginMarketplaceView(): ReactElement {
     }
   }
 
+  const addFromGitHub = async (): Promise<void> => {
+    if (!selectedSkillRoot?.path) {
+      setNotice({ tone: 'error', message: t('pluginSkillRootMissing') })
+      return
+    }
+    const trimmedUrl = githubImportUrl.trim()
+    if (!trimmedUrl) {
+      setNotice({ tone: 'error', message: t('pluginGithubImportUrlRequired') })
+      return
+    }
+    setGithubImportBusy(true)
+    setNotice(null)
+    setGithubImportSummary(null)
+    try {
+      const result = await window.kunGui.importSkillsFromGitHub(selectedSkillRoot.path, trimmedUrl)
+      if (!result.ok) {
+        throw new Error(result.message)
+      }
+      await Promise.all([refreshSkillList(), refreshSkillRoots()])
+      setGithubImportSummary({
+        count: result.count,
+        names: result.names
+      })
+      setNotice({ tone: 'success', message: t('pluginGithubImportSuccess', { count: result.count }) })
+      setGithubImportUrl('')
+    } catch (error) {
+      setNotice({ tone: 'error', message: error instanceof Error ? error.message : String(error) })
+    } finally {
+      setGithubImportBusy(false)
+    }
+  }
+
   return (
     <div className="ds-no-drag h-full min-h-0 overflow-y-auto px-6 py-7 md:px-10 lg:px-14">
       <div className="mx-auto max-w-6xl">
@@ -1200,12 +1242,28 @@ export function PluginMarketplaceView(): ReactElement {
             </button>
             <button
               type="button"
-              onClick={() => setCustomOpen((value) => !value)}
+              onClick={() => {
+                setCustomOpen((value) => !value)
+                setGithubImportOpen(false)
+              }}
               className="inline-flex items-center gap-2 rounded-xl bg-ds-userbubble px-3 py-2 text-[13px] font-semibold text-ds-userbubbleFg shadow-sm transition hover:opacity-90"
             >
               <Plus className="h-4 w-4" strokeWidth={1.9} />
               {t('pluginCreate')}
             </button>
+            {activeKind === 'skill' ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setGithubImportOpen((value) => !value)
+                  setCustomOpen(false)
+                }}
+                className="inline-flex items-center gap-2 rounded-xl border border-ds-border bg-ds-card px-3 py-2 text-[13px] font-semibold text-ds-ink shadow-sm transition hover:bg-ds-hover"
+              >
+                <Download className="h-4 w-4" strokeWidth={1.9} />
+                {t('pluginGithubImport')}
+              </button>
+            ) : null}
           </div>
         </div>
 
@@ -1319,6 +1377,16 @@ export function PluginMarketplaceView(): ReactElement {
           />
         ) : null}
 
+        {activeKind === 'skill' && githubImportOpen ? (
+          <GitHubSkillImportPanel
+            url={githubImportUrl}
+            busy={githubImportBusy}
+            summary={githubImportSummary}
+            onUrlChange={setGithubImportUrl}
+            onImport={() => void addFromGitHub()}
+          />
+        ) : null}
+
         {notice ? <NoticeView notice={notice} /> : null}
         {oauthPreviewItem?.oauth ? (
           <OAuthConnectorPreviewDialog
@@ -1387,6 +1455,55 @@ export function PluginMarketplaceView(): ReactElement {
         ) : null}
       </div>
     </div>
+  )
+}
+
+function GitHubSkillImportPanel({
+  url,
+  busy,
+  summary,
+  onUrlChange,
+  onImport
+}: {
+  url: string
+  busy: boolean
+  summary: { count: number; names: string[] } | null
+  onUrlChange: (value: string) => void
+  onImport: () => void
+}): ReactElement {
+  const { t } = useTranslation('common')
+  return (
+    <section className="mt-6 rounded-2xl border border-ds-border bg-ds-card/95 p-4 shadow-sm">
+      <div className="flex flex-col gap-3 md:flex-row md:items-center">
+        <input
+          value={url}
+          onChange={(event) => onUrlChange(event.target.value)}
+          className="h-10 min-w-0 flex-1 rounded-xl border border-ds-border bg-ds-main/45 px-3 text-[14px] text-ds-ink outline-none focus:border-accent/40 focus:ring-1 focus:ring-accent/30"
+          placeholder={t('pluginGithubImportPlaceholder')}
+          spellCheck={false}
+        />
+        <button
+          type="button"
+          onClick={onImport}
+          disabled={busy}
+          className="inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-xl bg-ds-userbubble px-4 text-[13px] font-semibold text-ds-userbubbleFg shadow-sm transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-55"
+        >
+          {busy ? <Loader2 className="h-4 w-4 animate-spin" strokeWidth={2} /> : <Download className="h-4 w-4" strokeWidth={2} />}
+          {t('pluginGithubImportAction')}
+        </button>
+      </div>
+      <p className="mt-2 text-[12px] text-ds-faint">
+        {t('pluginGithubImportHint')}
+      </p>
+      {summary ? (
+        <p className="mt-3 text-[12px] text-ds-muted">
+          {t('pluginGithubImportResult', {
+            count: summary.count,
+            names: summary.names.join(', ')
+          })}
+        </p>
+      ) : null}
+    </section>
   )
 }
 

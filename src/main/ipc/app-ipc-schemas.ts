@@ -1300,7 +1300,27 @@ export const skillSaveFilePayloadSchema = z
   .object({
     rootPath: trimmedString(MAX_PATH_LENGTH),
     skillName: trimmedString(128),
-    content: z.string().max(MAX_SKILL_FILE_BYTES)
+    content: z.string().max(MAX_SKILL_FILE_BYTES),
+    manifestContent: z.string().max(MAX_SKILL_FILE_BYTES).optional()
+  })
+  .strict()
+
+export const skillGithubImportPayloadSchema = z
+  .object({
+    rootPath: trimmedString(MAX_PATH_LENGTH),
+    // Defense-in-depth: reject any explicit non-https scheme at the IPC
+    // boundary (http/file/javascript/data/etc.). Scheme-less input is allowed
+    // because the importer normalizes it to https before parsing; only the
+    // host-check inside `importSkillsFromGitHub` is authoritative, but barring
+    // dangerous schemes here narrows what ever reaches the importer.
+    url: z
+      .string()
+      .trim()
+      .min(1)
+      .max(MAX_URL_LENGTH)
+      .refine((value) => !/^[a-z][a-z0-9+.-]*:/i.test(value) || /^https:\/\//i.test(value), {
+        message: 'GitHub skill import URL must use https.'
+      })
   })
   .strict()
 

@@ -6,6 +6,7 @@ import {
   scheduleTaskFromTextPayloadSchema,
   settingsPatchSchema,
   shellOpenExternalUrlSchema,
+  skillGithubImportPayloadSchema,
   skillListPayloadSchema,
   sseStartPayloadSchema,
   workspaceDirectoryCreatePayloadSchema,
@@ -74,6 +75,34 @@ describe('app-ipc-schemas', () => {
       method: 'PATCH',
       body: '{}'
     }).path).toBe('/v1/memory/mem_1')
+  })
+
+  it('accepts https GitHub skill import URLs and rejects other schemes', () => {
+    expect(skillGithubImportPayloadSchema.parse({
+      rootPath: '/tmp/skills',
+      url: 'https://github.com/acme/skills/tree/main/review'
+    })).toEqual({
+      rootPath: '/tmp/skills',
+      url: 'https://github.com/acme/skills/tree/main/review'
+    })
+    // Scheme-less input is allowed (the importer normalizes it to https).
+    expect(skillGithubImportPayloadSchema.parse({
+      rootPath: '/tmp/skills',
+      url: 'github.com/acme/skills'
+    }).url).toBe('github.com/acme/skills')
+    // Dangerous / non-https explicit schemes are rejected at the boundary.
+    expect(() => skillGithubImportPayloadSchema.parse({
+      rootPath: '/tmp/skills',
+      url: 'http://github.com/acme/skills'
+    })).toThrow()
+    expect(() => skillGithubImportPayloadSchema.parse({
+      rootPath: '/tmp/skills',
+      url: 'file:///etc/passwd'
+    })).toThrow()
+    expect(() => skillGithubImportPayloadSchema.parse({
+      rootPath: '/tmp/skills',
+      url: 'javascript:alert(1)'
+    })).toThrow()
   })
 
   it('accepts skill list payloads with an optional workspace root', () => {
