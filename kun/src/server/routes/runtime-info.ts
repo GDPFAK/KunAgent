@@ -11,6 +11,7 @@ export async function runtimeToolDiagnosticsJsonResponse(runtime: ServerRuntime)
   return jsonResponse(redactSecrets(await (runtime.toolDiagnostics?.() ?? {
     providers: [],
     mcpServers: [],
+    mcpOAuth: [],
     webProviders: [],
     skills: {
       enabled: false,

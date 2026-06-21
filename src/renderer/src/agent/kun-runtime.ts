@@ -14,6 +14,7 @@ import {
   KUN_ATTACHMENTS_PATH,
   KUN_MEMORY_DIAGNOSTICS_PATH,
   KUN_MEMORY_PATH,
+  KUN_MCP_OAUTH_PATH,
   KUN_RUNTIME_INFO_PATH,
   KUN_RUNTIME_TOOLS_PATH,
   KUN_SKILLS_PATH,
@@ -32,6 +33,7 @@ import {
   kunAttachmentContentPath,
   kunUserInputPath,
   kunMemoryRecordPath,
+  kunMcpOAuthServerPath,
   kunSessionResumePath,
   normalizeThreadMode,
   type KunThreadMode
@@ -46,6 +48,9 @@ import type {
   CoreMemoryDiagnosticsJson,
   CoreMemoryListResponseJson,
   CoreMemoryRecordJson,
+  CoreMcpOAuthClearResponseJson,
+  CoreMcpOAuthDiagnosticJson,
+  CoreMcpOAuthDiagnosticsResponseJson,
   CoreResumeSessionResponseJson,
   CoreRuntimeInfoJson,
   CoreRuntimeEventJson,
@@ -638,6 +643,31 @@ export class KunRuntimeProvider implements AgentProvider {
       response.body,
       'runtime returned an invalid runtime diagnostics response'
     )
+  }
+
+  async getMcpOAuthDiagnostics(): Promise<CoreMcpOAuthDiagnosticJson[]> {
+    const response = await rendererRuntimeClient.runtimeRequest(KUN_MCP_OAUTH_PATH, 'GET')
+    if (!response.ok) {
+      throw runtimeErrorToError(readRuntimeError(response.body, 'failed to load MCP OAuth diagnostics'))
+    }
+    return readRuntimeJson<CoreMcpOAuthDiagnosticsResponseJson>(
+      response.body,
+      'runtime returned an invalid MCP OAuth diagnostics response'
+    ).servers
+  }
+
+  async clearMcpOAuthCredentials(serverId?: string): Promise<string[]> {
+    const response = await rendererRuntimeClient.runtimeRequest(
+      serverId ? kunMcpOAuthServerPath(serverId) : KUN_MCP_OAUTH_PATH,
+      'DELETE'
+    )
+    if (!response.ok) {
+      throw runtimeErrorToError(readRuntimeError(response.body, 'failed to clear MCP OAuth credentials'))
+    }
+    return readRuntimeJson<CoreMcpOAuthClearResponseJson>(
+      response.body,
+      'runtime returned an invalid MCP OAuth reset response'
+    ).cleared
   }
 
   async listSkills(): Promise<CoreRuntimeSkillJson[]> {

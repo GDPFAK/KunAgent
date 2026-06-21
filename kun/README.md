@@ -220,6 +220,13 @@ Shape:
           "transport": "streamable-http",
           "url": "https://mcp.example.com/mcp",
           "headers": { "authorization": "Bearer <docs-mcp-token>" },
+          "oauth": {
+            "enabled": true,
+            "clientName": "Kun",
+            "clientId": "<optional-oauth-client-id>",
+            "clientSecret": "<optional-oauth-client-secret>",
+            "scopes": ["docs.readonly"]
+          },
           "trustScope": "user",
           "timeoutMs": 30000
         }
@@ -279,7 +286,7 @@ See `../docs/KUN_CONFIG.md` for the detailed file layout and examples.
 
 Feature flags are intentionally explicit:
 
-- `capabilities.mcp` starts configured MCP clients and imports their tools into the dynamic registry. Workspace-scoped servers require `trustedWorkspaceRoots`.
+- `capabilities.mcp` starts configured MCP clients and imports their tools into the dynamic registry. Workspace-scoped servers require `trustedWorkspaceRoots`. Remote HTTP/SSE servers can use `oauth`; Kun stores OAuth tokens under the data directory instead of the config file. Use `GET /v1/mcp/oauth` to inspect redacted OAuth state and `DELETE /v1/mcp/oauth/{serverId}` to clear a server's saved authorization.
 - `serve.mcpSearch` can collapse a large MCP catalog into four entry points: `mcp_search`, `mcp_describe`, `mcp_call`, and `mcp_refresh_catalog`. When the catalog is too large, the model searches for relevant tools first, then describes and calls the exact tool instead of carrying every MCP schema on every turn.
 - `serve.tokenEconomy` / `tokenEconomyMode` compresses tool descriptions, tool results, and history context while preserving code, paths, commands, URLs, errors, and other high-value signals.
 - `contextCompaction` controls fallback long-thread compaction thresholds and summary behavior. Per-model thresholds live in `models.profiles`. Compaction preserves goals, constraints, decisions, touched files, tool outcomes, and unresolved next steps.

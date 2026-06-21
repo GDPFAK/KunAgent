@@ -226,7 +226,9 @@ export async function createKunServeRuntime(
   })
   // Independent I/O; all must still finish before the server listens.
   const [mcpProviders, skillRuntime] = await Promise.all([
-    buildMcpToolProviders(options.capabilities?.mcp),
+    buildMcpToolProviders(options.capabilities?.mcp, {
+      oauthStorageDir: join(options.dataDir, 'mcp-oauth')
+    }),
     SkillRuntime.create(options.capabilities?.skills),
     seedUsageCarryover({ threadStore, sessionStore, usageService })
   ])
@@ -620,6 +622,7 @@ export async function createKunServeRuntime(
     toolDiagnostics: async () => ({
       providers: registry.diagnostics(),
       mcpServers: mcpProviders.diagnostics,
+      mcpOAuth: mcpProviders.oauth,
       mcpSearch: mcpProviders.search,
       webProviders: webProviders.diagnostics,
       skills: skillRuntime.diagnostics(),
@@ -634,6 +637,8 @@ export async function createKunServeRuntime(
       musicGen: musicGenProviders.diagnostics,
       videoGen: videoGenProviders.diagnostics
     }),
+    mcpOAuth: async () => mcpProviders.oauth,
+    clearMcpOAuth: async (serverId) => mcpProviders.clearOAuthCredentials(serverId),
     skills: () => skillRuntime.diagnostics(),
     shutdown: async () => {
       try {

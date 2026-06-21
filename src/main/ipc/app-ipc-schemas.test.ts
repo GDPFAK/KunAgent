@@ -47,6 +47,17 @@ describe('app-ipc-schemas', () => {
     expect(payload.path).toBe('/v1/runtime/tools')
   })
 
+  it('accepts Kun MCP OAuth status and token reset endpoints', () => {
+    expect(runtimeRequestPayloadSchema.parse({
+      path: '/v1/mcp/oauth',
+      method: 'GET'
+    }).path).toBe('/v1/mcp/oauth')
+    expect(runtimeRequestPayloadSchema.parse({
+      path: '/v1/mcp/oauth/google_drive',
+      method: 'DELETE'
+    }).path).toBe('/v1/mcp/oauth/google_drive')
+  })
+
   it('accepts the Kun skills endpoint', () => {
     const payload = runtimeRequestPayloadSchema.parse({
       path: '/v1/skills',

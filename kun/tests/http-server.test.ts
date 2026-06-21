@@ -170,6 +170,47 @@ describe('HTTP server', () => {
     expect(response.status).toBe(401)
   })
 
+  it('reports and clears MCP OAuth diagnostics through the HTTP layer', async () => {
+    const h = buildHarness()
+    h.runtime.mcpOAuth = () => [
+      {
+        serverId: 'google_drive',
+        enabled: true,
+        configured: true,
+        transport: 'streamable-http',
+        url: 'https://drivemcp.googleapis.com/mcp/v1',
+        status: 'authorized',
+        hasClientInformation: true,
+        hasTokens: true,
+        hasRefreshToken: true,
+        hasCodeVerifier: false,
+        hasDiscoveryState: true
+      }
+    ]
+    h.runtime.clearMcpOAuth = async (serverId?: string) => ({ cleared: serverId ? [serverId] : ['google_drive'] })
+
+    const listed = await dispatchRequest(
+      h.router,
+      new Request('http://localhost/v1/mcp/oauth', {
+        headers: { authorization: 'Bearer tok-1' }
+      })
+    )
+    expect(listed.status).toBe(200)
+    await expect(readJson(listed)).resolves.toMatchObject({
+      servers: [{ serverId: 'google_drive', status: 'authorized', hasTokens: true }]
+    })
+
+    const cleared = await dispatchRequest(
+      h.router,
+      new Request('http://localhost/v1/mcp/oauth/google_drive', {
+        method: 'DELETE',
+        headers: { authorization: 'Bearer tok-1' }
+      })
+    )
+    expect(cleared.status).toBe(200)
+    await expect(readJson(cleared)).resolves.toEqual({ cleared: ['google_drive'] })
+  })
+
   it('lists discovered skills through the HTTP layer', async () => {
     const h = buildHarness()
     h.runtime.skills = () => ({

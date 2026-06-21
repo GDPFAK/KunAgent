@@ -1,12 +1,21 @@
 import { describe, expect, it } from 'vitest'
+import { mkdtemp } from 'node:fs/promises'
+import { createServer, get as httpGet } from 'node:http'
+import type { AddressInfo } from 'node:net'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { CapabilityRegistry } from '../src/adapters/tool/capability-registry.js'
 import { LocalToolHost } from '../src/adapters/tool/local-tool-host.js'
 import {
+  FileMcpOAuthProvider,
   buildMcpStdioEnvironment,
   buildMcpToolProviders,
+  clearMcpOAuthCredentials,
+  createMcpOAuthProvider,
   formatMcpConnectionError,
   isMcpServerTrusted,
   isMcpServerVisible,
+  listMcpOAuthDiagnostics,
   normalizeMcpToolName,
   resolveMcpServerCwd,
   type McpClientLike
@@ -55,6 +64,30 @@ function fakeClient(): McpClientLike {
       // no-op
     }
   }
+}
+
+async function getFreePort(): Promise<number> {
+  const server = createServer()
+  await new Promise<void>((resolve, reject) => {
+    server.once('error', reject)
+    server.listen(0, '127.0.0.1', () => resolve())
+  })
+  const address = server.address() as AddressInfo
+  await new Promise<void>((resolve, reject) => {
+    server.close((error) => error ? reject(error) : resolve())
+  })
+  return address.port
+}
+
+async function httpStatus(url: URL): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const request = httpGet(url, (response) => {
+      response.resume()
+      response.on('end', () => resolve(response.statusCode ?? 0))
+    })
+    request.once('error', reject)
+    request.setTimeout(3_000, () => request.destroy(new Error('HTTP request timed out')))
+  })
 }
 
 describe('MCP tool provider', () => {
@@ -777,6 +810,224 @@ describe('MCP tool provider', () => {
     expect(encoded).not.toContain('other-secret')
     expect(encoded).not.toContain('config-secret')
   })
+
+  it('keeps OAuth disabled unless remote MCP servers opt in', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'kun-mcp-oauth-'))
+    const config = KunCapabilitiesConfig.parse({
+      mcp: {
+        enabled: true,
+        servers: {
+          remote_docs: {
+            transport: 'streamable-http',
+            url: 'https://mcp.example.test/mcp',
+            trustScope: 'user'
+          }
+        }
+      }
+    })
+    const server = config.mcp.servers.remote_docs as McpServerConfig
+
+    expect(createMcpOAuthProvider('remote_docs', server, { storageDir: root })).toBeUndefined()
+    await expect(listMcpOAuthDiagnostics(config.mcp, { storageDir: root })).resolves.toEqual([])
+  })
+
+  it('persists remote MCP OAuth client state outside the server config', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'kun-mcp-oauth-'))
+    const server = KunCapabilitiesConfig.parse({
+      mcp: {
+        enabled: true,
+        servers: {
+          google_drive: {
+            transport: 'streamable-http',
+            url: 'https://drivemcp.googleapis.com/mcp/v1',
+            trustScope: 'user',
+            oauth: {
+              scopes: ['drive.readonly']
+            }
+          }
+        }
+      }
+    }).mcp.servers.google_drive as McpServerConfig
+    const storagePath = join(root, 'google_drive.json')
+    const provider = new FileMcpOAuthProvider('google_drive', server, storagePath, async () => undefined)
+
+    await provider.saveClientInformation({ client_id: 'client-1', client_secret: 'secret-1' })
+    await provider.saveTokens({ access_token: 'access-1', token_type: 'Bearer', refresh_token: 'refresh-1' })
+    await provider.saveCodeVerifier('verifier-1')
+
+    const restored = new FileMcpOAuthProvider('google_drive', server, storagePath, async () => undefined)
+    expect(await restored.clientInformation()).toMatchObject({ client_id: 'client-1' })
+    expect(await restored.tokens()).toMatchObject({ access_token: 'access-1', refresh_token: 'refresh-1' })
+    expect(await restored.codeVerifier()).toBe('verifier-1')
+    expect(restored.clientMetadata.scope).toBe('drive.readonly')
+  })
+
+  it('reports and clears remote MCP OAuth credential state', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'kun-mcp-oauth-'))
+    const config = KunCapabilitiesConfig.parse({
+      mcp: {
+        enabled: true,
+        servers: {
+          google_drive: {
+            transport: 'streamable-http',
+            url: 'https://drivemcp.googleapis.com/mcp/v1',
+            trustScope: 'user',
+            oauth: {
+              scopes: ['drive.readonly']
+            }
+          }
+        }
+      }
+    })
+    const server = config.mcp.servers.google_drive as McpServerConfig
+    const provider = createMcpOAuthProvider('google_drive', server, { storageDir: root })
+    expect(provider).toBeDefined()
+    await provider?.saveTokens({ access_token: 'access-1', token_type: 'Bearer', refresh_token: 'refresh-1' })
+
+    const before = await listMcpOAuthDiagnostics(config.mcp, { storageDir: root })
+    expect(before).toHaveLength(1)
+    expect(before[0]).toMatchObject({
+      serverId: 'google_drive',
+      configured: true,
+      status: 'authorized',
+      hasTokens: true,
+      hasRefreshToken: true
+    })
+
+    const built = await buildMcpToolProviders(config.mcp, {
+      oauthStorageDir: root,
+      clientFactory: async () => fakeClient()
+    })
+    await built.close()
+    expect(built.oauth[0]).toMatchObject({
+      serverId: 'google_drive',
+      status: 'authorized'
+    })
+    await expect(clearMcpOAuthCredentials(config.mcp, {
+      storageDir: root,
+      serverId: 'google_drive'
+    })).resolves.toEqual({ cleared: ['google_drive'] })
+    expect((await listMcpOAuthDiagnostics(config.mcp, { storageDir: root }))[0]).toMatchObject({
+      status: 'empty',
+      hasTokens: false
+    })
+  })
+
+  it('receives remote MCP OAuth authorization codes on a loopback callback', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'kun-mcp-oauth-'))
+    const redirectPort = await getFreePort()
+    const opened: string[] = []
+    const server = KunCapabilitiesConfig.parse({
+      mcp: {
+        enabled: true,
+        servers: {
+          vercel: {
+            transport: 'streamable-http',
+            url: 'https://mcp.vercel.com',
+            trustScope: 'user',
+            oauth: {
+              redirectPort,
+              callbackTimeoutMs: 5_000
+            }
+          }
+        }
+      }
+    }).mcp.servers.vercel as McpServerConfig
+    const provider = new FileMcpOAuthProvider(
+      'vercel',
+      server,
+      join(root, 'vercel.json'),
+      async (url) => {
+        opened.push(url.toString())
+      }
+    )
+
+    await provider.redirectToAuthorization(new URL('https://auth.example.test/authorize'))
+    expect(provider.redirectUrl.port).toBe(String(redirectPort))
+    const code = provider.waitForAuthorizationCode()
+      .then((value) => ({ ok: true as const, value }))
+      .catch((error: unknown) => ({ ok: false as const, error }))
+    const callbackUrl = new URL(provider.redirectUrl)
+    callbackUrl.searchParams.set('code', 'abc123')
+    const status = await httpStatus(callbackUrl)
+
+    expect(status).toBe(200)
+    await expect(code).resolves.toEqual({ ok: true, value: 'abc123' })
+    expect(opened).toEqual(['https://auth.example.test/authorize'])
+  }, 10_000)
+
+  it('rejects non-http MCP OAuth authorization urls', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'kun-mcp-oauth-'))
+    const opened: string[] = []
+    const server = KunCapabilitiesConfig.parse({
+      mcp: {
+        enabled: true,
+        servers: {
+          vercel: {
+            transport: 'streamable-http',
+            url: 'https://mcp.vercel.com',
+            trustScope: 'user',
+            oauth: {}
+          }
+        }
+      }
+    }).mcp.servers.vercel as McpServerConfig
+    const provider = new FileMcpOAuthProvider(
+      'vercel',
+      server,
+      join(root, 'vercel.json'),
+      async (url) => {
+        opened.push(url.toString())
+      }
+    )
+
+    await expect(provider.redirectToAuthorization(new URL('file:///tmp/token'))).rejects.toThrow(/http or https/)
+    expect(opened).toEqual([])
+  })
+
+  it('keeps remote MCP OAuth callbacks bound to the generated state', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'kun-mcp-oauth-'))
+    const redirectPort = await getFreePort()
+    const server = KunCapabilitiesConfig.parse({
+      mcp: {
+        enabled: true,
+        servers: {
+          vercel: {
+            transport: 'streamable-http',
+            url: 'https://mcp.vercel.com',
+            trustScope: 'user',
+            oauth: {
+              redirectPort,
+              callbackTimeoutMs: 5_000
+            }
+          }
+        }
+      }
+    }).mcp.servers.vercel as McpServerConfig
+    const provider = new FileMcpOAuthProvider(
+      'vercel',
+      server,
+      join(root, 'vercel.json'),
+      async () => undefined
+    )
+
+    const state = provider.state()
+    await provider.redirectToAuthorization(new URL('https://auth.example.test/authorize'))
+    const code = provider.waitForAuthorizationCode()
+      .then((value) => ({ ok: true as const, value }))
+      .catch((error: unknown) => ({ ok: false as const, error }))
+
+    const wrongStateUrl = new URL(provider.redirectUrl)
+    wrongStateUrl.searchParams.set('code', 'wrong-code')
+    wrongStateUrl.searchParams.set('state', 'wrong-state')
+    await expect(httpStatus(wrongStateUrl)).resolves.toBe(400)
+
+    const callbackUrl = new URL(provider.redirectUrl)
+    callbackUrl.searchParams.set('code', 'right-code')
+    callbackUrl.searchParams.set('state', state)
+    await expect(httpStatus(callbackUrl)).resolves.toBe(200)
+    await expect(code).resolves.toEqual({ ok: true, value: 'right-code' })
+  }, 10_000)
 
   it('closes connected MCP clients during shutdown', async () => {
     let closed = 0

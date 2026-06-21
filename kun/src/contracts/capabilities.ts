@@ -83,6 +83,19 @@ export type McpTrustScope = z.infer<typeof McpTrustScope>
 export const McpToolDiscoveryMode = z.enum(['direct', 'search', 'auto'])
 export type McpToolDiscoveryMode = z.infer<typeof McpToolDiscoveryMode>
 
+export const McpOAuthConfig = z
+  .object({
+    enabled: z.boolean().default(true),
+    clientName: z.string().min(1).optional(),
+    clientId: z.string().min(1).optional(),
+    clientSecret: z.string().min(1).optional(),
+    scopes: z.array(z.string().min(1)).default([]),
+    redirectPort: z.number().int().min(1024).max(65535).optional(),
+    callbackTimeoutMs: z.number().int().positive().default(120_000)
+  })
+  .strict()
+export type McpOAuthConfig = z.infer<typeof McpOAuthConfig>
+
 export const McpSearchConfig = z
   .object({
     enabled: z.boolean().default(false),
@@ -124,6 +137,7 @@ export const McpServerConfig = z
     // Visibility scope: empty means globally visible; otherwise the server is
     // advertised only when ToolHostContext.workspace is under one of these roots.
     workspaceRoots: z.array(z.string().min(1)).default([]),
+    oauth: McpOAuthConfig.optional(),
     trustScope: McpTrustScope.default('workspace'),
     trustedWorkspaceRoots: z.array(z.string().min(1)).default([]),
     timeoutMs: z.number().int().positive().default(30_000)

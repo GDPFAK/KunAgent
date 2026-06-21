@@ -726,6 +726,7 @@ function normalizeGuiManagedMcpServer(server: unknown): Record<string, unknown> 
   const args = stringArrayValue(raw.args)
   const headers = stringRecordValue(raw.headers)
   const env = stringRecordValue(raw.env)
+  const oauth = objectValue(raw.oauth)
   const transport = normalizeMcpTransport(raw.transport, command, url)
   if (!transport) return null
 
@@ -745,6 +746,7 @@ function normalizeGuiManagedMcpServer(server: unknown): Record<string, unknown> 
     ...(Object.keys(headers).length > 0 ? { headers } : {}),
     ...(Object.keys(env).length > 0 ? { env } : {}),
     ...(workspaceRoots.length > 0 ? { workspaceRoots } : {}),
+    ...(Object.keys(oauth).length > 0 ? { oauth } : {}),
     trustScope,
     ...(trustedWorkspaceRoots.length > 0 ? { trustedWorkspaceRoots } : {}),
     ...(timeoutMs ? { timeoutMs } : {})

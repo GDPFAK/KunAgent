@@ -55,6 +55,32 @@ describe('MCP config', () => {
     expect(config.mcp.servers.github?.transport).toBe('streamable-http')
   })
 
+  it('accepts OAuth settings for remote MCP servers', () => {
+    const server = McpServerConfig.parse({
+      transport: 'streamable-http',
+      url: 'https://mcp.example.test/mcp',
+      trustScope: 'user',
+      oauth: {
+        clientName: 'Kun Test Client',
+        clientId: 'client-id',
+        clientSecret: 'client-secret',
+        scopes: ['drive.readonly', 'gmail.readonly'],
+        redirectPort: 49_999,
+        callbackTimeoutMs: 30_000
+      }
+    })
+
+    expect(server.oauth).toMatchObject({
+      enabled: true,
+      clientName: 'Kun Test Client',
+      clientId: 'client-id',
+      clientSecret: 'client-secret',
+      scopes: ['drive.readonly', 'gmail.readonly'],
+      redirectPort: 49_999,
+      callbackTimeoutMs: 30_000
+    })
+  })
+
   it('rejects stdio servers without commands', () => {
     const result = McpServerConfig.safeParse({
       transport: 'stdio',

@@ -1,6 +1,19 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
-import { createHash } from 'node:crypto'
-import { posix, win32 } from 'node:path'
+import {
+  UnauthorizedError,
+  type OAuthClientProvider,
+  type OAuthDiscoveryState
+} from '@modelcontextprotocol/sdk/client/auth.js'
+import type {
+  OAuthClientInformationMixed,
+  OAuthClientMetadata,
+  OAuthTokens
+} from '@modelcontextprotocol/sdk/shared/auth.js'
+import { spawn } from 'node:child_process'
+import { createHash, randomBytes } from 'node:crypto'
+import { chmod, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
+import { createServer } from 'node:http'
+import { dirname, join, posix, win32 } from 'node:path'
 import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js'
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
@@ -50,12 +63,6 @@ export type McpClientLike = {
     options?: { signal?: AbortSignal; timeout?: number }
   ): Promise<unknown>
   close(): Promise<void>
-  setLifecycleHandlers?(handlers: McpClientLifecycleHandlers): void
-}
-
-export type McpClientLifecycleHandlers = {
-  onError?: (error: Error) => void
-  onClose?: () => void
 }
 
 export type McpServerDiagnostic = {
@@ -64,21 +71,36 @@ export type McpServerDiagnostic = {
   transport: McpServerConfig['transport']
   trustScope: McpServerConfig['trustScope']
   available: boolean
-  status: 'disabled' | 'connected' | 'reconnecting' | 'error'
+  status: 'disabled' | 'connected' | 'error'
   toolCount: number
   catalogFingerprint?: string
   catalogDrift?: boolean
   lastConnectedAt?: string
-  lastDisconnectedAt?: string
-  lastReconnectAt?: string
-  nextReconnectAt?: string
-  reconnectAttempts?: number
   lastError?: string
+}
+
+export type McpOAuthDiagnostic = {
+  serverId: string
+  enabled: boolean
+  configured: boolean
+  transport: McpServerConfig['transport']
+  url?: string
+  status: 'disabled' | 'empty' | 'partial' | 'authorized'
+  hasClientInformation: boolean
+  hasTokens: boolean
+  hasRefreshToken: boolean
+  hasCodeVerifier: boolean
+  hasDiscoveryState: boolean
+}
+
+export type McpOAuthClearResult = {
+  cleared: string[]
 }
 
 export type McpToolProviderBuildResult = {
   providers: CapabilityToolProvider[]
   diagnostics: McpServerDiagnostic[]
+  oauth: McpOAuthDiagnostic[]
   search: McpSearchRuntimeDiagnostic
   connectedServers: number
   toolCount: number
@@ -93,12 +115,15 @@ export type McpToolProviderBuildResult = {
    * failed server has reconnected or exhausted its retries (used by tests).
    */
   startBackgroundReconnect: (register: (provider: CapabilityToolProvider) => void) => Promise<void>
+  clearOAuthCredentials: (serverId?: string) => Promise<McpOAuthClearResult>
   close: () => Promise<void>
 }
 
 export type McpToolProviderOptions = {
   clientFactory?: (serverId: string, server: McpServerConfig) => Promise<McpClientLike>
   nowIso?: () => string
+  oauthStorageDir?: string
+  openExternal?: (url: URL) => void | Promise<void>
   /**
    * Upper bound for connect + initial tool listing per server during startup.
    * A slow or hung server (e.g. an npx-based stdio server resolving packages)
@@ -126,6 +151,10 @@ const DEFAULT_MCP_STARTUP_CONNECT_TIMEOUT_MS = 10_000
 const DEFAULT_MCP_RECONNECT_MAX_ATTEMPTS = 5
 const DEFAULT_MCP_RECONNECT_BASE_DELAY_MS = 4_000
 const DEFAULT_MCP_RECONNECT_MAX_DELAY_MS = 30_000
+const MCP_OAUTH_REDIRECT_HOST = '127.0.0.1'
+const MCP_OAUTH_REDIRECT_PATH = '/oauth/callback'
+const MCP_OAUTH_PORT_BASE = 49_152
+const MCP_OAUTH_PORT_RANGE = 12_000
 
 export type McpStdioEnvironmentOptions = {
   platform?: NodeJS.Platform
@@ -141,16 +170,7 @@ type McpConnectionState = {
   catalogFingerprint?: string
   catalogDrift?: boolean
   lastConnectedAt?: string
-  lastDisconnectedAt?: string
-  lastReconnectAt?: string
-  nextReconnectAt?: string
-  reconnectAttempts: number
-  reconnectBackoffMs: number
-  reconnectPromise?: Promise<McpClientLike>
   lastError?: string
-  status: 'connected' | 'reconnecting' | 'error'
-  diagnostic?: McpServerDiagnostic
-  intentionallyClosing?: boolean
 }
 
 export async function buildMcpToolProviders(
@@ -164,11 +184,16 @@ export async function buildMcpToolProviders(
   const catalogState: McpSearchCatalogState = { records: [] }
   const mcp = config
   const nowIso = options.nowIso ?? (() => new Date().toISOString())
-  const clientFactory = options.clientFactory ?? createSdkMcpClient
+  const clientFactory = options.clientFactory ?? ((serverId, server) =>
+    createSdkMcpClient(serverId, server, {
+      storageDir: options.oauthStorageDir,
+      openExternal: options.openExternal
+    }))
   if (!mcp?.enabled) {
     return {
       providers,
       diagnostics,
+      oauth: [],
       search: mcpSearchDiagnostic({
         config: config?.search ?? {
           enabled: false,
@@ -187,6 +212,7 @@ export async function buildMcpToolProviders(
       connectedServers: 0,
       toolCount: 0,
       startBackgroundReconnect: async () => undefined,
+      clearOAuthCredentials: async () => ({ cleared: [] }),
       close: async () => undefined
     }
   }
@@ -218,12 +244,8 @@ export async function buildMcpToolProviders(
           client,
           clientFactory,
           nowIso,
-          reconnectAttempts: 0,
-          reconnectBackoffMs: DEFAULT_MCP_RECONNECT_BASE_DELAY_MS,
-          status: 'connected',
           lastConnectedAt: nowIso()
         }
-        attachMcpClientLifecycle(state)
         const listed = await refreshMcpConnectionCatalog(state)
         return { state, listed }
       })()
@@ -263,11 +285,14 @@ export async function buildMcpToolProviders(
       available: true,
       tools
     })
-    diagnostics.push(syncMcpDiagnostic(state, 'connected', tools.length))
+    diagnostics.push(serverDiagnostic(state, 'connected', tools.length))
   }
 
   const connectedServers = diagnostics.filter((diagnostic) => diagnostic.status === 'connected').length
   const toolCount = catalogState.records.length
+  const oauthDiagnostics = await listMcpOAuthDiagnostics(mcp, {
+    storageDir: options.oauthStorageDir
+  })
   catalogState.lastRefreshedAt = nowIso()
   catalogState.catalogFingerprint = catalogFingerprint(catalogState.records.map((record) => record.toolId))
   const searchActive = shouldUseMcpSearch(mcp.search, toolCount) && connectedServers > 0
@@ -310,6 +335,7 @@ export async function buildMcpToolProviders(
   return {
     providers,
     diagnostics,
+    oauth: oauthDiagnostics,
     search: mcpSearchDiagnostic({
       config: mcp.search,
       active: searchActive,
@@ -338,9 +364,20 @@ export async function buildMcpToolProviders(
         options: options.backgroundReconnect
       })
     },
+    clearOAuthCredentials: async (serverId) => {
+      const result = await clearMcpOAuthCredentials(mcp, {
+        storageDir: options.oauthStorageDir,
+        serverId
+      })
+      const nextDiagnostics = await listMcpOAuthDiagnostics(mcp, {
+        storageDir: options.oauthStorageDir
+      })
+      oauthDiagnostics.splice(0, oauthDiagnostics.length, ...nextDiagnostics)
+      return result
+    },
     close: async () => {
       reconnectAborted = true
-      await Promise.all(connected.map((state) => closeMcpClient(state)))
+      await Promise.all(connected.map((state) => state.client.close().catch(() => undefined)))
     }
   }
 }
@@ -389,7 +426,6 @@ async function reconnectFailedMcpServer(
 ): Promise<void> {
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     if (params.isAborted()) return
-    updateFailedServerDiagnostic(params.diagnostics, failed, 'reconnecting', attempt)
     await params.delay(Math.min(maxDelayMs, baseDelayMs * 2 ** (attempt - 1)))
     if (params.isAborted()) return
     try {
@@ -400,27 +436,17 @@ async function reconnectFailedMcpServer(
         client,
         clientFactory: params.clientFactory,
         nowIso: params.nowIso,
-        reconnectAttempts: 0,
-        reconnectBackoffMs: DEFAULT_MCP_RECONNECT_BASE_DELAY_MS,
-        status: 'connected',
         lastConnectedAt: params.nowIso()
       }
-      attachMcpClientLifecycle(state)
       const listed = await refreshMcpConnectionCatalog(state)
       if (params.isAborted()) {
-        await closeMcpClient(state)
+        await client.close().catch(() => undefined)
         return
       }
       registerLateMcpConnection(params, state, listed)
       return
-    } catch (error) {
-      updateFailedServerDiagnostic(
-        params.diagnostics,
-        failed,
-        'error',
-        attempt,
-        formatMcpConnectionError(error, failed.server)
-      )
+    } catch {
+      // Leave the diagnostic as "error" and try again until attempts run out.
     }
   }
 }
@@ -450,31 +476,10 @@ function registerLateMcpConnection(
       // flips to connected below so the UI stops showing the server as failed.
     }
   }
-  const diagnostic = syncMcpDiagnostic(state, 'connected', tools.length)
+  const diagnostic = serverDiagnostic(state, 'connected', tools.length)
   const index = params.diagnostics.findIndex((entry) => entry.id === state.serverId)
   if (index >= 0) params.diagnostics[index] = diagnostic
   else params.diagnostics.push(diagnostic)
-}
-
-function updateFailedServerDiagnostic(
-  diagnostics: McpServerDiagnostic[],
-  failed: FailedMcpServer,
-  status: Extract<McpServerDiagnostic['status'], 'reconnecting' | 'error'>,
-  attempt: number,
-  lastError?: string
-): void {
-  const index = diagnostics.findIndex((entry) => entry.id === failed.serverId)
-  const previous = index >= 0 ? diagnostics[index] : undefined
-  const next: McpServerDiagnostic = {
-    ...(previous ?? serverDiagnostic({ serverId: failed.serverId, server: failed.server }, 'error', 0)),
-    status,
-    available: false,
-    reconnectAttempts: attempt,
-    lastReconnectAt: new Date().toISOString(),
-    ...(lastError ? { lastError: redactSecretText(lastError) } : {})
-  }
-  if (index >= 0) diagnostics[index] = next
-  else diagnostics.push(next)
 }
 
 function defaultMcpReconnectDelay(ms: number): Promise<void> {
@@ -512,20 +517,353 @@ function workspaceMatchesRoots(workspace: string, roots: readonly string[]): boo
   })
 }
 
-async function createSdkMcpClient(serverId: string, server: McpServerConfig): Promise<McpClientLike> {
-  const client = new Client({ name: `kun-${serverId}`, version: '0.1.0' })
-  // Observe transport-level failures explicitly. The SDK routes a dropped SSE
-  // stream and exhausted background reconnects to `onerror`; with no handler
-  // they are silently swallowed, which hides real outages from the logs and (on
-  // some SDK/runtime versions) lets the rejection escape as unhandled. Handling
-  // it here keeps a streamable-http disconnect from destabilizing the runtime
-  // (#639) — the per-call reconnect in callMcpToolWithReconnect still recovers
-  // the connection on the next tool use.
-  client.onerror = (error) => {
-    process.stderr.write(`kun mcp[${serverId}]: transport error: ${redactSecretText(errorMessage(error))}\n`)
+type McpOAuthState = {
+  clientInformation?: OAuthClientInformationMixed
+  tokens?: OAuthTokens
+  codeVerifier?: string
+  discoveryState?: OAuthDiscoveryState
+}
+
+type McpOAuthProviderOptions = {
+  storageDir: string
+  openExternal?: (url: URL) => void | Promise<void>
+}
+
+type SdkMcpClientOptions = {
+  storageDir?: string
+  openExternal?: (url: URL) => void | Promise<void>
+}
+
+type OAuthTransport = Transport & {
+  finishAuth?: (authorizationCode: string) => Promise<void>
+}
+
+export class FileMcpOAuthProvider implements OAuthClientProvider {
+  readonly clientMetadataUrl?: string
+  private pendingAuthorizationCode: Promise<string> | null = null
+  private pendingState: string | null = null
+
+  constructor(
+    private readonly serverId: string,
+    private readonly server: McpServerConfig,
+    private readonly storagePath: string,
+    private readonly openExternal: (url: URL) => void | Promise<void> = defaultOpenExternal
+  ) {}
+
+  get redirectUrl(): URL {
+    return new URL(`http://${MCP_OAUTH_REDIRECT_HOST}:${this.redirectPort()}${MCP_OAUTH_REDIRECT_PATH}`)
   }
-  const transport = createTransport(server)
-  await client.connect(transport, { timeout: server.timeoutMs })
+
+  get clientMetadata(): OAuthClientMetadata {
+    return {
+      client_name: this.server.oauth?.clientName ?? `Kun MCP Client (${this.serverId})`,
+      redirect_uris: [this.redirectUrl.toString()],
+      grant_types: ['authorization_code', 'refresh_token'],
+      response_types: ['code'],
+      token_endpoint_auth_method: this.server.oauth?.clientSecret ? 'client_secret_post' : 'none',
+      ...(this.server.oauth?.scopes.length ? { scope: this.server.oauth.scopes.join(' ') } : {})
+    }
+  }
+
+  async clientInformation(): Promise<OAuthClientInformationMixed | undefined> {
+    const configured = this.configuredClientInformation()
+    if (configured) return configured
+    return (await this.readState()).clientInformation
+  }
+
+  async saveClientInformation(clientInformation: OAuthClientInformationMixed): Promise<void> {
+    if (this.configuredClientInformation()) return
+    await this.updateState((state) => ({ ...state, clientInformation }))
+  }
+
+  async tokens(): Promise<OAuthTokens | undefined> {
+    return (await this.readState()).tokens
+  }
+
+  async saveTokens(tokens: OAuthTokens): Promise<void> {
+    await this.updateState((state) => ({ ...state, tokens }))
+  }
+
+  state(): string {
+    this.pendingState = randomBytes(24).toString('hex')
+    return this.pendingState
+  }
+
+  async redirectToAuthorization(authorizationUrl: URL): Promise<void> {
+    if (authorizationUrl.protocol !== 'http:' && authorizationUrl.protocol !== 'https:') {
+      throw new Error(`MCP OAuth authorization URL must use http or https for server "${this.serverId}"`)
+    }
+    const callback = this.startCallbackServer()
+    this.pendingAuthorizationCode = callback.code
+    try {
+      await callback.ready
+      await this.openExternal(authorizationUrl)
+    } catch (error) {
+      callback.cancel()
+      this.pendingAuthorizationCode = null
+      this.pendingState = null
+      throw error
+    }
+  }
+
+  async waitForAuthorizationCode(): Promise<string> {
+    const authorizationCode = this.pendingAuthorizationCode
+    if (!authorizationCode) {
+      throw new Error(`MCP OAuth authorization was not started for server "${this.serverId}"`)
+    }
+    try {
+      return await authorizationCode
+    } finally {
+      if (this.pendingAuthorizationCode === authorizationCode) {
+        this.pendingAuthorizationCode = null
+        this.pendingState = null
+      }
+    }
+  }
+
+  async saveCodeVerifier(codeVerifier: string): Promise<void> {
+    await this.updateState((state) => ({ ...state, codeVerifier }))
+  }
+
+  async codeVerifier(): Promise<string> {
+    const codeVerifier = (await this.readState()).codeVerifier
+    if (!codeVerifier) throw new Error(`MCP OAuth code verifier is missing for server "${this.serverId}"`)
+    return codeVerifier
+  }
+
+  async saveDiscoveryState(discoveryState: OAuthDiscoveryState): Promise<void> {
+    await this.updateState((state) => ({ ...state, discoveryState }))
+  }
+
+  async discoveryState(): Promise<OAuthDiscoveryState | undefined> {
+    return (await this.readState()).discoveryState
+  }
+
+  async invalidateCredentials(scope: 'all' | 'client' | 'tokens' | 'verifier' | 'discovery'): Promise<void> {
+    if (scope === 'all') {
+      await rm(this.storagePath, { force: true })
+      return
+    }
+    await this.updateState((state) => {
+      const next = { ...state }
+      if (scope === 'client') delete next.clientInformation
+      if (scope === 'tokens') delete next.tokens
+      if (scope === 'verifier') delete next.codeVerifier
+      if (scope === 'discovery') delete next.discoveryState
+      return next
+    })
+  }
+
+  async diagnostics(): Promise<Omit<McpOAuthDiagnostic, 'serverId' | 'enabled' | 'configured' | 'transport' | 'url'>> {
+    const state = await this.readState()
+    const hasClientInformation = Boolean(state.clientInformation)
+    const hasTokens = Boolean(state.tokens?.access_token)
+    const hasRefreshToken = Boolean(state.tokens?.refresh_token)
+    const hasCodeVerifier = Boolean(state.codeVerifier)
+    const hasDiscoveryState = Boolean(state.discoveryState)
+    const hasAnyState = hasClientInformation || hasTokens || hasCodeVerifier || hasDiscoveryState
+    const status = hasTokens ? 'authorized' : hasAnyState ? 'partial' : 'empty'
+    return {
+      status,
+      hasClientInformation,
+      hasTokens,
+      hasRefreshToken,
+      hasCodeVerifier,
+      hasDiscoveryState
+    }
+  }
+
+  async clearCredentials(): Promise<void> {
+    await rm(this.storagePath, { force: true })
+  }
+
+  private configuredClientInformation(): OAuthClientInformationMixed | undefined {
+    if (!this.server.oauth?.clientId) return undefined
+    return {
+      client_id: this.server.oauth.clientId,
+      ...(this.server.oauth.clientSecret ? { client_secret: this.server.oauth.clientSecret } : {})
+    }
+  }
+
+  private redirectPort(): number {
+    return this.server.oauth?.redirectPort ?? defaultMcpOAuthRedirectPort(this.serverId, this.server.url ?? '')
+  }
+
+  private startCallbackServer(): { code: Promise<string>; ready: Promise<void>; cancel: () => void } {
+    const timeoutMs = this.server.oauth?.callbackTimeoutMs ?? 120_000
+    let resolveCode!: (code: string) => void
+    let rejectCode!: (error: Error) => void
+    let completed = false
+    let listening = false
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const codePromise = new Promise<string>((resolve, reject) => {
+      resolveCode = resolve
+      rejectCode = reject
+    })
+    const closeServer = () => {
+      if (timer) clearTimeout(timer)
+      if (listening) {
+        server.close()
+        listening = false
+      }
+    }
+    const resolveOnce = (code: string) => {
+      if (completed) return
+      completed = true
+      closeServer()
+      resolveCode(code)
+    }
+    const rejectOnce = (error: Error) => {
+      if (completed) return
+      completed = true
+      closeServer()
+      rejectCode(error)
+    }
+    const server = createServer((request, response) => {
+      const url = new URL(request.url ?? '/', this.redirectUrl)
+      if (url.pathname !== MCP_OAUTH_REDIRECT_PATH) {
+        response.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' })
+        response.end('Not found')
+        return
+      }
+      const state = url.searchParams.get('state')
+      if (this.pendingState && state !== this.pendingState) {
+        response.writeHead(400, { 'content-type': 'text/html; charset=utf-8' })
+        response.end('<!doctype html><title>Kun OAuth</title><p>Authorization state mismatch.</p>')
+        return
+      }
+      const code = url.searchParams.get('code')
+      const error = url.searchParams.get('error')
+      if (code) {
+        response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
+        response.end('<!doctype html><title>Kun OAuth</title><p>Authorization complete. You can close this window.</p>')
+        resolveOnce(code)
+      } else {
+        response.writeHead(400, { 'content-type': 'text/html; charset=utf-8' })
+        response.end('<!doctype html><title>Kun OAuth</title><p>Authorization failed.</p>')
+        rejectOnce(new Error(error ? `MCP OAuth authorization failed: ${error}` : 'MCP OAuth callback did not include a code'))
+      }
+    })
+    timer = setTimeout(() => {
+      rejectOnce(new Error(`MCP OAuth authorization timed out for server "${this.serverId}"`))
+    }, timeoutMs)
+    const ready = new Promise<void>((resolve, reject) => {
+      server.once('error', (error) => {
+        rejectOnce(error instanceof Error ? error : new Error(String(error)))
+        reject(error)
+      })
+      server.listen(this.redirectPort(), MCP_OAUTH_REDIRECT_HOST, () => {
+        listening = true
+        resolve()
+      })
+    })
+    timer.unref()
+    codePromise.finally(() => {
+      if (timer) clearTimeout(timer)
+    }).catch(() => undefined)
+    return {
+      code: codePromise,
+      ready,
+      cancel: () => rejectOnce(new Error(`MCP OAuth authorization was cancelled for server "${this.serverId}"`))
+    }
+  }
+
+  private async readState(): Promise<McpOAuthState> {
+    try {
+      const parsed = JSON.parse(await readFile(this.storagePath, 'utf8')) as unknown
+      return isMcpOAuthState(parsed) ? parsed : {}
+    } catch (error) {
+      if (isNodeErrorCode(error, 'ENOENT')) return {}
+      throw error
+    }
+  }
+
+  private async updateState(update: (state: McpOAuthState) => McpOAuthState): Promise<void> {
+    const next = update(await this.readState())
+    await mkdir(dirname(this.storagePath), { recursive: true, mode: 0o700 })
+    const temporaryPath = `${this.storagePath}.${process.pid}.${Date.now()}.tmp`
+    await writeFile(temporaryPath, `${JSON.stringify(next, null, 2)}\n`, { mode: 0o600 })
+    await chmod(temporaryPath, 0o600).catch(() => undefined)
+    await rename(temporaryPath, this.storagePath)
+    await chmod(this.storagePath, 0o600).catch(() => undefined)
+  }
+}
+
+export function createMcpOAuthProvider(
+  serverId: string,
+  server: McpServerConfig,
+  options: McpOAuthProviderOptions | undefined
+): FileMcpOAuthProvider | undefined {
+  if (!options?.storageDir) return undefined
+  if (server.transport !== 'streamable-http' && server.transport !== 'sse') return undefined
+  if (!server.url || !server.oauth || server.oauth.enabled === false) return undefined
+  return new FileMcpOAuthProvider(
+    serverId,
+    server,
+    join(options.storageDir, `${safeMcpOAuthFileName(serverId)}-${hashText(server.url).slice(0, 16)}.json`),
+    options.openExternal
+  )
+}
+
+export async function listMcpOAuthDiagnostics(
+  config: McpCapabilityConfig,
+  options: { storageDir?: string } = {}
+): Promise<McpOAuthDiagnostic[]> {
+  const providers = createConfiguredMcpOAuthProviders(config, options)
+  return Promise.all(providers.map(async ({ serverId, server, provider }) => ({
+    serverId,
+    enabled: server.oauth?.enabled !== false,
+    configured: Boolean(server.oauth),
+    transport: server.transport,
+    ...(server.url ? { url: server.url } : {}),
+    ...await provider.diagnostics()
+  })))
+}
+
+export async function clearMcpOAuthCredentials(
+  config: McpCapabilityConfig,
+  options: { storageDir?: string; serverId?: string } = {}
+): Promise<McpOAuthClearResult> {
+  const providers = createConfiguredMcpOAuthProviders(config, options)
+    .filter((entry) => !options.serverId || entry.serverId === options.serverId)
+  await Promise.all(providers.map((entry) => entry.provider.clearCredentials()))
+  return { cleared: providers.map((entry) => entry.serverId) }
+}
+
+function createConfiguredMcpOAuthProviders(
+  config: McpCapabilityConfig,
+  options: { storageDir?: string } = {}
+): Array<{ serverId: string; server: McpServerConfig; provider: FileMcpOAuthProvider }> {
+  return Object.entries(config.servers).flatMap(([serverId, server]) => {
+    const provider = createMcpOAuthProvider(serverId, server, {
+      storageDir: options.storageDir ?? ''
+    })
+    return provider ? [{ serverId, server, provider }] : []
+  })
+}
+
+async function createSdkMcpClient(
+  serverId: string,
+  server: McpServerConfig,
+  options: SdkMcpClientOptions = {}
+): Promise<McpClientLike> {
+  const client = new Client({ name: `kun-${serverId}`, version: '0.1.0' })
+  const authProvider = createMcpOAuthProvider(serverId, server, {
+    storageDir: options.storageDir ?? '',
+    openExternal: options.openExternal
+  })
+  let transport = createTransport(server, authProvider)
+  try {
+    await client.connect(transport, { timeout: server.timeoutMs })
+  } catch (error) {
+    if (!(error instanceof UnauthorizedError) || !authProvider || typeof transport.finishAuth !== 'function') {
+      throw error
+    }
+    const authorizationCode = await authProvider.waitForAuthorizationCode()
+    await transport.finishAuth(authorizationCode)
+    transport = createTransport(server, authProvider)
+    await client.connect(transport, { timeout: server.timeoutMs })
+  }
   return {
     listTools: (options) => {
       const params = options?.cursor ? { cursor: options.cursor } : undefined
@@ -535,15 +873,11 @@ async function createSdkMcpClient(serverId: string, server: McpServerConfig): Pr
       })
     },
     callTool: (input, options) => client.callTool(input, undefined, options),
-    close: () => client.close(),
-    setLifecycleHandlers: (handlers) => {
-      client.onerror = handlers.onError
-      client.onclose = handlers.onClose
-    }
+    close: () => client.close()
   }
 }
 
-function createTransport(server: McpServerConfig): Transport {
+function createTransport(server: McpServerConfig, authProvider?: OAuthClientProvider): OAuthTransport {
   switch (server.transport) {
     case 'stdio': {
       const cwd = resolveMcpServerCwd(server)
@@ -557,10 +891,12 @@ function createTransport(server: McpServerConfig): Transport {
     }
     case 'streamable-http':
       return new StreamableHTTPClientTransport(new URL(server.url ?? ''), {
+        ...(authProvider ? { authProvider } : {}),
         requestInit: { headers: server.headers }
       })
     case 'sse':
       return new SSEClientTransport(new URL(server.url ?? ''), {
+        ...(authProvider ? { authProvider } : {}),
         requestInit: { headers: server.headers },
         eventSourceInit: { fetch: fetchWithHeaders(server.headers) }
       })
@@ -573,6 +909,41 @@ export function resolveMcpServerCwd(server: McpServerConfig): string | undefined
   if (configured) return configured
   if (server.trustScope !== 'workspace') return undefined
   return server.trustedWorkspaceRoots.map((root) => root.trim()).find(Boolean)
+}
+
+function defaultMcpOAuthRedirectPort(serverId: string, url: string): number {
+  const digest = createHash('sha256').update(`${serverId}\n${url}`).digest()
+  return MCP_OAUTH_PORT_BASE + digest.readUInt16BE(0) % MCP_OAUTH_PORT_RANGE
+}
+
+function safeMcpOAuthFileName(serverId: string): string {
+  return slug(serverId).slice(0, 64) || 'server'
+}
+
+function hashText(value: string): string {
+  return createHash('sha256').update(value).digest('hex')
+}
+
+function isMcpOAuthState(value: unknown): value is McpOAuthState {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function isNodeErrorCode(error: unknown, code: string): boolean {
+  return typeof error === 'object' && error !== null && 'code' in error && (error as { code?: unknown }).code === code
+}
+
+function defaultOpenExternal(url: URL): void {
+  const target = url.toString()
+  const command = process.platform === 'win32' ? 'rundll32.exe'
+    : process.platform === 'darwin' ? 'open'
+      : 'xdg-open'
+  const args = process.platform === 'win32' ? ['url.dll,FileProtocolHandler', target] : [target]
+  const child = spawn(command, args, {
+    detached: true,
+    stdio: 'ignore',
+    windowsHide: true
+  })
+  child.unref()
 }
 
 function fetchWithHeaders(headers: Record<string, string>): typeof fetch {
@@ -605,17 +976,6 @@ function createMcpLocalTool(
       if (!isMcpServerTrusted(state.server, context.workspace)) {
         return {
           output: { error: `MCP server ${state.serverId} is not trusted for this workspace` },
-          isError: true
-        }
-      }
-      if (state.status === 'error' && !canAttemptMcpReconnect(state)) {
-        return {
-          output: {
-            error: mcpReconnectCooldownMessage(state),
-            serverId: state.serverId,
-            status: state.status,
-            nextReconnectAt: state.nextReconnectAt
-          },
           isError: true
         }
       }
@@ -671,7 +1031,6 @@ async function refreshMcpConnectionCatalog(state: McpConnectionState): Promise<M
   state.catalogDrift = Boolean(state.catalogFingerprint && state.catalogFingerprint !== nextFingerprint)
   state.catalogFingerprint = nextFingerprint
   state.lastError = undefined
-  syncMcpDiagnostic(state, state.status, listed.length)
   return listed
 }
 
@@ -682,21 +1041,16 @@ async function callMcpToolWithReconnect(
   timeout = state.server.timeoutMs
 ): Promise<unknown> {
   try {
-    await ensureMcpConnectionForCall(state, signal)
     return await state.client.callTool(input, { signal, timeout })
   } catch (error) {
+    state.lastError = redactSecretText(errorMessage(error))
     if (signal?.aborted) throw error
     // Deterministic server-side failures (validation errors, bad
     // arguments) come back identically on a fresh connection; tearing
     // down a healthy session for them just loses server state. Only
     // transport-looking failures earn a reconnect + retry.
-    if (!looksLikeMcpTransportError(error)) {
-      state.lastError = redactSecretText(errorMessage(error))
-      syncMcpDiagnostic(state)
-      throw error
-    }
-    markMcpConnectionError(state, error)
-    const client = await reconnectMcpConnection(state, signal)
+    if (!looksLikeMcpTransportError(error)) throw error
+    const client = await reconnectMcpConnection(state)
     return client.callTool(input, { signal, timeout })
   }
 }
@@ -743,110 +1097,13 @@ async function raceStartupTimeout<T extends { state: McpConnectionState }>(
   }
 }
 
-async function ensureMcpConnectionForCall(
-  state: McpConnectionState,
-  signal: AbortSignal | undefined
-): Promise<void> {
-  if (state.status === 'connected') return
-  await reconnectMcpConnection(state, signal)
-}
-
-async function reconnectMcpConnection(
-  state: McpConnectionState,
-  signal?: AbortSignal
-): Promise<McpClientLike> {
-  if (state.reconnectPromise) return state.reconnectPromise
-  if (!canAttemptMcpReconnect(state)) {
-    throw new Error(mcpReconnectCooldownMessage(state))
-  }
-  state.status = 'reconnecting'
-  state.reconnectAttempts += 1
-  state.lastReconnectAt = state.nowIso()
-  syncMcpDiagnostic(state, 'reconnecting')
-  state.reconnectPromise = reconnectMcpConnectionOnce(state, signal)
-    .catch((error) => {
-      markMcpReconnectFailed(state, error)
-      throw error
-    })
-    .finally(() => {
-      state.reconnectPromise = undefined
-    })
-  return state.reconnectPromise
-}
-
-async function reconnectMcpConnectionOnce(
-  state: McpConnectionState,
-  signal?: AbortSignal
-): Promise<McpClientLike> {
-  if (signal?.aborted) throw new Error('MCP reconnect aborted')
-  await closeMcpClient(state)
-  if (signal?.aborted) throw new Error('MCP reconnect aborted')
+async function reconnectMcpConnection(state: McpConnectionState): Promise<McpClientLike> {
+  await state.client.close().catch(() => undefined)
   const client = await state.clientFactory(state.serverId, state.server)
   state.client = client
-  state.status = 'connected'
   state.lastConnectedAt = state.nowIso()
   state.lastError = undefined
-  state.nextReconnectAt = undefined
-  state.reconnectBackoffMs = DEFAULT_MCP_RECONNECT_BASE_DELAY_MS
-  attachMcpClientLifecycle(state)
-  await refreshMcpConnectionCatalog(state)
-  syncMcpDiagnostic(state, 'connected')
   return client
-}
-
-async function closeMcpClient(state: McpConnectionState): Promise<void> {
-  state.intentionallyClosing = true
-  try {
-    await state.client.close().catch(() => undefined)
-  } finally {
-    state.intentionallyClosing = false
-  }
-}
-
-function attachMcpClientLifecycle(state: McpConnectionState): void {
-  state.client.setLifecycleHandlers?.({
-    onError: (error) => {
-      if (looksLikeMcpTransportError(error)) {
-        markMcpConnectionError(state, error)
-      } else {
-        state.lastError = redactSecretText(errorMessage(error))
-        syncMcpDiagnostic(state)
-      }
-    },
-    onClose: () => {
-      if (state.intentionallyClosing) return
-      markMcpConnectionError(state, new Error('MCP transport closed'))
-    }
-  })
-}
-
-function markMcpConnectionError(state: McpConnectionState, error: unknown): void {
-  if (state.intentionallyClosing) return
-  state.status = 'error'
-  state.lastError = redactSecretText(errorMessage(error))
-  state.lastDisconnectedAt = state.nowIso()
-  syncMcpDiagnostic(state, 'error')
-}
-
-function markMcpReconnectFailed(state: McpConnectionState, error: unknown): void {
-  state.status = 'error'
-  state.lastError = redactSecretText(errorMessage(error))
-  state.lastDisconnectedAt = state.nowIso()
-  const nextDelay = state.reconnectBackoffMs
-  state.reconnectBackoffMs = Math.min(DEFAULT_MCP_RECONNECT_MAX_DELAY_MS, nextDelay * 2)
-  state.nextReconnectAt = new Date(Date.now() + nextDelay).toISOString()
-  syncMcpDiagnostic(state, 'error')
-}
-
-function canAttemptMcpReconnect(state: McpConnectionState): boolean {
-  if (!state.nextReconnectAt) return true
-  return Date.now() >= Date.parse(state.nextReconnectAt)
-}
-
-function mcpReconnectCooldownMessage(state: McpConnectionState): string {
-  return state.nextReconnectAt
-    ? `MCP server ${state.serverId} is offline; reconnect is cooling down until ${state.nextReconnectAt}. Last error: ${state.lastError ?? 'unknown error'}`
-    : `MCP server ${state.serverId} is offline. Last error: ${state.lastError ?? 'unknown error'}`
 }
 
 function shouldUseMcpSearch(config: NonNullable<McpCapabilityConfig['search']>, toolCount: number): boolean {
@@ -882,39 +1139,6 @@ function serverDiagnostic(
     ...(state.lastConnectedAt ? { lastConnectedAt: state.lastConnectedAt } : {}),
     ...(lastError ? { lastError: redactSecretText(lastError) } : {})
   }
-}
-
-function syncMcpDiagnostic(
-  state: McpConnectionState,
-  status: McpServerDiagnostic['status'] = state.status,
-  toolCount = state.diagnostic?.toolCount ?? 0
-): McpServerDiagnostic {
-  const diagnostic: McpServerDiagnostic = {
-    id: state.serverId,
-    enabled: state.server.enabled,
-    transport: state.server.transport,
-    trustScope: state.server.trustScope,
-    available: status === 'connected',
-    status,
-    toolCount,
-    ...(state.catalogFingerprint ? { catalogFingerprint: state.catalogFingerprint } : {}),
-    ...(state.catalogDrift !== undefined ? { catalogDrift: state.catalogDrift } : {}),
-    ...(state.lastConnectedAt ? { lastConnectedAt: state.lastConnectedAt } : {}),
-    ...(state.lastDisconnectedAt ? { lastDisconnectedAt: state.lastDisconnectedAt } : {}),
-    ...(state.lastReconnectAt ? { lastReconnectAt: state.lastReconnectAt } : {}),
-    ...(state.nextReconnectAt ? { nextReconnectAt: state.nextReconnectAt } : {}),
-    ...(state.reconnectAttempts > 0 ? { reconnectAttempts: state.reconnectAttempts } : {}),
-    ...(state.lastError ? { lastError: redactSecretText(state.lastError) } : {})
-  }
-  if (!state.diagnostic) {
-    state.diagnostic = diagnostic
-    return diagnostic
-  }
-  for (const key of Object.keys(state.diagnostic) as Array<keyof McpServerDiagnostic>) {
-    delete (state.diagnostic as Record<string, unknown>)[key]
-  }
-  Object.assign(state.diagnostic, diagnostic)
-  return state.diagnostic
 }
 
 function catalogFingerprint(values: readonly string[]): string {
