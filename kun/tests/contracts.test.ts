@@ -15,6 +15,8 @@ import {
   UsageSnapshotSchema,
   AttachmentUploadRequest,
   MemoryRecord,
+  KnowledgeBaseRecord,
+  KnowledgeSearchRequest,
   KunErrorBody,
   KunCapabilitiesConfig,
   RuntimeCapabilityManifest,
@@ -268,6 +270,34 @@ describe('contracts', () => {
       updatedAt: '2026-06-03T00:00:00.000Z'
     }).tags).toEqual(['frontend'])
 
+    expect(KnowledgeBaseRecord.parse({
+      id: 'kb_1',
+      name: 'Docs',
+      workspace: '/tmp/ws',
+      enabled: true,
+      providerKind: 'local-sqlite',
+      documentCount: 0,
+      chunkCount: 0,
+      createdAt: '2026-06-21T00:00:00.000Z',
+      updatedAt: '2026-06-21T00:00:00.000Z'
+    }).embedding).toEqual({})
+
+    expect(KnowledgeSearchRequest.parse({
+      query: 'search docs'
+    })).toMatchObject({ knowledgeBaseIds: [], topK: 8, minScore: 0 })
+
+    expect(() => KnowledgeBaseRecord.parse({
+      id: 'kb_bad',
+      name: 'Bad external',
+      enabled: true,
+      providerKind: 'external',
+      external: { endpoint: 'file:///tmp/secret.txt' },
+      documentCount: 0,
+      chunkCount: 0,
+      createdAt: '2026-06-21T00:00:00.000Z',
+      updatedAt: '2026-06-21T00:00:00.000Z'
+    })).toThrow(/http\(s\)/)
+
     const child = RuntimeEvent.parse({
       kind: 'turn_completed',
       seq: 10,
@@ -495,6 +525,10 @@ describe('cli', () => {
     expect(config.attachments.textFallbackMaxImageDimension).toBe(1280)
     expect(config.attachments.textFallbackPreferredMimeType).toBe('image/webp')
     expect(config.memory.scopes).toEqual(['user', 'workspace', 'project'])
+    expect(config.knowledge.enabled).toBe(false)
+    expect(config.knowledge.defaultChunkSizeChars).toBe(1600)
+    expect(config.knowledge.defaultChunkOverlapChars).toBe(200)
+    expect(config.knowledge.maxToolResults).toBe(8)
     expect(config.imageGen.enabled).toBe(false)
     expect(config.imageGen.timeoutMs).toBe(180_000)
     expect(config.imageGen.maxReferenceImages).toBe(4)
@@ -647,6 +681,13 @@ describe('cli', () => {
     expect(manifest.attachments.textFallbackPreferredMimeType).toBe('image/webp')
     expect(manifest.imageGen.available).toBe(false)
     expect(manifest.imageGen.reason).toMatch(/disabled/)
+    expect(manifest.knowledge).toMatchObject({
+      enabled: false,
+      available: false,
+      defaultChunkSizeChars: 1600,
+      defaultChunkOverlapChars: 200,
+      maxToolResults: 8
+    })
 
     const enabledButMissingProvider = buildRuntimeCapabilityManifest({
       model: modelCapabilitiesForModel('deepseek-chat'),
@@ -657,6 +698,19 @@ describe('cli', () => {
     expect(enabledButMissingProvider.web.enabled).toBe(true)
     expect(enabledButMissingProvider.web.available).toBe(false)
     expect(enabledButMissingProvider.web.reason).toMatch(/no web providers/)
+
+    const enabledKnowledge = buildRuntimeCapabilityManifest({
+      model: modelCapabilitiesForModel('deepseek-chat'),
+      config: KunCapabilitiesConfig.parse({
+        knowledge: { enabled: true }
+      }),
+      knowledge: { available: true }
+    })
+    expect(enabledKnowledge.knowledge).toMatchObject({
+      enabled: true,
+      available: true,
+      status: 'available'
+    })
   })
 
   it('loads config.json from the data dir when present', async () => {

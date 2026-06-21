@@ -659,6 +659,146 @@ describe('KunRuntimeProvider', () => {
     })
   })
 
+  it('manages knowledge bases through Kun endpoints', async () => {
+    const base = {
+      id: 'kb_1',
+      name: 'Project docs',
+      description: 'Docs',
+      workspace: '/tmp/workspace',
+      enabled: true,
+      providerKind: 'local-sqlite',
+      embedding: {},
+      reranker: { enabled: false },
+      documentCount: 1,
+      chunkCount: 1,
+      createdAt: 't0',
+      updatedAt: 't1'
+    }
+    const document = {
+      id: 'doc_1',
+      knowledgeBaseId: 'kb_1',
+      name: 'Readme',
+      sourceType: 'text',
+      contentHash: 'hash',
+      byteSize: 12,
+      chunkCount: 1,
+      status: 'ready',
+      createdAt: 't0',
+      updatedAt: 't1'
+    }
+    const runtimeRequest = vi.fn(async (path: string, method?: string, body?: string) => {
+      if (path === '/v1/knowledge-bases?workspace=%2Ftmp%2Fworkspace&include_disabled=true') {
+        return { ok: true, status: 200, body: JSON.stringify({ knowledgeBases: [base] }) }
+      }
+      if (path === '/v1/knowledge-bases' && method === 'POST') {
+        expect(body).toBe(JSON.stringify({
+          name: 'Project docs',
+          workspace: '/tmp/workspace',
+          providerKind: 'local-sqlite'
+        }))
+        return { ok: true, status: 201, body: JSON.stringify({ knowledgeBase: base }) }
+      }
+      if (path === '/v1/knowledge-bases/kb_1' && method === 'PATCH') {
+        expect(body).toBe(JSON.stringify({ providerKind: 'external' }))
+        return {
+          ok: true,
+          status: 200,
+          body: JSON.stringify({
+            knowledgeBase: {
+              ...base,
+              providerKind: 'external',
+              external: { provider: 'ragflow', endpoint: 'https://rag.example/search', metadata: {} }
+            }
+          })
+        }
+      }
+      if (path === '/v1/knowledge-bases/kb_1/documents' && method === 'GET') {
+        return { ok: true, status: 200, body: JSON.stringify({ documents: [document] }) }
+      }
+      if (path === '/v1/knowledge-bases/kb_1/documents' && method === 'POST') {
+        expect(body).toBe(JSON.stringify({ name: 'Readme', text: 'Kun RAG' }))
+        return { ok: true, status: 201, body: JSON.stringify({ document }) }
+      }
+      if (path === '/v1/knowledge-bases/kb_1/documents/doc_1' && method === 'DELETE') {
+        return { ok: true, status: 200, body: JSON.stringify({ document: { ...document, status: 'deleted' } }) }
+      }
+      if (path === '/v1/knowledge-bases/search' && method === 'POST') {
+        expect(body).toBe(JSON.stringify({
+          query: 'Kun RAG',
+          workspace: '/tmp/workspace',
+          knowledgeBaseIds: ['kb_1'],
+          topK: 3
+        }))
+        return {
+          ok: true,
+          status: 200,
+          body: JSON.stringify({
+            results: [{
+              knowledgeBaseId: 'kb_1',
+              knowledgeBaseName: 'Project docs',
+              documentId: 'doc_1',
+              documentName: 'Readme',
+              sourceType: 'text',
+              chunkId: 'chunk_1',
+              ordinal: 0,
+              text: 'Kun RAG result',
+              score: 0.9
+            }]
+          })
+        }
+      }
+      if (path === '/v1/knowledge-bases/diagnostics' && method === 'GET') {
+        return {
+          ok: true,
+          status: 200,
+          body: JSON.stringify({
+            enabled: true,
+            rootDir: '/tmp/kun/knowledge',
+            sqlitePath: '/tmp/kun/knowledge/knowledge.sqlite3',
+            available: true,
+            knowledgeBaseCount: 1,
+            documentCount: 1,
+            chunkCount: 1,
+            externalProviderCount: 0
+          })
+        }
+      }
+      if (path === '/v1/knowledge-bases/kb_1' && method === 'DELETE') {
+        return { ok: true, status: 200, body: JSON.stringify({ knowledgeBase: base }) }
+      }
+      return { ok: true, status: 200, body: '{}' }
+    })
+    installDsGui({ runtimeRequest })
+    const provider = new KunRuntimeProvider()
+
+    await expect(provider.listKnowledgeBases({
+      workspace: '/tmp/workspace',
+      includeDisabled: true
+    })).resolves.toEqual([base])
+    await expect(provider.createKnowledgeBase({
+      name: 'Project docs',
+      workspace: '/tmp/workspace',
+      providerKind: 'local-sqlite'
+    })).resolves.toMatchObject({ id: 'kb_1' })
+    await expect(provider.updateKnowledgeBase('kb_1', { providerKind: 'external' })).resolves.toMatchObject({
+      providerKind: 'external'
+    })
+    await expect(provider.listKnowledgeDocuments('kb_1')).resolves.toEqual([document])
+    await expect(provider.addKnowledgeDocument('kb_1', { name: 'Readme', text: 'Kun RAG' })).resolves.toEqual(document)
+    await expect(provider.deleteKnowledgeDocument('kb_1', 'doc_1')).resolves.toMatchObject({ status: 'deleted' })
+    await expect(provider.searchKnowledgeBases({
+      query: 'Kun RAG',
+      workspace: '/tmp/workspace',
+      knowledgeBaseIds: ['kb_1'],
+      topK: 3
+    })).resolves.toEqual([expect.objectContaining({ text: 'Kun RAG result' })])
+    await expect(provider.getKnowledgeDiagnostics()).resolves.toMatchObject({
+      available: true,
+      knowledgeBaseCount: 1
+    })
+    await expect(provider.deleteKnowledgeBase('kb_1')).resolves.toMatchObject({ id: 'kb_1' })
+  })
+
   it('calls Kun fork and user-input compatibility endpoints', async () => {
     const runtimeRequest = vi.fn(async (path: string) => ({
       ok: true,

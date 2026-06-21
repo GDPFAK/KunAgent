@@ -76,6 +76,41 @@ describe('app-ipc-schemas', () => {
     }).path).toBe('/v1/memory/mem_1')
   })
 
+  it('accepts Kun knowledge base endpoints', () => {
+    expect(runtimeRequestPayloadSchema.parse({
+      path: '/v1/knowledge-bases?workspace=%2Ftmp%2Fws&include_disabled=true',
+      method: 'GET'
+    }).path).toBe('/v1/knowledge-bases?workspace=%2Ftmp%2Fws&include_disabled=true')
+    expect(runtimeRequestPayloadSchema.parse({
+      path: '/v1/knowledge-bases',
+      method: 'POST',
+      body: '{}'
+    }).path).toBe('/v1/knowledge-bases')
+    expect(runtimeRequestPayloadSchema.parse({
+      path: '/v1/knowledge-bases/kb_1',
+      method: 'PATCH',
+      body: '{}'
+    }).path).toBe('/v1/knowledge-bases/kb_1')
+    expect(runtimeRequestPayloadSchema.parse({
+      path: '/v1/knowledge-bases/kb_1/documents',
+      method: 'POST',
+      body: '{}'
+    }).path).toBe('/v1/knowledge-bases/kb_1/documents')
+    expect(runtimeRequestPayloadSchema.parse({
+      path: '/v1/knowledge-bases/kb_1/documents/doc_1',
+      method: 'DELETE'
+    }).path).toBe('/v1/knowledge-bases/kb_1/documents/doc_1')
+    expect(runtimeRequestPayloadSchema.parse({
+      path: '/v1/knowledge-bases/search',
+      method: 'POST',
+      body: '{}'
+    }).path).toBe('/v1/knowledge-bases/search')
+    expect(runtimeRequestPayloadSchema.parse({
+      path: '/v1/knowledge-bases/diagnostics',
+      method: 'GET'
+    }).path).toBe('/v1/knowledge-bases/diagnostics')
+  })
+
   it('accepts skill list payloads with an optional workspace root', () => {
     expect(skillListPayloadSchema.parse({
       workspaceRoot: ' /tmp/workspace '
@@ -435,12 +470,14 @@ describe('app-ipc-schemas', () => {
         kun: {
           runtimeTuning: {
             streamIdleTimeoutMs: 300000
-          }
+          },
+          knowledgeEnabled: true
         }
       }
     })
 
     expect(payload.agents?.kun?.runtimeTuning?.streamIdleTimeoutMs).toBe(300000)
+    expect(payload.agents?.kun?.knowledgeEnabled).toBe(true)
   })
 
   it('rejects an out-of-range stream idle timeout', () => {

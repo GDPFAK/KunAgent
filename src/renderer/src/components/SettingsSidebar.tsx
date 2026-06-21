@@ -1,7 +1,7 @@
 import type { Dispatch, ReactElement, SetStateAction } from 'react'
-import { Archive, AudioLines, Bot, BrainCircuit, GitBranch, Bug, ChevronLeft, Globe, Keyboard, Mic, PencilLine, RefreshCw, ServerCog, Settings, ShieldCheck, Smartphone, Sparkles } from 'lucide-react'
+import { Archive, AudioLines, Bot, BrainCircuit, Database, GitBranch, Bug, ChevronLeft, Globe, Keyboard, Mic, PencilLine, RefreshCw, ServerCog, Settings, ShieldCheck, Smartphone, Sparkles } from 'lucide-react'
 
-type SettingsCategory = 'general' | 'providers' | 'write' | 'mediaGeneration' | 'speechToText' | 'agents' | 'archives' | 'permissions' | 'worktree' | 'memory' | 'shortcuts' | 'easterEgg' | 'claw' | 'updates' | 'debug'
+type SettingsCategory = 'general' | 'providers' | 'write' | 'mediaGeneration' | 'speechToText' | 'agents' | 'archives' | 'permissions' | 'worktree' | 'memory' | 'knowledge' | 'shortcuts' | 'easterEgg' | 'claw' | 'updates' | 'debug'
 
 export function SettingsSidebar({
   category,
@@ -125,6 +125,15 @@ export function SettingsSidebar({
         >
           <BrainCircuit className="h-4 w-4 shrink-0 opacity-70" strokeWidth={1.75} />
           {t('memory')}
+        </button>
+        <button
+          type="button"
+          data-cursor-spotlight-target
+          className={catCls('knowledge')}
+          onClick={() => setCategory('knowledge')}
+        >
+          <Database className="h-4 w-4 shrink-0 opacity-70" strokeWidth={1.75} />
+          {t('knowledge')}
         </button>
         <button
           type="button"

@@ -146,6 +146,7 @@ export function defaultKunRuntimeSettings(
     videoGeneration: defaultKunVideoGenerationSettings(),
     modelProfiles: {},
     memoryEnabled: false,
+    knowledgeEnabled: false,
     computerUse: defaultKunComputerUseSettings(),
     quality: defaultKunQualitySettings()
   }
@@ -444,6 +445,7 @@ export function mergeKunRuntimeSettings(
     videoGeneration: nextVideoGeneration,
     modelProfiles: nextModelProfiles,
     memoryEnabled: patch?.memoryEnabled ?? current.memoryEnabled ?? false,
+    knowledgeEnabled: patch?.knowledgeEnabled ?? current.knowledgeEnabled ?? false,
     computerUse: nextComputerUse,
     quality: nextQuality
   }

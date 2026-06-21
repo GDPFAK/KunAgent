@@ -2,6 +2,15 @@ import type {
   CoreAttachmentContentResponseJson,
   CoreAttachmentMetadataJson,
   CoreAttachmentTextFallbackJson,
+  CoreKnowledgeBaseRecordJson,
+  CoreKnowledgeChunkSearchResultJson,
+  CoreKnowledgeDiagnosticsJson,
+  CoreKnowledgeDocumentRecordJson,
+  CoreKnowledgeDocumentSourceTypeJson,
+  CoreKnowledgeEmbeddingConfigJson,
+  CoreKnowledgeProviderKindJson,
+  CoreKnowledgeRerankerConfigJson,
+  CoreExternalKnowledgeConfigJson,
   CoreMemoryDiagnosticsJson,
   CoreMemoryRecordJson,
   CoreRuntimeInfoJson,
@@ -494,6 +503,53 @@ export interface AgentProvider {
   ): Promise<CoreMemoryRecordJson>
   deleteMemory?(memoryId: string, options?: { workspace?: string }): Promise<CoreMemoryRecordJson>
   getMemoryDiagnostics?(): Promise<CoreMemoryDiagnosticsJson>
+  listKnowledgeBases?(options?: { workspace?: string; includeDisabled?: boolean }): Promise<CoreKnowledgeBaseRecordJson[]>
+  createKnowledgeBase?(input: {
+    name: string
+    description?: string
+    workspace?: string
+    providerKind?: CoreKnowledgeProviderKindJson
+    enabled?: boolean
+    embedding?: CoreKnowledgeEmbeddingConfigJson
+    reranker?: CoreKnowledgeRerankerConfigJson
+    external?: CoreExternalKnowledgeConfigJson
+  }): Promise<CoreKnowledgeBaseRecordJson>
+  updateKnowledgeBase?(
+    knowledgeBaseId: string,
+    patch: {
+      name?: string
+      description?: string
+      enabled?: boolean
+      providerKind?: CoreKnowledgeProviderKindJson
+      embedding?: CoreKnowledgeEmbeddingConfigJson
+      reranker?: CoreKnowledgeRerankerConfigJson
+      external?: CoreExternalKnowledgeConfigJson
+    }
+  ): Promise<CoreKnowledgeBaseRecordJson>
+  deleteKnowledgeBase?(knowledgeBaseId: string): Promise<CoreKnowledgeBaseRecordJson>
+  listKnowledgeDocuments?(knowledgeBaseId: string): Promise<CoreKnowledgeDocumentRecordJson[]>
+  addKnowledgeDocument?(
+    knowledgeBaseId: string,
+    input: {
+      name?: string
+      sourceType?: CoreKnowledgeDocumentSourceTypeJson
+      sourcePath?: string
+      mimeType?: string
+      text?: string
+    }
+  ): Promise<CoreKnowledgeDocumentRecordJson>
+  deleteKnowledgeDocument?(
+    knowledgeBaseId: string,
+    documentId: string
+  ): Promise<CoreKnowledgeDocumentRecordJson>
+  searchKnowledgeBases?(input: {
+    query: string
+    workspace?: string
+    knowledgeBaseIds?: string[]
+    topK?: number
+    minScore?: number
+  }): Promise<CoreKnowledgeChunkSearchResultJson[]>
+  getKnowledgeDiagnostics?(): Promise<CoreKnowledgeDiagnosticsJson>
   steerUserMessage?(threadId: string, turnId: string, text: string): Promise<void>
   interruptTurn(threadId: string, turnId: string, options?: { discard?: boolean }): Promise<void>
   renameThread(threadId: string, title: string): Promise<void>

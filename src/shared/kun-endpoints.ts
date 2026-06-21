@@ -42,6 +42,25 @@ export function kunMemoryRecordPath(memoryId: string): string {
   return `/v1/memory/${encodeURIComponent(memoryId)}`
 }
 
+export const KUN_KNOWLEDGE_BASES_PATH = '/v1/knowledge-bases'
+export const KUN_KNOWLEDGE_BASES_TEMPLATE = '/v1/knowledge-bases'
+export const KUN_KNOWLEDGE_BASES_DIAGNOSTICS_PATH = '/v1/knowledge-bases/diagnostics'
+export const KUN_KNOWLEDGE_BASES_DIAGNOSTICS_TEMPLATE = '/v1/knowledge-bases/diagnostics'
+export const KUN_KNOWLEDGE_BASES_SEARCH_PATH = '/v1/knowledge-bases/search'
+export const KUN_KNOWLEDGE_BASES_SEARCH_TEMPLATE = '/v1/knowledge-bases/search'
+export const KUN_KNOWLEDGE_BASE_TEMPLATE = '/v1/knowledge-bases/{id}'
+export function kunKnowledgeBasePath(knowledgeBaseId: string): string {
+  return `/v1/knowledge-bases/${encodeURIComponent(knowledgeBaseId)}`
+}
+export const KUN_KNOWLEDGE_DOCUMENTS_TEMPLATE = '/v1/knowledge-bases/{id}/documents'
+export function kunKnowledgeDocumentsPath(knowledgeBaseId: string): string {
+  return `${kunKnowledgeBasePath(knowledgeBaseId)}/documents`
+}
+export const KUN_KNOWLEDGE_DOCUMENT_TEMPLATE = '/v1/knowledge-bases/{id}/documents/{documentId}'
+export function kunKnowledgeDocumentPath(knowledgeBaseId: string, documentId: string): string {
+  return `${kunKnowledgeDocumentsPath(knowledgeBaseId)}/${encodeURIComponent(documentId)}`
+}
+
 export const KUN_THREADS_PATH = '/v1/threads'
 export const KUN_THREADS_TEMPLATE = '/v1/threads'
 

@@ -13,6 +13,7 @@ export type ToolProviderKind =
   | 'web'
   | 'skill'
   | 'memory'
+  | 'knowledge'
   | 'gui'
   | 'delegation'
   | 'image'

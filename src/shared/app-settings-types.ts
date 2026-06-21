@@ -229,6 +229,8 @@ export type KunRuntimeSettingsV1 = {
   modelProfiles: Record<string, ModelProviderModelProfileV1>
   /** Whether long-term memory is enabled in the Kun runtime. */
   memoryEnabled: boolean
+  /** Whether built-in knowledge bases and the knowledge_search tool are enabled. */
+  knowledgeEnabled: boolean
   /** Host computer-use (screenshot + mouse/keyboard control) settings. */
   computerUse: KunComputerUseSettingsV1
   /** First-party design-quality linter applied to frontend output. */

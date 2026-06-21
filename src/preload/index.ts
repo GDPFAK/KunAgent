@@ -45,6 +45,8 @@ const api = {
     ipcRenderer.invoke('claw:im-install:telegram-token', { botToken, allowedChatIds }),
   pickWorkspaceDirectory: (defaultPath) =>
     ipcRenderer.invoke('workspace:pick-directory', defaultPath),
+  pickKnowledgeDocumentFile: (defaultPath) =>
+    ipcRenderer.invoke('knowledge:pick-document-file', defaultPath),
   confirmDialog: (options) =>
     ipcRenderer.invoke('dialog:confirm', options),
   detectLegacySessions: () =>

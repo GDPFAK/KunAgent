@@ -17,6 +17,7 @@ import { buildTodoLocalTools } from '../adapters/tool/todo-tools.js'
 import { LocalToolHost, buildDefaultLocalTools } from '../adapters/tool/local-tool-host.js'
 import { buildMcpToolProviders } from '../adapters/tool/mcp-tool-provider.js'
 import { buildMemoryToolProviders } from '../adapters/tool/memory-tool-provider.js'
+import { buildKnowledgeToolProviders } from '../adapters/tool/knowledge-tool-provider.js'
 import { buildSkillToolProviders } from '../adapters/tool/skill-tool-provider.js'
 import { buildDelegationToolProviders } from '../adapters/tool/delegation-tool-provider.js'
 import { buildWebToolProviders } from '../adapters/tool/web-tool-provider.js'
@@ -74,6 +75,11 @@ import {
 import { SkillRuntime } from '../skills/skill-runtime.js'
 import { resolveConfiguredHooks, type HooksConfig } from '../hooks/hook-config.js'
 import { FileMemoryStore } from '../memory/memory-store.js'
+import {
+  OpenAICompatibleEmbeddingProvider,
+  OpenAICompatibleRerankerProvider,
+  SqliteKnowledgeStore
+} from '../knowledge/index.js'
 import { DelegationRuntime, FileDelegationStore } from '../delegation/delegation-runtime.js'
 import { createChildAgentExecutor } from '../delegation/child-agent-executor.js'
 
@@ -260,6 +266,16 @@ export async function createKunServeRuntime(
         nowIso
       })
     : undefined
+  const knowledgeStore = options.capabilities?.knowledge.enabled
+    ? new SqliteKnowledgeStore({
+        rootDir: join(options.dataDir, 'knowledge'),
+        config: options.capabilities.knowledge,
+        embeddingProvider: new OpenAICompatibleEmbeddingProvider({ modelProxyUrl: options.modelProxyUrl }),
+        rerankerProvider: new OpenAICompatibleRerankerProvider({ modelProxyUrl: options.modelProxyUrl }),
+        nowIso
+      })
+    : undefined
+  const knowledgeDiagnosticsSnapshot = knowledgeStore ? await knowledgeStore.diagnostics() : undefined
   const imageGenProviders = buildImageGenToolProviders(options.capabilities?.imageGen, {
     attachmentStore,
     nowIso
@@ -279,6 +295,7 @@ export async function createKunServeRuntime(
     ...mcpProviders.providers,
     ...webProviders.providers,
     ...buildMemoryToolProviders(memoryStore),
+    ...buildKnowledgeToolProviders(knowledgeStore),
     ...buildSkillToolProviders(skillRuntime),
     ...imageGenProviders.providers,
     ...speechGenProviders.providers,
@@ -358,6 +375,10 @@ export async function createKunServeRuntime(
     },
     memory: {
       available: Boolean(memoryStore)
+    },
+    knowledge: {
+      available: knowledgeDiagnosticsSnapshot?.available === true,
+      reason: knowledgeDiagnosticsSnapshot?.reason
     },
     subagents: {
       available: Boolean(delegationRuntime)
@@ -475,6 +496,7 @@ export async function createKunServeRuntime(
     toolHost,
     ...(attachmentStore ? { attachmentStore } : {}),
     ...(memoryStore ? { memoryStore } : {}),
+    ...(knowledgeStore ? { knowledgeStore } : {}),
     runTurn(threadId, turnId) {
       return loop.runTurn(threadId, turnId)
     },
@@ -515,6 +537,19 @@ export async function createKunServeRuntime(
       memory: memoryStore
         ? await memoryStore.diagnostics()
         : { enabled: false, rootDir: '', activeCount: 0, tombstoneCount: 0, lastInjectedIds: [] },
+      knowledge: knowledgeStore
+        ? await knowledgeStore.diagnostics()
+        : {
+            enabled: false,
+            rootDir: '',
+            sqlitePath: '',
+            available: false,
+            reason: 'knowledge store is disabled',
+            knowledgeBaseCount: 0,
+            documentCount: 0,
+            chunkCount: 0,
+            externalProviderCount: 0
+          },
       imageGen: imageGenProviders.diagnostics,
       speechGen: speechGenProviders.diagnostics,
       musicGen: musicGenProviders.diagnostics,
@@ -524,6 +559,7 @@ export async function createKunServeRuntime(
     shutdown: async () => {
       try {
         loop.shutdownGoalResume()
+        knowledgeStore?.close?.()
         await mcpProviders.close()
       } finally {
         await stores.shutdown?.()

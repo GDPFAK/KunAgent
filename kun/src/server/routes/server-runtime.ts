@@ -25,6 +25,8 @@ import type { AttachmentDiagnostics } from '../../contracts/attachments.js'
 import type { AttachmentStore } from '../../attachments/attachment-store.js'
 import type { MemoryDiagnostics } from '../../contracts/memory.js'
 import type { MemoryStore } from '../../memory/memory-store.js'
+import type { KnowledgeDiagnostics } from '../../contracts/knowledge.js'
+import type { KnowledgeProvider } from '../../knowledge/knowledge-provider.js'
 import type { ReviewTarget } from '../../contracts/review.js'
 
 export type RuntimeToolDiagnostics = {
@@ -35,6 +37,7 @@ export type RuntimeToolDiagnostics = {
   skills: SkillRuntimeDiagnostics
   attachments: AttachmentDiagnostics
   memory: MemoryDiagnostics
+  knowledge?: KnowledgeDiagnostics
   imageGen?: ImageGenDiagnostic[]
   speechGen?: SpeechGenDiagnostic[]
   musicGen?: MusicGenDiagnostic[]
@@ -62,6 +65,7 @@ export type ServerRuntime = {
   toolHost?: ToolHost
   attachmentStore?: AttachmentStore
   memoryStore?: MemoryStore
+  knowledgeStore?: KnowledgeProvider
   runTurn(threadId: string, turnId: string): Promise<'completed' | 'failed' | 'aborted'> | void
   /**
    * Relaunch goal continuation turns for threads whose in-flight turn was

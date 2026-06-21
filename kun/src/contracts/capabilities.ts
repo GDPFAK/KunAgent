@@ -196,7 +196,7 @@ export type SubagentToolPolicy = z.infer<typeof SubagentToolPolicy>
  * to side-effect-free investigation tools — no bash/edit/write, and no
  * nested `delegate_task`.
  */
-export const SUBAGENT_READ_ONLY_TOOL_NAMES = ['read', 'grep', 'find', 'ls'] as const
+export const SUBAGENT_READ_ONLY_TOOL_NAMES = ['read', 'grep', 'find', 'ls', 'knowledge_search'] as const
 
 export const SubagentProfileConfig = z
   .object({
@@ -256,6 +256,22 @@ export const MemoryCapabilityConfig = CapabilityToggleConfig.extend({
   maxInjectedRecords: z.number().int().positive().default(8)
 }).strict()
 export type MemoryCapabilityConfig = z.infer<typeof MemoryCapabilityConfig>
+
+export const KnowledgeCapabilityConfig = CapabilityToggleConfig.extend({
+  defaultChunkSizeChars: z.number().int().positive().default(1600),
+  defaultChunkOverlapChars: z.number().int().nonnegative().default(200),
+  maxDocumentBytes: z.number().int().positive().default(2 * 1024 * 1024),
+  maxToolResults: z.number().int().positive().max(50).default(8)
+}).strict().superRefine((config, ctx) => {
+  if (config.defaultChunkOverlapChars >= config.defaultChunkSizeChars) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['defaultChunkOverlapChars'],
+      message: 'defaultChunkOverlapChars must be smaller than defaultChunkSizeChars'
+    })
+  }
+})
+export type KnowledgeCapabilityConfig = z.infer<typeof KnowledgeCapabilityConfig>
 
 export const ImageGenerationProtocol = z.enum(['openai-images', 'minimax-image'])
 export type ImageGenerationProtocol = z.infer<typeof ImageGenerationProtocol>
@@ -339,6 +355,7 @@ export const KunCapabilitiesConfig = z
     subagents: SubagentsCapabilityConfig.default(() => SubagentsCapabilityConfig.parse({})),
     attachments: AttachmentsCapabilityConfig.default(() => AttachmentsCapabilityConfig.parse({})),
     memory: MemoryCapabilityConfig.default(() => MemoryCapabilityConfig.parse({})),
+    knowledge: KnowledgeCapabilityConfig.default(() => KnowledgeCapabilityConfig.parse({})),
     imageGen: ImageGenCapabilityConfig.default(() => ImageGenCapabilityConfig.parse({})),
     speechGen: SpeechGenCapabilityConfig.default(() => SpeechGenCapabilityConfig.parse({})),
     musicGen: MusicGenCapabilityConfig.default(() => MusicGenCapabilityConfig.parse({})),
@@ -414,6 +431,12 @@ export const RuntimeCapabilityManifest = z
       scopes: z.array(z.enum(['user', 'workspace', 'project'])),
       maxInjectedRecords: z.number().int().positive()
     }).strict(),
+    knowledge: RuntimeCapabilityState.extend({
+      defaultChunkSizeChars: z.number().int().positive(),
+      defaultChunkOverlapChars: z.number().int().nonnegative(),
+      maxDocumentBytes: z.number().int().positive(),
+      maxToolResults: z.number().int().positive()
+    }).strict(),
     imageGen: RuntimeCapabilityState.extend({
       model: z.string().optional()
     }).strict(),
@@ -463,6 +486,10 @@ export function buildRuntimeCapabilityManifest(input: {
     reason?: string
   }
   memory?: {
+    available?: boolean
+    reason?: string
+  }
+  knowledge?: {
     available?: boolean
     reason?: string
   }
@@ -585,6 +612,18 @@ export function buildRuntimeCapabilityManifest(input: {
       ),
       scopes: config.memory.scopes,
       maxInjectedRecords: config.memory.maxInjectedRecords
+    },
+    knowledge: {
+      ...providerCapabilityState(
+        config.knowledge.enabled,
+        'knowledge base is disabled by config',
+        input.knowledge?.available === true,
+        input.knowledge?.reason ?? 'knowledge store is unavailable'
+      ),
+      defaultChunkSizeChars: config.knowledge.defaultChunkSizeChars,
+      defaultChunkOverlapChars: config.knowledge.defaultChunkOverlapChars,
+      maxDocumentBytes: config.knowledge.maxDocumentBytes,
+      maxToolResults: config.knowledge.maxToolResults
     },
     imageGen: {
       ...providerCapabilityState(

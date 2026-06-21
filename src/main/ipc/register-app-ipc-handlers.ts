@@ -722,6 +722,31 @@ export function registerAppIpcHandlers(options: RegisterAppIpcHandlersOptions): 
     }
   })
 
+  ipcMain.handle('knowledge:pick-document-file', async (_, defaultPath: unknown): Promise<WorkspacePickResult> => {
+    const normalizedDefaultPath = parseIpcPayload(
+      'knowledge:pick-document-file',
+      z.object({ defaultPath: defaultPathSchema }).strict(),
+      { defaultPath }
+    ).defaultPath
+    const options: Electron.OpenDialogOptions = {
+      title: 'Select knowledge document',
+      defaultPath: normalizedDefaultPath,
+      properties: ['openFile', 'dontAddToRecent'],
+      filters: [
+        { name: 'Text documents', extensions: ['txt', 'md', 'markdown', 'json', 'jsonl', 'csv', 'tsv', 'log'] },
+        { name: 'All files', extensions: ['*'] }
+      ]
+    }
+    const mainWindow = getMainWindow()
+    const result = mainWindow
+      ? await dialog.showOpenDialog(mainWindow, options)
+      : await dialog.showOpenDialog(options)
+    return {
+      canceled: result.canceled,
+      path: result.canceled ? null : (result.filePaths[0] ?? null)
+    }
+  })
+
   // Replaces window.confirm in the renderer: the synchronous native confirm
   // leaves the WebContents unable to focus inputs after it closes
   // (electron/electron#19977), which froze the composer after deleting threads.

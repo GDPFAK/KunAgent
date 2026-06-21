@@ -45,6 +45,17 @@ import {
   memoryDiagnostics,
   updateMemory
 } from './memory.js'
+import {
+  addKnowledgeDocument,
+  createKnowledgeBase,
+  deleteKnowledgeBase,
+  deleteKnowledgeDocument,
+  knowledgeDiagnostics,
+  listKnowledgeBases,
+  listKnowledgeDocuments,
+  searchKnowledgeBases,
+  updateKnowledgeBase
+} from './knowledge.js'
 import { isAuthorized, bearerToken } from '../auth.js'
 import { ERRORS } from './runtime-error.js'
 import type { ServerRuntime } from './server-runtime.js'
@@ -59,6 +70,7 @@ import type { ServerRuntime } from './server-runtime.js'
  * - `GET /v1/attachments/diagnostics` (auth)
  * - `GET /v1/attachments/{id}` and `{id}/content` (auth)
  * - `GET/POST /v1/memory`, `PATCH/DELETE /v1/memory/{id}`, diagnostics (auth)
+ * - `GET/POST /v1/knowledge-bases`, documents, search, diagnostics (auth)
  * - `GET /v1/workspace/status` (auth)
  * - `GET/POST /v1/threads` (auth)
  * - `GET/PATCH/DELETE /v1/threads/{id}` (auth)
@@ -128,6 +140,42 @@ export function buildRouter(runtime: ServerRuntime): Router {
   router.add('DELETE', '/v1/memory/:id', async (request, ctx) => {
     if (!authorize(request, runtime)) return ERRORS.unauthorized()
     return deleteMemory(runtime.memoryStore, ctx.params.id, request)
+  })
+  router.add('GET', '/v1/knowledge-bases', async (request) => {
+    if (!authorize(request, runtime)) return ERRORS.unauthorized()
+    return listKnowledgeBases(runtime.knowledgeStore, request)
+  })
+  router.add('POST', '/v1/knowledge-bases', async (request) => {
+    if (!authorize(request, runtime)) return ERRORS.unauthorized()
+    return createKnowledgeBase(runtime.knowledgeStore, request)
+  })
+  router.add('GET', '/v1/knowledge-bases/diagnostics', async (request) => {
+    if (!authorize(request, runtime)) return ERRORS.unauthorized()
+    return knowledgeDiagnostics(runtime.knowledgeStore)
+  })
+  router.add('POST', '/v1/knowledge-bases/search', async (request) => {
+    if (!authorize(request, runtime)) return ERRORS.unauthorized()
+    return searchKnowledgeBases(runtime.knowledgeStore, request)
+  })
+  router.add('PATCH', '/v1/knowledge-bases/:id', async (request, ctx) => {
+    if (!authorize(request, runtime)) return ERRORS.unauthorized()
+    return updateKnowledgeBase(runtime.knowledgeStore, ctx.params.id, request)
+  })
+  router.add('DELETE', '/v1/knowledge-bases/:id', async (request, ctx) => {
+    if (!authorize(request, runtime)) return ERRORS.unauthorized()
+    return deleteKnowledgeBase(runtime.knowledgeStore, ctx.params.id)
+  })
+  router.add('GET', '/v1/knowledge-bases/:id/documents', async (request, ctx) => {
+    if (!authorize(request, runtime)) return ERRORS.unauthorized()
+    return listKnowledgeDocuments(runtime.knowledgeStore, ctx.params.id)
+  })
+  router.add('POST', '/v1/knowledge-bases/:id/documents', async (request, ctx) => {
+    if (!authorize(request, runtime)) return ERRORS.unauthorized()
+    return addKnowledgeDocument(runtime.knowledgeStore, ctx.params.id, request)
+  })
+  router.add('DELETE', '/v1/knowledge-bases/:id/documents/:documentId', async (request, ctx) => {
+    if (!authorize(request, runtime)) return ERRORS.unauthorized()
+    return deleteKnowledgeDocument(runtime.knowledgeStore, ctx.params.id, ctx.params.documentId)
   })
   router.add('GET', '/v1/workspace/status', async (request) => {
     if (!authorize(request, runtime)) return ERRORS.unauthorized()

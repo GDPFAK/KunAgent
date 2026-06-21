@@ -314,6 +314,7 @@ export type KunGuiApi = {
     allowedChatIds?: string
   ) => Promise<ClawImTelegramConnectResult>
   pickWorkspaceDirectory: (defaultPath?: string) => Promise<WorkspacePickResult>
+  pickKnowledgeDocumentFile: (defaultPath?: string) => Promise<WorkspacePickResult>
   confirmDialog: (options: ConfirmDialogOptions) => Promise<boolean>
   /** Detect importable conversations from a previous DeepSeek GUI install. */
   detectLegacySessions: () => Promise<LegacySessionDetectResult>

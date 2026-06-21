@@ -163,6 +163,93 @@ export type CoreMemoryDiagnosticsJson = {
   lastInjectedIds?: string[]
 }
 
+export type CoreKnowledgeProviderKindJson = 'local-sqlite' | 'external'
+export type CoreKnowledgeDocumentSourceTypeJson = 'text' | 'file' | 'generated' | 'external'
+export type CoreKnowledgeDocumentStatusJson = 'ready' | 'indexing' | 'failed' | 'deleted'
+
+export type CoreKnowledgeEmbeddingConfigJson = {
+  providerId?: string
+  baseUrl?: string
+  apiKey?: string
+  model?: string
+  dimensions?: number
+}
+
+export type CoreKnowledgeRerankerConfigJson = {
+  enabled: boolean
+  providerId?: string
+  baseUrl?: string
+  apiKey?: string
+  model?: string
+}
+
+export type CoreExternalKnowledgeConfigJson = {
+  provider?: string
+  endpoint?: string
+  apiKey?: string
+  metadata?: Record<string, unknown>
+}
+
+export type CoreKnowledgeBaseRecordJson = {
+  id: string
+  name: string
+  description?: string
+  workspace?: string
+  enabled: boolean
+  providerKind: CoreKnowledgeProviderKindJson
+  embedding: CoreKnowledgeEmbeddingConfigJson
+  reranker: CoreKnowledgeRerankerConfigJson
+  external?: CoreExternalKnowledgeConfigJson
+  documentCount: number
+  chunkCount: number
+  createdAt: string
+  updatedAt: string
+}
+
+export type CoreKnowledgeDocumentRecordJson = {
+  id: string
+  knowledgeBaseId: string
+  name: string
+  sourceType: CoreKnowledgeDocumentSourceTypeJson
+  sourcePath?: string
+  mimeType?: string
+  contentHash: string
+  byteSize: number
+  chunkCount: number
+  status: CoreKnowledgeDocumentStatusJson
+  error?: string
+  createdAt: string
+  updatedAt: string
+}
+
+export type CoreKnowledgeChunkSearchResultJson = {
+  knowledgeBaseId: string
+  knowledgeBaseName: string
+  documentId: string
+  documentName: string
+  sourceType: CoreKnowledgeDocumentSourceTypeJson
+  sourcePath?: string
+  chunkId: string
+  ordinal: number
+  text: string
+  score: number
+  bm25Score?: number
+  vectorScore?: number
+  rerankScore?: number
+}
+
+export type CoreKnowledgeDiagnosticsJson = {
+  enabled: boolean
+  rootDir: string
+  sqlitePath: string
+  available: boolean
+  reason?: string
+  knowledgeBaseCount: number
+  documentCount: number
+  chunkCount: number
+  externalProviderCount: number
+}
+
 export type CoreRuntimeCapabilityStateJson = {
   status: 'available' | 'disabled' | 'unavailable'
   enabled: boolean
@@ -220,6 +307,12 @@ export type CoreRuntimeCapabilityManifestJson = {
   memory: CoreRuntimeCapabilityStateJson & {
     scopes: Array<'user' | 'workspace' | 'project'>
     maxInjectedRecords: number
+  }
+  knowledge?: CoreRuntimeCapabilityStateJson & {
+    defaultChunkSizeChars: number
+    defaultChunkOverlapChars: number
+    maxDocumentBytes: number
+    maxToolResults: number
   }
   /** Optional so the GUI keeps working against older Kun builds without the capability. */
   imageGen?: CoreRuntimeCapabilityStateJson & {
@@ -281,6 +374,7 @@ export type CoreRuntimeToolDiagnosticsJson = {
   }
   attachments?: CoreAttachmentDiagnosticsJson
   memory?: CoreMemoryDiagnosticsJson
+  knowledge?: CoreKnowledgeDiagnosticsJson
   subagents?: {
     enabled?: boolean
     active?: number
@@ -470,6 +564,18 @@ export type CoreAttachmentContentResponseJson = {
 
 export type CoreMemoryListResponseJson = {
   memories: CoreMemoryRecordJson[]
+}
+
+export type CoreKnowledgeBaseListResponseJson = {
+  knowledgeBases: CoreKnowledgeBaseRecordJson[]
+}
+
+export type CoreKnowledgeDocumentListResponseJson = {
+  documents: CoreKnowledgeDocumentRecordJson[]
+}
+
+export type CoreKnowledgeSearchResponseJson = {
+  results: CoreKnowledgeChunkSearchResultJson[]
 }
 
 export type CoreResumeSessionResponseJson = {

@@ -89,6 +89,7 @@ export type SettingsRouteSection =
   | 'agents'
   | 'archives'
   | 'permissions'
+  | 'knowledge'
   | 'skill'
   | 'mcp'
   | 'shortcuts'

@@ -6,6 +6,12 @@ import {
   KUN_ATTACHMENTS_TEMPLATE,
   KUN_ATTACHMENT_TEMPLATE,
   KUN_HEALTH_TEMPLATE,
+  KUN_KNOWLEDGE_BASES_DIAGNOSTICS_TEMPLATE,
+  KUN_KNOWLEDGE_BASES_SEARCH_TEMPLATE,
+  KUN_KNOWLEDGE_BASES_TEMPLATE,
+  KUN_KNOWLEDGE_BASE_TEMPLATE,
+  KUN_KNOWLEDGE_DOCUMENTS_TEMPLATE,
+  KUN_KNOWLEDGE_DOCUMENT_TEMPLATE,
   KUN_MEMORY_DIAGNOSTICS_TEMPLATE,
   KUN_MEMORY_RECORD_TEMPLATE,
   KUN_MEMORY_TEMPLATE,
@@ -132,10 +138,10 @@ function compileEndpoint(
   allowedMethods: readonly string[]
 ): EndpointTemplate {
   // Build a regex from the template by escaping the literal parts and
-  // substituting the `{id}` / `{turn}` placeholders with `[^/]+`. The
+  // substituting the `{id}` / `{turn}` / named placeholders with `[^/]+`. The
   // template fragments are URL-encoded by the path helpers, so they
   // contain only characters that are safe to escape directly.
-  const pattern = template.replace(/[.+*?^$()|[\]\\]/g, '\\$&').replace(/\{(?:id|turn)\}/g, '[^/]+')
+  const pattern = template.replace(/[.+*?^$()|[\]\\]/g, '\\$&').replace(/\{[a-zA-Z][a-zA-Z0-9_]*\}/g, '[^/]+')
   const regex = new RegExp(`^${pattern}$`)
   return {
     match: (path: string) => regex.test(path),
@@ -155,6 +161,12 @@ const ENDPOINTS: readonly EndpointTemplate[] = [
   compileEndpoint(KUN_MEMORY_TEMPLATE, ['GET', 'POST']),
   compileEndpoint(KUN_MEMORY_DIAGNOSTICS_TEMPLATE, ['GET']),
   compileEndpoint(KUN_MEMORY_RECORD_TEMPLATE, ['PATCH', 'DELETE']),
+  compileEndpoint(KUN_KNOWLEDGE_BASES_TEMPLATE, ['GET', 'POST']),
+  compileEndpoint(KUN_KNOWLEDGE_BASES_DIAGNOSTICS_TEMPLATE, ['GET']),
+  compileEndpoint(KUN_KNOWLEDGE_BASES_SEARCH_TEMPLATE, ['POST']),
+  compileEndpoint(KUN_KNOWLEDGE_BASE_TEMPLATE, ['PATCH', 'DELETE']),
+  compileEndpoint(KUN_KNOWLEDGE_DOCUMENTS_TEMPLATE, ['GET', 'POST']),
+  compileEndpoint(KUN_KNOWLEDGE_DOCUMENT_TEMPLATE, ['DELETE']),
   compileEndpoint(KUN_THREADS_TEMPLATE, ['GET', 'POST']),
   compileEndpoint(KUN_THREAD_TEMPLATE, ['GET', 'PATCH', 'DELETE']),
   compileEndpoint(KUN_THREAD_FORK_TEMPLATE, ['POST']),
@@ -448,7 +460,8 @@ const kunRuntimePatchSchema = z.object({
     z.string().trim().min(1).max(128),
     modelProfilePatchSchema.nullable()
   ).optional(),
-  memoryEnabled: z.boolean().optional()
+  memoryEnabled: z.boolean().optional(),
+  knowledgeEnabled: z.boolean().optional()
 }).strict()
 
 const logPatchSchema = z.object({

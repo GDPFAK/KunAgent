@@ -35,6 +35,7 @@ import {
   AttachmentsCapabilityConfig,
   ComputerUseCapabilityConfig,
   ImageGenCapabilityConfig,
+  KnowledgeCapabilityConfig,
   McpCapabilityConfig,
   McpServerConfig,
   MemoryCapabilityConfig,
@@ -394,6 +395,7 @@ export async function syncGuiManagedKunConfig(
     | 'computerUse'
     | 'modelProfiles'
     | 'memoryEnabled'
+    | 'knowledgeEnabled'
     | 'quality'
   >,
   options?: {
@@ -424,6 +426,7 @@ export async function syncGuiManagedKunConfig(
   const search = objectValue(mcp.search)
   const attachments = objectValue(capabilities.attachments)
   const memory = objectValue(capabilities.memory)
+  const knowledge = objectValue(capabilities.knowledge)
   const web = objectValue(capabilities.web)
   const skills = objectValue(capabilities.skills)
   const imageGen = objectValue(capabilities.imageGen)
@@ -474,6 +477,10 @@ export async function syncGuiManagedKunConfig(
       memory: {
         ...memory,
         enabled: runtime.memoryEnabled
+      },
+      knowledge: {
+        ...knowledge,
+        enabled: runtime.knowledgeEnabled
       },
       mcp: {
         ...mcp,
@@ -1014,6 +1021,7 @@ function sanitizeKunCapabilitiesConfig(value: unknown): Record<string, unknown> 
     next.attachments = parseKunConfigSection(AttachmentsCapabilityConfig, raw.attachments)
   }
   if ('memory' in raw) next.memory = parseKunConfigSection(MemoryCapabilityConfig, raw.memory)
+  if ('knowledge' in raw) next.knowledge = parseKunConfigSection(KnowledgeCapabilityConfig, raw.knowledge)
   if ('imageGen' in raw) next.imageGen = parseKunConfigSection(ImageGenCapabilityConfig, raw.imageGen)
   if ('speechGen' in raw) next.speechGen = parseKunConfigSection(SpeechGenCapabilityConfig, raw.speechGen)
   if ('musicGen' in raw) next.musicGen = parseKunConfigSection(MusicGenCapabilityConfig, raw.musicGen)

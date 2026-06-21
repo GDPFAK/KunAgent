@@ -1,4 +1,5 @@
 import type {
+  CoreKnowledgeBaseRecordJson,
   CoreMemoryRecordJson,
   CoreRuntimeInfoJson,
   CoreRuntimeToolDiagnosticsJson
@@ -6,12 +7,13 @@ import type {
 import type { AgentProvider } from '../agent/types'
 import { describeRuntimeError } from './format-runtime-error'
 
-type DiagnosticsProvider = Pick<AgentProvider, 'getRuntimeInfo' | 'getToolDiagnostics' | 'listMemories'>
+type DiagnosticsProvider = Pick<AgentProvider, 'getRuntimeInfo' | 'getToolDiagnostics' | 'listMemories' | 'listKnowledgeBases'>
 
 export type LoadedKunDiagnostics = {
   runtimeInfo?: CoreRuntimeInfoJson | null
   toolDiagnostics?: CoreRuntimeToolDiagnosticsJson | null
   memoryRecords?: CoreMemoryRecordJson[]
+  knowledgeBases?: CoreKnowledgeBaseRecordJson[]
   errors: string[]
 }
 
@@ -19,11 +21,14 @@ export async function loadKunDiagnostics(
   provider: DiagnosticsProvider,
   options: { workspace?: string } = {}
 ): Promise<LoadedKunDiagnostics> {
-  const [runtimeInfo, toolDiagnostics, memoryRecords] = await Promise.allSettled([
+  const [runtimeInfo, toolDiagnostics, memoryRecords, knowledgeBases] = await Promise.allSettled([
     provider.getRuntimeInfo ? provider.getRuntimeInfo() : Promise.resolve(null),
     provider.getToolDiagnostics ? provider.getToolDiagnostics() : Promise.resolve(null),
     provider.listMemories
       ? provider.listMemories({ workspace: options.workspace, includeDeleted: false })
+      : Promise.resolve([]),
+    provider.listKnowledgeBases
+      ? provider.listKnowledgeBases({ workspace: options.workspace, includeDisabled: true })
       : Promise.resolve([])
   ])
 
@@ -45,6 +50,12 @@ export async function loadKunDiagnostics(
     loaded.memoryRecords = memoryRecords.value ?? []
   } else {
     loaded.errors.push(`Memory: ${errorMessage(memoryRecords.reason)}`)
+  }
+
+  if (knowledgeBases.status === 'fulfilled') {
+    loaded.knowledgeBases = knowledgeBases.value ?? []
+  } else {
+    loaded.errors.push(`Knowledge: ${errorMessage(knowledgeBases.reason)}`)
   }
 
   loaded.errors = [...new Set(loaded.errors)]

@@ -20,6 +20,15 @@ import { getProvider } from '../agent/registry'
 import type {
   CoreMemoryDiagnosticsJson,
   CoreMemoryRecordJson,
+  CoreKnowledgeBaseRecordJson,
+  CoreKnowledgeChunkSearchResultJson,
+  CoreKnowledgeDiagnosticsJson,
+  CoreKnowledgeDocumentRecordJson,
+  CoreKnowledgeDocumentSourceTypeJson,
+  CoreKnowledgeEmbeddingConfigJson,
+  CoreKnowledgeProviderKindJson,
+  CoreKnowledgeRerankerConfigJson,
+  CoreExternalKnowledgeConfigJson,
   CoreRuntimeInfoJson,
   CoreRuntimeToolDiagnosticsJson
 } from '../agent/kun-contract'
@@ -56,6 +65,7 @@ import {
   EasterEggSettingsSection,
   GeneralSettingsSection,
   KeyboardShortcutsSettingsSection,
+  KnowledgeSettingsSection,
   LlmDebugSettingsSection,
   WorktreeSettingsSection,
   MediaGenerationSettingsSection,
@@ -66,9 +76,27 @@ import {
   WriteSettingsSection
 } from './settings-sections'
 
-type SettingsCategory = 'general' | 'providers' | 'write' | 'mediaGeneration' | 'speechToText' | 'agents' | 'archives' | 'permissions' | 'worktree' | 'memory' | 'shortcuts' | 'easterEgg' | 'claw' | 'updates' | 'debug'
+type SettingsCategory = 'general' | 'providers' | 'write' | 'mediaGeneration' | 'speechToText' | 'agents' | 'archives' | 'permissions' | 'worktree' | 'memory' | 'knowledge' | 'shortcuts' | 'easterEgg' | 'claw' | 'updates' | 'debug'
 type SaveStatus = 'idle' | 'saving' | 'saved' | 'error'
 type SettingsPatch = AppSettingsPatch
+type KnowledgeBaseCreateInput = {
+  name: string
+  description?: string
+  workspace?: string
+  providerKind?: CoreKnowledgeProviderKindJson
+  enabled?: boolean
+  embedding?: CoreKnowledgeEmbeddingConfigJson
+  reranker?: CoreKnowledgeRerankerConfigJson
+  external?: CoreExternalKnowledgeConfigJson
+}
+type KnowledgeBaseUpdateInput = Omit<Partial<KnowledgeBaseCreateInput>, 'workspace'>
+type KnowledgeDocumentCreateInput = {
+  name?: string
+  sourceType?: CoreKnowledgeDocumentSourceTypeJson
+  sourcePath?: string
+  mimeType?: string
+  text?: string
+}
 type InlineNotice = {
   tone: 'success' | 'error' | 'info'
   message: string
@@ -121,6 +149,10 @@ export function SettingsView(): ReactElement {
   const [toolDiagnostics, setToolDiagnostics] = useState<CoreRuntimeToolDiagnosticsJson | null>(null)
   const [memoryRecords, setMemoryRecords] = useState<CoreMemoryRecordJson[]>([])
   const [memoryDiagnostics, setMemoryDiagnostics] = useState<CoreMemoryDiagnosticsJson | null>(null)
+  const [knowledgeBases, setKnowledgeBases] = useState<CoreKnowledgeBaseRecordJson[]>([])
+  const [knowledgeDiagnostics, setKnowledgeDiagnostics] = useState<CoreKnowledgeDiagnosticsJson | null>(null)
+  const [knowledgeDocumentsByBase, setKnowledgeDocumentsByBase] = useState<Record<string, CoreKnowledgeDocumentRecordJson[]>>({})
+  const [knowledgeSearchResults, setKnowledgeSearchResults] = useState<CoreKnowledgeChunkSearchResultJson[]>([])
   const [runtimeDiagnosticsBusy, setRuntimeDiagnosticsBusy] = useState(false)
   const [runtimeDiagnosticsNotice, setRuntimeDiagnosticsNotice] = useState<InlineNotice | null>(null)
   const [writeDebugModalOpen, setWriteDebugModalOpen] = useState(false)
@@ -312,6 +344,10 @@ export function SettingsView(): ReactElement {
       setCategory('updates')
       return
     }
+    if (settingsSection === 'knowledge') {
+      setCategory('knowledge')
+      return
+    }
     setCategory('agents')
   }, [settingsSection])
 
@@ -329,12 +365,13 @@ export function SettingsView(): ReactElement {
       settingsSection === 'shortcuts' ||
       settingsSection === 'easterEgg' ||
       settingsSection === 'updates' ||
+      settingsSection === 'knowledge' ||
       (category !== 'agents' && category !== 'permissions')
     ) {
       return
     }
     const refs: Record<
-      Exclude<SettingsRouteSection, 'general' | 'providers' | 'write' | 'imageGeneration' | 'mediaGeneration' | 'speechToText' | 'archives' | 'claw' | 'shortcuts' | 'easterEgg' | 'updates'>,
+      Exclude<SettingsRouteSection, 'general' | 'providers' | 'write' | 'imageGeneration' | 'mediaGeneration' | 'speechToText' | 'archives' | 'claw' | 'shortcuts' | 'easterEgg' | 'updates' | 'knowledge'>,
       HTMLDivElement | null
     > = {
       agents: agentsSectionRef.current,
@@ -485,6 +522,7 @@ export function SettingsView(): ReactElement {
       if (loaded.runtimeInfo !== undefined) setRuntimeInfo(loaded.runtimeInfo)
       if (loaded.toolDiagnostics !== undefined) setToolDiagnostics(loaded.toolDiagnostics)
       if (loaded.memoryRecords !== undefined) setMemoryRecords(loaded.memoryRecords)
+      if (loaded.knowledgeBases !== undefined) setKnowledgeBases(loaded.knowledgeBases)
       if (loaded.errors.length > 0) {
         setRuntimeDiagnosticsNotice({
           tone: 'error',
@@ -502,7 +540,7 @@ export function SettingsView(): ReactElement {
   }, [expandHomePath, formWorkspaceRoot])
 
   useEffect(() => {
-    if (category !== 'agents' && category !== 'permissions' && category !== 'memory') return
+    if (category !== 'agents' && category !== 'permissions' && category !== 'memory' && category !== 'knowledge') return
     void refreshKunDiagnostics()
   }, [category, refreshKunDiagnostics])
 
@@ -521,6 +559,22 @@ export function SettingsView(): ReactElement {
     if (category !== 'memory') return
     void refreshMemoryDiagnostics()
   }, [category, memoryRecords])
+
+  const refreshKnowledgeDiagnostics = async (): Promise<void> => {
+    const provider = getProvider()
+    if (typeof provider.getKnowledgeDiagnostics !== 'function') return
+    try {
+      const diagnostics = await provider.getKnowledgeDiagnostics()
+      setKnowledgeDiagnostics(diagnostics)
+    } catch {
+      // best-effort; surfaced via runtimeDiagnosticsNotice elsewhere
+    }
+  }
+
+  useEffect(() => {
+    if (category !== 'knowledge') return
+    void refreshKnowledgeDiagnostics()
+  }, [category, knowledgeBases])
 
   const createMemoryRecord = async (input: {
     content: string
@@ -598,6 +652,143 @@ export function SettingsView(): ReactElement {
         tone: 'error',
         message: error instanceof Error ? error.message : String(error)
       })
+    }
+  }
+
+  const createKnowledgeBaseRecord = async (
+    input: KnowledgeBaseCreateInput
+  ): Promise<CoreKnowledgeBaseRecordJson | null> => {
+    const provider = getProvider()
+    if (typeof provider.createKnowledgeBase !== 'function') return null
+    try {
+      const knowledgeBase = await provider.createKnowledgeBase({
+        ...input,
+        workspace: normalizeWorkspaceRoot(formWorkspaceRoot)
+      })
+      setKnowledgeBases((bases) => [knowledgeBase, ...bases.filter((base) => base.id !== knowledgeBase.id)])
+      return knowledgeBase
+    } catch (error) {
+      setRuntimeDiagnosticsNotice({
+        tone: 'error',
+        message: error instanceof Error ? error.message : String(error)
+      })
+      return null
+    }
+  }
+
+  const updateKnowledgeBaseRecord = async (
+    knowledgeBaseId: string,
+    patch: KnowledgeBaseUpdateInput
+  ): Promise<boolean> => {
+    const provider = getProvider()
+    if (typeof provider.updateKnowledgeBase !== 'function') return false
+    try {
+      const knowledgeBase = await provider.updateKnowledgeBase(knowledgeBaseId, patch)
+      setKnowledgeBases((bases) => bases.map((base) => (base.id === knowledgeBaseId ? knowledgeBase : base)))
+      return true
+    } catch (error) {
+      setRuntimeDiagnosticsNotice({
+        tone: 'error',
+        message: error instanceof Error ? error.message : String(error)
+      })
+      return false
+    }
+  }
+
+  const deleteKnowledgeBaseRecord = async (knowledgeBaseId: string): Promise<void> => {
+    const provider = getProvider()
+    if (typeof provider.deleteKnowledgeBase !== 'function') return
+    try {
+      await provider.deleteKnowledgeBase(knowledgeBaseId)
+      setKnowledgeBases((bases) => bases.filter((base) => base.id !== knowledgeBaseId))
+      setKnowledgeDocumentsByBase((byBase) => {
+        const next = { ...byBase }
+        delete next[knowledgeBaseId]
+        return next
+      })
+    } catch (error) {
+      setRuntimeDiagnosticsNotice({
+        tone: 'error',
+        message: error instanceof Error ? error.message : String(error)
+      })
+    }
+  }
+
+  const loadKnowledgeDocuments = async (knowledgeBaseId: string): Promise<void> => {
+    const provider = getProvider()
+    if (typeof provider.listKnowledgeDocuments !== 'function') return
+    try {
+      const documents = await provider.listKnowledgeDocuments(knowledgeBaseId)
+      setKnowledgeDocumentsByBase((byBase) => ({
+        ...byBase,
+        [knowledgeBaseId]: documents
+      }))
+    } catch (error) {
+      setRuntimeDiagnosticsNotice({
+        tone: 'error',
+        message: error instanceof Error ? error.message : String(error)
+      })
+    }
+  }
+
+  const addKnowledgeDocumentRecord = async (
+    knowledgeBaseId: string,
+    input: KnowledgeDocumentCreateInput
+  ): Promise<CoreKnowledgeDocumentRecordJson | null> => {
+    const provider = getProvider()
+    if (typeof provider.addKnowledgeDocument !== 'function') return null
+    try {
+      const document = await provider.addKnowledgeDocument(knowledgeBaseId, input)
+      await loadKnowledgeDocuments(knowledgeBaseId)
+      void refreshKunDiagnostics()
+      return document
+    } catch (error) {
+      setRuntimeDiagnosticsNotice({
+        tone: 'error',
+        message: error instanceof Error ? error.message : String(error)
+      })
+      return null
+    }
+  }
+
+  const deleteKnowledgeDocumentRecord = async (
+    knowledgeBaseId: string,
+    documentId: string
+  ): Promise<void> => {
+    const provider = getProvider()
+    if (typeof provider.deleteKnowledgeDocument !== 'function') return
+    try {
+      await provider.deleteKnowledgeDocument(knowledgeBaseId, documentId)
+      await loadKnowledgeDocuments(knowledgeBaseId)
+      void refreshKunDiagnostics()
+    } catch (error) {
+      setRuntimeDiagnosticsNotice({
+        tone: 'error',
+        message: error instanceof Error ? error.message : String(error)
+      })
+    }
+  }
+
+  const searchKnowledgeRecords = async (input: {
+    query: string
+    knowledgeBaseIds?: string[]
+    topK?: number
+  }): Promise<boolean> => {
+    const provider = getProvider()
+    if (typeof provider.searchKnowledgeBases !== 'function') return false
+    try {
+      const results = await provider.searchKnowledgeBases({
+        ...input,
+        workspace: normalizeWorkspaceRoot(formWorkspaceRoot)
+      })
+      setKnowledgeSearchResults(results)
+      return true
+    } catch (error) {
+      setRuntimeDiagnosticsNotice({
+        tone: 'error',
+        message: error instanceof Error ? error.message : String(error)
+      })
+      return false
     }
   }
 
@@ -948,6 +1139,10 @@ export function SettingsView(): ReactElement {
     toolDiagnostics,
     memoryRecords,
     memoryDiagnostics,
+    knowledgeBases,
+    knowledgeDiagnostics,
+    knowledgeDocumentsByBase,
+    knowledgeSearchResults,
     runtimeDiagnosticsBusy,
     runtimeDiagnosticsNotice,
     refreshKunDiagnostics,
@@ -955,6 +1150,13 @@ export function SettingsView(): ReactElement {
     updateMemoryRecord,
     disableMemoryRecord,
     deleteMemoryRecord,
+    createKnowledgeBaseRecord,
+    updateKnowledgeBaseRecord,
+    deleteKnowledgeBaseRecord,
+    loadKnowledgeDocuments,
+    addKnowledgeDocumentRecord,
+    deleteKnowledgeDocumentRecord,
+    searchKnowledgeRecords,
     pickClawWorkspace,
     resetClawWorkspaceToDefault,
     clawWorkspacePickerError,
@@ -1033,6 +1235,7 @@ export function SettingsView(): ReactElement {
           {category === 'archives' ? <ArchivedThreadsSettingsSection ctx={settingsSectionContext} /> : null}
           {category === 'worktree' ? <WorktreeSettingsSection ctx={settingsSectionContext} /> : null}
           {category === 'memory' ? <MemorySettingsSection ctx={settingsSectionContext} /> : null}
+          {category === 'knowledge' ? <KnowledgeSettingsSection ctx={settingsSectionContext} /> : null}
           {category === 'shortcuts' ? <KeyboardShortcutsSettingsSection ctx={settingsSectionContext} /> : null}
           {category === 'easterEgg' ? <EasterEggSettingsSection ctx={settingsSectionContext} /> : null}
           {category === 'claw' ? <ClawSettingsSection ctx={settingsSectionContext} /> : null}

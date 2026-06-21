@@ -12,6 +12,9 @@ import { getKunRuntimeSettings } from '@shared/app-settings'
 import {
   KUN_ATTACHMENT_DIAGNOSTICS_PATH,
   KUN_ATTACHMENTS_PATH,
+  KUN_KNOWLEDGE_BASES_DIAGNOSTICS_PATH,
+  KUN_KNOWLEDGE_BASES_PATH,
+  KUN_KNOWLEDGE_BASES_SEARCH_PATH,
   KUN_MEMORY_DIAGNOSTICS_PATH,
   KUN_MEMORY_PATH,
   KUN_RUNTIME_INFO_PATH,
@@ -31,6 +34,9 @@ import {
   kunThreadTurnsPath,
   kunAttachmentContentPath,
   kunUserInputPath,
+  kunKnowledgeBasePath,
+  kunKnowledgeDocumentsPath,
+  kunKnowledgeDocumentPath,
   kunMemoryRecordPath,
   kunSessionResumePath,
   normalizeThreadMode,
@@ -43,6 +49,13 @@ import type {
   CoreAttachmentMetadataJson,
   CoreAttachmentTextFallbackJson,
   CoreAttachmentUploadResponseJson,
+  CoreKnowledgeBaseListResponseJson,
+  CoreKnowledgeBaseRecordJson,
+  CoreKnowledgeChunkSearchResultJson,
+  CoreKnowledgeDiagnosticsJson,
+  CoreKnowledgeDocumentListResponseJson,
+  CoreKnowledgeDocumentRecordJson,
+  CoreKnowledgeSearchResponseJson,
   CoreMemoryDiagnosticsJson,
   CoreMemoryListResponseJson,
   CoreMemoryRecordJson,
@@ -742,6 +755,153 @@ export class KunRuntimeProvider implements AgentProvider {
     return readRuntimeJson<CoreMemoryDiagnosticsJson>(
       response.body,
       'runtime returned an invalid memory diagnostics response'
+    )
+  }
+
+  async listKnowledgeBases(
+    options: { workspace?: string; includeDisabled?: boolean } = {}
+  ): Promise<CoreKnowledgeBaseRecordJson[]> {
+    const query = buildQuery({
+      workspace: options.workspace,
+      include_disabled: options.includeDisabled
+    })
+    const response = await rendererRuntimeClient.runtimeRequest(`${KUN_KNOWLEDGE_BASES_PATH}${query}`, 'GET')
+    if (!response.ok) {
+      throw runtimeErrorToError(readRuntimeError(response.body, 'failed to list knowledge bases'))
+    }
+    return readRuntimeJson<CoreKnowledgeBaseListResponseJson>(
+      response.body,
+      'runtime returned an invalid knowledge base list response'
+    ).knowledgeBases ?? []
+  }
+
+  async createKnowledgeBase(input: Partial<CoreKnowledgeBaseRecordJson> & {
+    name: string
+  }): Promise<CoreKnowledgeBaseRecordJson> {
+    const response = await rendererRuntimeClient.runtimeRequest(
+      KUN_KNOWLEDGE_BASES_PATH,
+      'POST',
+      JSON.stringify(input)
+    )
+    if (!response.ok) {
+      throw runtimeErrorToError(readRuntimeError(response.body, 'failed to create knowledge base'))
+    }
+    return readRuntimeJson<{ knowledgeBase: CoreKnowledgeBaseRecordJson }>(
+      response.body,
+      'runtime returned an invalid knowledge base response'
+    ).knowledgeBase
+  }
+
+  async updateKnowledgeBase(
+    knowledgeBaseId: string,
+    patch: Partial<CoreKnowledgeBaseRecordJson>
+  ): Promise<CoreKnowledgeBaseRecordJson> {
+    const response = await rendererRuntimeClient.runtimeRequest(
+      kunKnowledgeBasePath(knowledgeBaseId),
+      'PATCH',
+      JSON.stringify(patch)
+    )
+    if (!response.ok) {
+      throw runtimeErrorToError(readRuntimeError(response.body, 'failed to update knowledge base'))
+    }
+    return readRuntimeJson<{ knowledgeBase: CoreKnowledgeBaseRecordJson }>(
+      response.body,
+      'runtime returned an invalid knowledge base response'
+    ).knowledgeBase
+  }
+
+  async deleteKnowledgeBase(knowledgeBaseId: string): Promise<CoreKnowledgeBaseRecordJson> {
+    const response = await rendererRuntimeClient.runtimeRequest(kunKnowledgeBasePath(knowledgeBaseId), 'DELETE')
+    if (!response.ok) {
+      throw runtimeErrorToError(readRuntimeError(response.body, 'failed to delete knowledge base'))
+    }
+    return readRuntimeJson<{ knowledgeBase: CoreKnowledgeBaseRecordJson }>(
+      response.body,
+      'runtime returned an invalid knowledge base response'
+    ).knowledgeBase
+  }
+
+  async listKnowledgeDocuments(knowledgeBaseId: string): Promise<CoreKnowledgeDocumentRecordJson[]> {
+    const response = await rendererRuntimeClient.runtimeRequest(kunKnowledgeDocumentsPath(knowledgeBaseId), 'GET')
+    if (!response.ok) {
+      throw runtimeErrorToError(readRuntimeError(response.body, 'failed to list knowledge documents'))
+    }
+    return readRuntimeJson<CoreKnowledgeDocumentListResponseJson>(
+      response.body,
+      'runtime returned an invalid knowledge document list response'
+    ).documents ?? []
+  }
+
+  async addKnowledgeDocument(
+    knowledgeBaseId: string,
+    input: {
+      name?: string
+      sourceType?: string
+      sourcePath?: string
+      mimeType?: string
+      text?: string
+    }
+  ): Promise<CoreKnowledgeDocumentRecordJson> {
+    const response = await rendererRuntimeClient.runtimeRequest(
+      kunKnowledgeDocumentsPath(knowledgeBaseId),
+      'POST',
+      JSON.stringify(input)
+    )
+    if (!response.ok) {
+      throw runtimeErrorToError(readRuntimeError(response.body, 'failed to add knowledge document'))
+    }
+    return readRuntimeJson<{ document: CoreKnowledgeDocumentRecordJson }>(
+      response.body,
+      'runtime returned an invalid knowledge document response'
+    ).document
+  }
+
+  async deleteKnowledgeDocument(
+    knowledgeBaseId: string,
+    documentId: string
+  ): Promise<CoreKnowledgeDocumentRecordJson> {
+    const response = await rendererRuntimeClient.runtimeRequest(
+      kunKnowledgeDocumentPath(knowledgeBaseId, documentId),
+      'DELETE'
+    )
+    if (!response.ok) {
+      throw runtimeErrorToError(readRuntimeError(response.body, 'failed to delete knowledge document'))
+    }
+    return readRuntimeJson<{ document: CoreKnowledgeDocumentRecordJson }>(
+      response.body,
+      'runtime returned an invalid knowledge document response'
+    ).document
+  }
+
+  async searchKnowledgeBases(input: {
+    query: string
+    workspace?: string
+    knowledgeBaseIds?: string[]
+    topK?: number
+    minScore?: number
+  }): Promise<CoreKnowledgeChunkSearchResultJson[]> {
+    const response = await rendererRuntimeClient.runtimeRequest(
+      KUN_KNOWLEDGE_BASES_SEARCH_PATH,
+      'POST',
+      JSON.stringify(input)
+    )
+    if (!response.ok) {
+      throw runtimeErrorToError(readRuntimeError(response.body, 'failed to search knowledge bases'))
+    }
+    return readRuntimeJson<CoreKnowledgeSearchResponseJson>(
+      response.body,
+      'runtime returned an invalid knowledge search response'
+    ).results ?? []
+  }
+
+  async getKnowledgeDiagnostics(): Promise<CoreKnowledgeDiagnosticsJson> {
+    const response = await rendererRuntimeClient.runtimeRequest(KUN_KNOWLEDGE_BASES_DIAGNOSTICS_PATH, 'GET')
+    if (!response.ok) {
+      throw runtimeErrorToError(readRuntimeError(response.body, 'failed to load knowledge diagnostics'))
+    }
+    return readRuntimeJson<CoreKnowledgeDiagnosticsJson>(
+      response.body,
+      'runtime returned an invalid knowledge diagnostics response'
     )
   }
 
