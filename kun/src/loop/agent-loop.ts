@@ -1751,8 +1751,8 @@ export class AgentLoop {
     approvalPolicy: ToolHostContext['approvalPolicy'],
     toolProviderKinds: ReadonlyMap<string, ToolProviderKind | undefined>
   ): boolean {
-    // Untrusted/never prompt on every tool, so parallel fan-out is unsafe.
-    if (approvalPolicy === 'untrusted' || approvalPolicy === 'never') return false
+    // always / untrusted / never 会触发审批或阻断工具调用，不能并发扇出。
+    if (approvalPolicy === 'always' || approvalPolicy === 'untrusted' || approvalPolicy === 'never') return false
     // Delegated children are isolated runs; multiple in one assistant message
     // are independent and safe to fan out. The delegation runtime caps real
     // concurrency at maxParallel and queues the overflow.
@@ -2707,6 +2707,7 @@ function normalizeApprovalPolicy(
 ): ToolHostContext['approvalPolicy'] {
   switch (value) {
     case 'on-request':
+    case 'always':
     case 'never':
     case 'auto':
     case 'suggest':

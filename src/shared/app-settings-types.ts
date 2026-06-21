@@ -21,6 +21,8 @@ export {
   type ApprovalPolicy,
   type SandboxMode
 } from '../../kun/src/contracts/policy.js'
+export const KUN_TOOL_PERMISSION_MODES = ['always-ask', 'read-only', 'sensitive-ask', 'workspace-write', 'bypass'] as const
+export type KunToolPermissionMode = (typeof KUN_TOOL_PERMISSION_MODES)[number]
 export type UiFontScale = 'small' | 'medium' | 'large'
 export type ScheduleRunMode = 'agent' | 'plan'
 export type ScheduleKind = 'manual' | 'interval' | 'daily' | 'at'
@@ -233,6 +235,38 @@ export type KunRuntimeSettingsV1 = {
   computerUse: KunComputerUseSettingsV1
   /** First-party design-quality linter applied to frontend output. */
   quality: KunDesignQualitySettingsV1
+}
+
+export function kunToolPermissionModeSettings(
+  mode: KunToolPermissionMode
+): Pick<KunRuntimeSettingsV1, 'approvalPolicy' | 'sandboxMode'> {
+  switch (mode) {
+    case 'always-ask':
+      return { approvalPolicy: 'always', sandboxMode: 'danger-full-access' }
+    case 'read-only':
+      return { approvalPolicy: 'on-request', sandboxMode: 'danger-full-access' }
+    case 'sensitive-ask':
+      return { approvalPolicy: 'untrusted', sandboxMode: 'danger-full-access' }
+    case 'workspace-write':
+      return { approvalPolicy: 'on-request', sandboxMode: 'workspace-write' }
+    case 'bypass':
+      return { approvalPolicy: 'auto', sandboxMode: 'danger-full-access' }
+  }
+}
+
+export function kunToolPermissionModeFromSettings(
+  settings: Pick<KunRuntimeSettingsV1, 'approvalPolicy' | 'sandboxMode'>
+): KunToolPermissionMode {
+  if (settings.approvalPolicy === 'always') return 'always-ask'
+  if (settings.approvalPolicy === 'untrusted') return 'sensitive-ask'
+  if (
+    settings.approvalPolicy === 'auto' &&
+    settings.sandboxMode === 'danger-full-access'
+  ) {
+    return 'bypass'
+  }
+  if (settings.sandboxMode === 'workspace-write') return 'workspace-write'
+  return 'read-only'
 }
 
 /** Detection aggressiveness for the design-quality linter. */

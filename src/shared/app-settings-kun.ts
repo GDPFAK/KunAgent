@@ -13,6 +13,8 @@ import {
   DEFAULT_VIDEO_GENERATION_PROTOCOL,
   MODEL_REASONING_EFFORTS,
   MODEL_REASONING_REQUEST_PROTOCOLS,
+  kunToolPermissionModeFromSettings,
+  kunToolPermissionModeSettings,
   normalizeModelEndpointFormat,
   type AppSettingsV1,
   type KunComputerUseSettingsV1,
@@ -428,9 +430,14 @@ export function mergeKunRuntimeSettings(
       : {})
   })
   const nextModelProfiles = normalizeKunModelProfiles(current.modelProfiles, patch?.modelProfiles)
+  const nextToolPermission = kunToolPermissionModeSettings(kunToolPermissionModeFromSettings({
+    approvalPolicy: patch?.approvalPolicy ?? current.approvalPolicy,
+    sandboxMode: patch?.sandboxMode ?? current.sandboxMode
+  }))
   return {
     ...current,
     ...(patch ?? {}),
+    ...nextToolPermission,
     tokenEconomyMode: nextTokenEconomy.enabled,
     tokenEconomy: nextTokenEconomy,
     mcpSearch: nextMcpSearch,

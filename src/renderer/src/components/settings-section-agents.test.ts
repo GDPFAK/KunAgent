@@ -221,20 +221,19 @@ const labels: Record<string, string> = {
   mcpReload: 'Reload MCP config',
   mcpOpenDir: 'Open MCP directory',
   permissions: 'Permissions',
-  approvalPolicy: 'Approval policy',
-  approvalPolicyDesc: 'Approval policy description',
-  approvalAuto: 'Auto',
-  approvalOnRequest: 'On request',
-  approvalUntrusted: 'Untrusted',
-  approvalSuggest: 'Suggest',
-  approvalNever: 'Never',
-  permissionsBehaviorHint: 'Full access and confirmation are separate',
-  sandboxMode: 'Sandbox mode',
-  sandboxModeDesc: 'Sandbox description',
-  sandboxWorkspaceWrite: 'Workspace write',
-  sandboxReadOnly: 'Read only',
-  sandboxFullAccess: 'Full access',
-  sandboxExternal: 'External sandbox'
+  toolPermissionMode: 'Tool permission mode',
+  toolPermissionModeDesc: 'Tool permission mode description',
+  toolPermissionAlwaysAsk: 'Always ask',
+  toolPermissionAlwaysAskDesc: 'Every tool call asks first',
+  toolPermissionReadOnly: 'Read only',
+  toolPermissionReadOnlyDesc: 'Read tools run automatically',
+  toolPermissionSensitiveAsk: 'Sensitive operations ask',
+  toolPermissionSensitiveAskDesc: 'Sensitive operations ask first',
+  toolPermissionWorkspaceWrite: 'Workspace write',
+  toolPermissionWorkspaceWriteDesc: 'Can modify the workspace',
+  toolPermissionBypass: 'Bypass mode',
+  toolPermissionBypassDesc: 'Never asks and has full access',
+  permissionsBehaviorHint: 'Tool confirmation and local permissions are unified'
 }
 
 function t(key: string): string {
@@ -550,13 +549,25 @@ describe('AgentsSettingsSection Kun diagnostics smoke', () => {
     expect(html).not.toContain('imageGen')
   })
 
-  it('renders permission controls with full access as the default sandbox', () => {
+  it('renders unified permission controls with bypass as the default mode', () => {
     const html = renderToStaticMarkup(createElement(AgentsSettingsSection, { ctx: baseCtx() }))
 
     expect(html).toContain('Permissions')
-    expect(html).toContain('Full access and confirmation are separate')
-    expect(html).toContain('<option value="auto" selected="">Auto</option>')
-    expect(html).toContain('<option value="danger-full-access" selected="">Full access</option>')
+    expect(html).toContain('Tool confirmation and local permissions are unified')
+    expect(html).toContain('Tool permission mode')
+    expect(html).toContain('role="radiogroup"')
+    expect(html).toContain('Every tool call asks first')
+    expect(html).toContain('Read tools run automatically')
+    expect(html).toContain('Sensitive operations ask first')
+    expect(html).toContain('Can modify the workspace')
+    expect(html).toContain('Never asks and has full access')
+    expect(html).toContain('lucide-hand')
+    expect(html).toContain('lucide-eye')
+    expect(html).toContain('lucide-shield-question')
+    expect(html).toContain('lucide-folder-pen')
+    expect(html).toContain('lucide-lock-keyhole-open')
+    expect(html).not.toContain('Approval policy')
+    expect(html).not.toContain('Sandbox mode')
   })
 
   it('renders pure JSONL as a selectable storage backend', () => {
