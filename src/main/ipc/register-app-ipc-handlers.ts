@@ -97,7 +97,7 @@ import {
   workspaceRootSchema,
   legacySessionImportPayloadSchema
 } from './app-ipc-schemas'
-import { DEFAULT_KUN_DATA_DIR, resolveKunRuntimeSettings } from '../../shared/app-settings'
+import { DEFAULT_KUN_DATA_DIR, resolveKunRuntimeSettings, resolveModelProviderProxyUrl } from '../../shared/app-settings'
 import { detectLegacySessions, importLegacySessions } from '../services/legacy-session-import-service'
 import type { JsonSettingsStore } from '../settings-store'
 import { probeModelProvider } from '../provider-connection'
@@ -736,9 +736,13 @@ export function registerAppIpcHandlers(options: RegisterAppIpcHandlersOptions): 
   })
 
   ipcMain.handle('anthropic:auth:browser', async () => {
+    // Anthropic is region-restricted in some locales; route the token exchange
+    // through the app's configured proxy (Electron's fetch ignores the system
+    // proxy the browser used for the authorize step).
+    const proxyUrl = resolveModelProviderProxyUrl(await store.load())
     return startAnthropicBrowserAuth(async (url: string) => {
       await shell.openExternal(url)
-    })
+    }, proxyUrl)
   })
 
   ipcMain.handle('workspace:pick-directory', async (_, defaultPath: unknown): Promise<WorkspacePickResult> => {

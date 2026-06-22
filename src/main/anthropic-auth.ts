@@ -1,5 +1,6 @@
 import { createServer, type Server } from 'node:http'
 import { createHash, randomBytes } from 'node:crypto'
+import { fetchWithOptionalProxy } from './proxy-fetch'
 
 // Anthropic OAuth (Claude Pro/Max subscription). Mirrors codex-auth.ts but
 // targets Anthropic's Authorization-Code + PKCE flow, reusing the Claude Code
@@ -29,12 +30,25 @@ export type AnthropicBrowserAuthResult =
   | { ok: true; credentials: AnthropicOAuthCredentials }
   | { ok: false; message: string }
 
-async function postJson(url: string, body: Record<string, string>): Promise<Record<string, unknown>> {
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-    body: JSON.stringify(body)
-  })
+// Route through the app's configured proxy. Anthropic is region-restricted in
+// some locales; the browser completes the authorize step via the system proxy,
+// but Electron's main-process fetch does NOT inherit it, so an unproxied token
+// exchange gets a 403 "Request not allowed". Going through the same proxy the
+// model requests use fixes that.
+async function postJson(
+  url: string,
+  body: Record<string, string>,
+  proxyUrl?: string
+): Promise<Record<string, unknown>> {
+  const res = await fetchWithOptionalProxy(
+    url,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify(body)
+    },
+    proxyUrl ?? ''
+  )
   const text = await res.text()
   if (!res.ok) {
     throw new Error(`Anthropic auth: ${url} returned ${res.status}: ${text.slice(0, 200)}`)
@@ -104,7 +118,8 @@ function renderAnthropicErrorHtml(message: string): string {
  * callback URL/port is fixed by Anthropic's app registration.
  */
 export async function startAnthropicBrowserAuth(
-  openBrowser: (url: string) => void | Promise<void>
+  openBrowser: (url: string) => void | Promise<void>,
+  proxyUrl?: string
 ): Promise<AnthropicBrowserAuthResult> {
   const pkce = generatePkce()
   const state = base64UrlEncode(randomBytes(32))
@@ -156,14 +171,18 @@ export async function startAnthropicBrowserAuth(
           settleReject(new Error(message))
           return
         }
-        postJson(ANTHROPIC_TOKEN_URL, {
-          grant_type: 'authorization_code',
-          client_id: ANTHROPIC_CLIENT_ID,
-          code,
-          state,
-          redirect_uri: ANTHROPIC_OAUTH_REDIRECT,
-          code_verifier: pkce.verifier
-        })
+        postJson(
+          ANTHROPIC_TOKEN_URL,
+          {
+            grant_type: 'authorization_code',
+            client_id: ANTHROPIC_CLIENT_ID,
+            code,
+            state,
+            redirect_uri: ANTHROPIC_OAUTH_REDIRECT,
+            code_verifier: pkce.verifier
+          },
+          proxyUrl
+        )
           .then((tokens) => {
             const creds = credentialsFromTokens(tokens)
             if (!creds) throw new Error('令牌交换返回的数据不完整')
@@ -209,14 +228,19 @@ export async function startAnthropicBrowserAuth(
  * can fall back to a re-login prompt.
  */
 export async function refreshAnthropicToken(
-  credentials: AnthropicOAuthCredentials
+  credentials: AnthropicOAuthCredentials,
+  proxyUrl?: string
 ): Promise<AnthropicOAuthCredentials | null> {
   try {
-    const tokens = await postJson(ANTHROPIC_TOKEN_URL, {
-      grant_type: 'refresh_token',
-      client_id: ANTHROPIC_CLIENT_ID,
-      refresh_token: credentials.refreshToken
-    })
+    const tokens = await postJson(
+      ANTHROPIC_TOKEN_URL,
+      {
+        grant_type: 'refresh_token',
+        client_id: ANTHROPIC_CLIENT_ID,
+        refresh_token: credentials.refreshToken
+      },
+      proxyUrl
+    )
     const accessToken = tokens.access_token as string | undefined
     if (!accessToken) return null
     // Keep the rotated refresh token; fall back to the prior one only if the

@@ -1,4 +1,5 @@
 import { getModelProviderSettings } from '../shared/app-settings-provider'
+import { resolveModelProviderProxyUrl } from '../shared/app-settings'
 import type { AppSettingsPatch, AppSettingsV1, ModelProviderProfileV1 } from '../shared/app-settings-types'
 import {
   encodeAnthropicCredentials,
@@ -27,7 +28,7 @@ export type AnthropicTokenRefresherDeps = {
   load: () => Promise<AppSettingsV1>
   applyPatch: (patch: AppSettingsPatch) => Promise<unknown>
   /** Injectable for tests; defaults to the real network refresh. */
-  refresh?: (creds: AnthropicOAuthCredentials) => Promise<AnthropicOAuthCredentials | null>
+  refresh?: (creds: AnthropicOAuthCredentials, proxyUrl?: string) => Promise<AnthropicOAuthCredentials | null>
   now?: () => number
   log?: (message: string, extra?: Record<string, unknown>) => void
   leadMs?: number
@@ -42,13 +43,16 @@ export function createAnthropicTokenRefresher(deps: AnthropicTokenRefresherDeps)
   let timer: ReturnType<typeof setInterval> | null = null
   let running = false
 
-  async function refreshProfile(profile: ModelProviderProfileV1): Promise<ModelProviderProfileV1 | null> {
+  async function refreshProfile(
+    profile: ModelProviderProfileV1,
+    proxyUrl: string
+  ): Promise<ModelProviderProfileV1 | null> {
     const raw = (profile.apiKey ?? '').trim()
     if (!isAnthropicOAuthCredentials(raw)) return null
     const creds = parseAnthropicCredentials(raw)
     if (!creds) return null
     if (creds.expiresAt - now() > leadMs) return null
-    const refreshed = await refresh(creds)
+    const refreshed = await refresh(creds, proxyUrl)
     if (!refreshed) {
       deps.log?.('anthropic token refresh returned no credentials', { providerId: profile.id })
       return null
@@ -63,11 +67,12 @@ export function createAnthropicTokenRefresher(deps: AnthropicTokenRefresherDeps)
     running = true
     try {
       const settings = await deps.load()
+      const proxyUrl = resolveModelProviderProxyUrl(settings)
       const providers = getModelProviderSettings(settings).providers
       let changed = false
       const next: ModelProviderProfileV1[] = []
       for (const profile of providers) {
-        const updated = await refreshProfile(profile)
+        const updated = await refreshProfile(profile, proxyUrl)
         if (updated) {
           changed = true
           next.push(updated)
