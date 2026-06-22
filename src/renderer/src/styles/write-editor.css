@@ -47,6 +47,16 @@
   padding-left: var(--ds-window-controls-safe-inset);
 }
 
+.ds-window-controls-collapsed-titlebar-inset {
+  padding-left: calc(
+    var(--ds-window-controls-safe-inset) + var(--ds-collapsed-sidebar-titlebar-extra-inset)
+  );
+}
+
+.ds-window-controls-collapsed-titlebar-anchor {
+  left: calc(1rem + var(--ds-window-controls-safe-inset) + var(--ds-collapsed-sidebar-titlebar-extra-inset));
+}
+
 .ds-write-titlebar-safe-inset {
   padding-left: calc(var(--ds-window-controls-safe-inset) + var(--ds-write-titlebar-extra-inset));
 }

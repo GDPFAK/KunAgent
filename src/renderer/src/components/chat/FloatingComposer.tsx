@@ -547,9 +547,9 @@ export function FloatingComposer({
   })
   const showVoiceDictation = Boolean(
     speechToTextSettings?.enabled &&
-    speechToTextSettings.baseUrl.trim() &&
-    speechToTextSettings.apiKey.trim() &&
-    speechToTextSettings.model.trim()
+    speechToTextSettings.model.trim() &&
+    (speechToTextSettings.protocol === 'local-whisper' ||
+      (speechToTextSettings.baseUrl.trim() && speechToTextSettings.apiKey.trim()))
   )
   const activeClawChannel = useMemo(
     () => clawChannels.find((channel) => channel.id === activeClawChannelId) ?? null,

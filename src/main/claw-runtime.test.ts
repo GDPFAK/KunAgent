@@ -11,6 +11,7 @@ import {
   defaultScheduleSettings,
   defaultWorkflowSettings,
   defaultWriteSettings,
+  defaultTerminalSettings,
   type AppSettingsV1,
   type ClawImChannelV1,
   type ClawImConversationV1,
@@ -63,6 +64,7 @@ function buildSettings(): AppSettingsV1 {
         }
       ]
     },
+    terminal: defaultTerminalSettings(),
     guiUpdate: { channel: 'stable' },
     codePromptPrefix: '',
     disabledSkillIds: []

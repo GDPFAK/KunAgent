@@ -443,7 +443,7 @@ export function ConnectPhoneView({
   return (
     <section className="ds-no-drag relative flex min-h-0 flex-1 overflow-hidden bg-transparent">
       {leftSidebarCollapsed ? (
-        <div className="absolute left-4 top-4 z-20">
+        <div className="ds-window-controls-collapsed-titlebar-anchor absolute top-4 z-20">
           <SidebarTitlebarToggleButton
             onClick={onToggleSidebar}
             title={t('sidebarExpand')}

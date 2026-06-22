@@ -45,9 +45,10 @@ describe('speech-to-text service', () => {
   })
 
   it('reports configuration state from enabled/baseUrl/apiKey/model', () => {
-    expect(isSpeechToTextConfigured({ enabled: true, baseUrl: 'x', apiKey: 'y', model: 'z' })).toBe(true)
-    expect(isSpeechToTextConfigured({ enabled: false, baseUrl: 'x', apiKey: 'y', model: 'z' })).toBe(false)
-    expect(isSpeechToTextConfigured({ enabled: true, baseUrl: '', apiKey: 'y', model: 'z' })).toBe(false)
+    expect(isSpeechToTextConfigured({ enabled: true, protocol: 'mimo-asr', baseUrl: 'x', apiKey: 'y', model: 'z' })).toBe(true)
+    expect(isSpeechToTextConfigured({ enabled: false, protocol: 'mimo-asr', baseUrl: 'x', apiKey: 'y', model: 'z' })).toBe(false)
+    expect(isSpeechToTextConfigured({ enabled: true, protocol: 'mimo-asr', baseUrl: '', apiKey: 'y', model: 'z' })).toBe(false)
+    expect(isSpeechToTextConfigured({ enabled: true, protocol: 'local-whisper', baseUrl: '', apiKey: '', model: 'whisper-small-q5_1' })).toBe(true)
   })
 
   it('transcribes via MiMo ASR chat completions with a base64 data URI', async () => {
@@ -90,6 +91,7 @@ describe('speech-to-text service', () => {
           baseUrl: 'https://token-plan-cn.xiaomimimo.com/v1',
           apiKey: 'tp-provider',
           model: 'mimo-v2.5-asr',
+          localWhisperDownloadSource: 'huggingface',
           language: 'zh',
           timeoutMs: 30000
         }
@@ -128,6 +130,28 @@ describe('speech-to-text service', () => {
     const form = requests[0].init.body as FormData
     expect(form.get('model')).toBe('whisper-1')
     expect(form.get('file')).toBeInstanceOf(Blob)
+  })
+
+  it('transcribes local Whisper without requiring a base URL or API key', async () => {
+    const result = await requestSpeechTranscription(
+      settingsWithSpeech({
+        providerId: 'local-whisper',
+        protocol: 'local-whisper',
+        baseUrl: '',
+        apiKey: '',
+        model: 'whisper-small-q5_1'
+      }),
+      { audioBase64: AUDIO_BASE64, mimeType: 'audio/wav' },
+      {
+        localWhisperTranscriber: async (_request, speechToText) => {
+          expect(speechToText.protocol).toBe('local-whisper')
+          expect(speechToText.model).toBe('whisper-small-q5_1')
+          return ' local transcript '
+        }
+      }
+    )
+
+    expect(result).toEqual({ ok: true, text: 'local transcript' })
   })
 
   it('surfaces upstream HTTP errors as failure messages', async () => {

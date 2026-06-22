@@ -412,13 +412,13 @@
 
 .ds-titlebar-sidebar-toggle {
   display: inline-flex;
-  height: 16px;
-  width: 16px;
+  height: 24px;
+  width: 24px;
   flex: 0 0 auto;
   align-items: center;
   justify-content: center;
   border: 0;
-  border-radius: 4px;
+  border-radius: 7px;
   background: transparent;
   color: #9b9b9b;
   box-shadow: none;

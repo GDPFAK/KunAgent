@@ -152,7 +152,7 @@ export function SddAssistantPanel({
             title={t('rightPanelCollapse')}
             className="shrink-0"
           >
-            <PanelRightClose className="h-[13px] w-[13px]" strokeWidth={1.55} />
+            <PanelRightClose className="h-4 w-4" strokeWidth={1.75} />
           </SidebarTitlebarToggleButton>
           <div className="sdd-assistant-title-pill flex min-w-0 flex-1 items-center gap-2 rounded-[12px] bg-ds-surface-subtle px-3 py-1.5 dark:bg-white/8">
             <Sparkles className="sdd-assistant-sparkle h-4 w-4 shrink-0 text-accent" strokeWidth={1.8} />

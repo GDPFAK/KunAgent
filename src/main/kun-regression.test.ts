@@ -12,6 +12,7 @@ import {
   defaultScheduleSettings,
   defaultWorkflowSettings,
   defaultWriteSettings,
+  defaultTerminalSettings,
   migrateLegacyAppSettings,
   type AppSettingsV1
 } from '../shared/app-settings'
@@ -26,13 +27,13 @@ describe('Kun single-agent regression', () => {
       agents: {
         codewhale: {
           binaryPath: '/usr/local/bin/codewhale',
-          port: 8787,
+          port: 18787,
           apiKey: 'legacy-key',
           baseUrl: DEFAULT_DEEPSEEK_BASE_URL,
           autoStart: false
         }
       },
-      deepseek: { port: 8788 }
+      deepseek: { port: 18788 }
     } as unknown as Parameters<typeof migrateLegacyAppSettings>[0])
 
     expect(migrated.agents).toEqual({
@@ -40,7 +41,7 @@ describe('Kun single-agent regression', () => {
         apiKey: '',
         baseUrl: '',
         binaryPath: '',
-        port: 8788,
+        port: 18788,
         autoStart: false
       })
     })
@@ -56,13 +57,13 @@ describe('Kun single-agent regression', () => {
       agentProvider: 'deepseek-runtime',
       deepseek: {
         binaryPath: '/Applications/DeepSeek Runtime.app/Contents/MacOS/deepseek-runtime',
-        port: 8787
+        port: 18787
       }
     } as unknown as Parameters<typeof migrateLegacyAppSettings>[0])
 
     expect(migrated.agents?.kun).toEqual(expect.objectContaining({
       binaryPath: '',
-      port: 8787
+      port: 18787
     }))
   })
 
@@ -72,12 +73,13 @@ describe('Kun single-agent regression', () => {
       agentProvider: 'codewhale',
       agents: {
         codewhale: {
+          // 这里必须保留旧版真实写入值, 用于升级到当前 Kun 默认端口。
           port: 7878
         }
       }
     } as unknown as Parameters<typeof migrateLegacyAppSettings>[0])
 
-    expect(migrated.agents?.kun?.port).toBe(8899)
+    expect(migrated.agents?.kun?.port).toBe(18899)
   })
 
   it('seeds provider credentials and Kun model from legacy reasoning settings', () => {
@@ -114,7 +116,7 @@ describe('Kun single-agent regression', () => {
       uiFontScale: 'small',
       provider: defaultModelProviderSettings(),
       agents: {
-        kun: defaultKunRuntimeSettings(9000)
+        kun: defaultKunRuntimeSettings(19000)
       },
       workspaceRoot: '/tmp',
       log: { enabled: true, retentionDays: 7 },
@@ -126,13 +128,14 @@ describe('Kun single-agent regression', () => {
       schedule: defaultScheduleSettings(),
       workflow: defaultWorkflowSettings(),
       design: defaultDesignSettings(),
+      terminal: defaultTerminalSettings(),
       guiUpdate: { channel: 'stable' },
       codePromptPrefix: '',
       disabledSkillIds: []
     }
 
     expect(kunRuntimeAdapter.id).toBe('kun')
-    expect(kunRuntimeAdapter.getBaseUrl(settings)).toBe('http://127.0.0.1:9000')
+    expect(kunRuntimeAdapter.getBaseUrl(settings)).toBe('http://127.0.0.1:19000')
   })
 
   it('JsonSettingsStore saves only Kun after legacy settings migration', async () => {
@@ -142,7 +145,7 @@ describe('Kun single-agent regression', () => {
       JSON.stringify({
         version: 1,
         agentProvider: 'codewhale',
-        deepseek: { port: 8787 }
+        deepseek: { port: 18787 }
       }),
       'utf-8'
     )
@@ -151,7 +154,7 @@ describe('Kun single-agent regression', () => {
     const loaded = await store.load()
 
     expect(loaded.agents).toEqual({
-      kun: expect.objectContaining({ port: 8787 })
+      kun: expect.objectContaining({ port: 18787 })
     })
     await rm(userDataDir, { recursive: true, force: true })
   })

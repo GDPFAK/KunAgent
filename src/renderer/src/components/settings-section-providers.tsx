@@ -83,7 +83,7 @@ const IMAGE_GENERATION_PROTOCOL_LABEL_KEYS: Record<ImageGenerationProtocol, stri
   'codex-responses-image': 'imageGenProtocolCodex'
 }
 
-const SPEECH_TO_TEXT_PROTOCOL_LABEL_KEYS: Record<SpeechToTextProtocol, string> = {
+const SPEECH_TO_TEXT_PROTOCOL_LABEL_KEYS: Partial<Record<SpeechToTextProtocol, string>> = {
   'openai-transcriptions': 'speechProtocolOpenAi',
   'mimo-asr': 'speechProtocolMimoAsr'
 }

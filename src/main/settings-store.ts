@@ -6,6 +6,7 @@ import {
   applyKunRuntimePatch,
   kunSettingsEnvelope,
   DEFAULT_GUI_UPDATE_CHANNEL,
+  DEFAULT_CURSOR_SPOTLIGHT_COLOR,
   DEFAULT_LOG_RETENTION_DAYS,
   DEFAULT_WRITE_WORKSPACE_ROOT,
   defaultClawSettings,
@@ -24,6 +25,8 @@ import {
   mergeScheduleSettings,
   mergeWorkflowSettings,
   mergeWriteSettings,
+  defaultTerminalSettings,
+  mergeTerminalSettings,
   normalizeAppBehaviorSettings,
   normalizeKeyboardShortcuts,
   migrateLegacyAppSettings,
@@ -202,6 +205,7 @@ const defaultSettings = (): AppSettingsV1 => ({
   theme: 'system',
   uiFontScale: 'small',
   cursorSpotlight: true,
+  cursorSpotlightColor: DEFAULT_CURSOR_SPOTLIGHT_COLOR,
   provider: defaultModelProviderSettings(),
   agents: {
     kun: defaultKunRuntimeSettings()
@@ -225,7 +229,8 @@ const defaultSettings = (): AppSettingsV1 => ({
   claw: defaultClawSettings(),
   schedule: defaultScheduleSettings(),
   workflow: defaultWorkflowSettings(),
-  design: defaultDesignSettings()
+  design: defaultDesignSettings(),
+  terminal: defaultTerminalSettings()
 })
 
 function buildMergedSettings(parsed: Partial<AppSettingsV1>): AppSettingsV1 {
@@ -247,6 +252,7 @@ function buildMergedSettings(parsed: Partial<AppSettingsV1>): AppSettingsV1 {
     schedule: mergeScheduleSettings(defaults.schedule, migrated.schedule),
     workflow: mergeWorkflowSettings(defaults.workflow, migrated.workflow),
     design: mergeDesignSettings(defaults.design, migrated.design),
+    terminal: mergeTerminalSettings(defaults.terminal, migrated.terminal),
     guiUpdate: { ...defaults.guiUpdate, ...migrated.guiUpdate },
     codePromptPrefix: typeof migrated.codePromptPrefix === 'string' ? migrated.codePromptPrefix : '',
     disabledSkillIds: normalizeDisabledSkillIds(migrated.disabledSkillIds)
@@ -437,6 +443,7 @@ export class JsonSettingsStore {
       schedule: mergeScheduleSettings(cur.schedule, partial.schedule),
       workflow: mergeWorkflowSettings(cur.workflow, partial.workflow),
       design: mergeDesignSettings(cur.design, partial.design),
+      terminal: mergeTerminalSettings(cur.terminal, partial.terminal),
       guiUpdate: { ...cur.guiUpdate, ...(partial.guiUpdate ?? {}) }
     })
     await this.save(next)

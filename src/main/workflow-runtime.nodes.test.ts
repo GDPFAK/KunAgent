@@ -25,6 +25,7 @@ import {
   defaultModelProviderSettings,
   defaultScheduleSettings,
   defaultWriteSettings,
+  defaultTerminalSettings,
   mergeWorkflowSettings,
   normalizeWorkflow,
   normalizeWorkflowSettings,
@@ -118,6 +119,7 @@ function buildSettings(
     schedule: defaultScheduleSettings(),
     workflow: normalizeWorkflowSettings({ enabled: true, workflows, modules }),
     design: defaultDesignSettings(),
+    terminal: defaultTerminalSettings(),
     guiUpdate: { channel: 'stable' },
     codePromptPrefix: '',
     disabledSkillIds: []

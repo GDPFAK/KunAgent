@@ -206,50 +206,81 @@ export function registerRuntimeSseIpc(options: {
             const reader = res.body.getReader()
             const dec = new TextDecoder()
             let buffer = ''
-            while (true) {
-              const { done, value } = await reader.read()
-              if (done) break
-              buffer += dec.decode(value, { stream: true })
-              // Batch every event parsed from this network chunk into one IPC
-              // message — streaming turns otherwise pay a structured-clone
-              // send per token delta.
-              const batch: Record<string, unknown>[] = []
-              let next: { block: string; rest: string } | null
-              while ((next = takeSseBlock(buffer)) !== null) {
-                const block = next.block
-                buffer = next.rest
-                const parsed = parseSseData(block)
+
+            let pendingEvents: Record<string, unknown>[] = []
+            let throttleTimer: any = null
+
+            const flushEvents = (): boolean => {
+              if (throttleTimer) {
+                clearTimeout(throttleTimer)
+                throttleTimer = null
+              }
+              if (state.stoppedByClient || ac.signal.aborted) {
+                pendingEvents = []
+                return false
+              }
+              if (pendingEvents.length === 0) return true
+
+              let batchMaxSeq = nextSinceSeq
+              for (const event of pendingEvents) {
+                if (typeof event.seq === 'number') {
+                  batchMaxSeq = Math.max(batchMaxSeq, event.seq)
+                }
+              }
+
+              const batch = pendingEvents
+              pendingEvents = []
+              if (!sendSseMessage(wc, 'runtime:sse-event', { streamId: id, events: batch })) {
+                state.stoppedByClient = true
+                ac.abort()
+                return false
+              }
+              nextSinceSeq = batchMaxSeq
+              return true
+            }
+
+            try {
+              while (true) {
+                const { done, value } = await reader.read()
+                if (done) break
+                buffer += dec.decode(value, { stream: true })
+
+                let next: { block: string; rest: string } | null
+                let hasNewEvents = false
+                while ((next = takeSseBlock(buffer)) !== null) {
+                  const block = next.block
+                  buffer = next.rest
+                  const parsed = parseSseData(block)
+                  if (parsed !== null) {
+                    const payload = coerceSsePayload(parsed)
+                    pendingEvents.push(payload)
+                    hasNewEvents = true
+                  }
+                }
+                if (hasNewEvents) {
+                  if (!throttleTimer) {
+                    throttleTimer = setTimeout(() => {
+                      throttleTimer = null
+                      flushEvents()
+                    }, 100)
+                  }
+                }
+              }
+              buffer += dec.decode()
+              const trailing = buffer.trim()
+              if (trailing) {
+                const parsed = parseSseData(trailing)
                 if (parsed !== null) {
                   const payload = coerceSsePayload(parsed)
-                  if (typeof payload.seq === 'number') {
-                    nextSinceSeq = Math.max(nextSinceSeq, payload.seq)
-                  }
-                  batch.push(payload)
+                  pendingEvents.push(payload)
                 }
               }
-              if (batch.length > 0) {
-                if (!sendSseMessage(wc, 'runtime:sse-event', { streamId: id, events: batch })) {
-                  state.stoppedByClient = true
-                  ac.abort()
-                  return
-                }
+            } finally {
+              if (throttleTimer) {
+                clearTimeout(throttleTimer)
+                throttleTimer = null
               }
-            }
-            buffer += dec.decode()
-            const trailing = buffer.trim()
-            if (trailing) {
-              const parsed = parseSseData(trailing)
-              if (parsed !== null) {
-                const payload = coerceSsePayload(parsed)
-                if (typeof payload.seq === 'number') {
-                  nextSinceSeq = Math.max(nextSinceSeq, payload.seq)
-                }
-                if (!sendSseMessage(wc, 'runtime:sse-event', { streamId: id, events: [payload] })) {
-                  state.stoppedByClient = true
-                  ac.abort()
-                  return
-                }
-              }
+              flushEvents()
             }
           } catch (e) {
             if (state.stoppedByClient || ac.signal.aborted) return

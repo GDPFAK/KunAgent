@@ -1,4 +1,19 @@
 /* Re-theme React Flow (@xyflow/react) to the app's --ds-* design tokens. */
+.workflow-editor-header {
+  height: 4rem;
+}
+
+:root[data-platform='darwin'] .workflow-editor-header {
+  padding-top: 1rem;
+  padding-bottom: 0.5rem;
+}
+
+:root[data-platform='darwin'] .workflow-editor-header-sidebar-collapsed {
+  padding-left: calc(
+    var(--ds-window-controls-safe-inset) + var(--ds-collapsed-sidebar-titlebar-extra-inset)
+  );
+}
+
 .ds-workflow-canvas {
   --xy-background-color: var(--ds-bg-main);
   --xy-background-pattern-color: var(--ds-border-muted, var(--ds-border));

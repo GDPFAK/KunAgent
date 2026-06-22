@@ -1,6 +1,7 @@
 import {
   DEFAULT_SCHEDULE_INTERNAL_PORT,
   DEFAULT_SCHEDULE_MODEL,
+  MIN_KUN_LOCAL_PORT,
   type ScheduleSettingsPatchV1,
   type ScheduleSettingsV1,
   type ScheduledTaskV1
@@ -21,6 +22,11 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
+function normalizeScheduleInternalPort(value: unknown, fallback: number): number {
+  if (value === 8788) return DEFAULT_SCHEDULE_INTERNAL_PORT
+  return normalizePositiveInteger(value, fallback, MIN_KUN_LOCAL_PORT, 65_535)
+}
+
 export function normalizeScheduledTask(
   task: Partial<ScheduledTaskV1>,
   index: number,
@@ -39,6 +45,9 @@ export function normalizeScheduledTask(
     model,
     reasoningEffort: normalizeScheduleReasoningEffort(task.reasoningEffort),
     mode: normalizeRunMode(task.mode),
+    priority: normalizePositiveInteger(task.priority, 0, 0, 100),
+    dependsOn: compactStrings(task.dependsOn).filter((id) => id !== task.id),
+    useWorktree: normalizeBoolean(task.useWorktree, false),
     schedule: {
       kind: normalizeScheduleKind(schedule?.kind),
       everyMinutes: normalizePositiveInteger(schedule?.everyMinutes, 60, 1, 10_080),
@@ -100,7 +109,7 @@ export function normalizeScheduleSettings(
     },
     keepAwake: normalizeBoolean(source.keepAwake, defaults.keepAwake),
     internal: {
-      port: normalizePositiveInteger(internal.port, defaults.internal.port, 1024, 65_535),
+      port: normalizeScheduleInternalPort(internal.port, defaults.internal.port),
       secret: typeof internal.secret === 'string' ? internal.secret.trim() : ''
     },
     tasks: Array.isArray(source.tasks)
