@@ -1,14 +1,33 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from 'react'
+import { createPortal } from 'react-dom'
 import { AlertCircle, Check, ChevronDown, GitBranch, Loader2, Plus, Search } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import type { GitBranchesResult } from '@shared/git-branches'
 import { getProvider } from '../../agent/registry'
+import { middleEllipsize } from '../../lib/middle-ellipsize'
 import { markThreadWorktree, saveThreadWorktreeRegistry } from '../../lib/thread-worktree-registry'
 import { useChatStore } from '../../store/chat-store'
 import { rememberCodeWorkspaceRoots } from '../../store/chat-store-helpers'
 
+const BRANCH_ROW_LABEL_MAX_LENGTH = 42
+const BRANCH_TRIGGER_LABEL_MAX_LENGTH = 32
+const BRANCH_FOOTER_LABEL_MAX_LENGTH = 34
+
 type Props = {
   workspaceRoot: string
+}
+
+type BranchTooltip = {
+  text: string
+  x: number
+  y: number
+}
+
+function branchTooltipPosition(clientX: number, clientY: number): { x: number; y: number } {
+  const width = Math.min(544, Math.max(0, window.innerWidth - 32))
+  const x = Math.max(16, Math.min(clientX + 12, window.innerWidth - width - 16))
+  const y = Math.max(16, Math.min(clientY + 14, window.innerHeight - 96))
+  return { x, y }
 }
 
 export function GitBranchPicker({ workspaceRoot }: Props): ReactElement | null {
@@ -20,6 +39,7 @@ export function GitBranchPicker({ workspaceRoot }: Props): ReactElement | null {
   const [loading, setLoading] = useState(false)
   const [actingBranch, setActingBranch] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [tooltip, setTooltip] = useState<BranchTooltip | null>(null)
   const wrapRef = useRef<HTMLDivElement | null>(null)
   const inputRef = useRef<HTMLInputElement | null>(null)
 
@@ -67,6 +87,10 @@ export function GitBranchPicker({ workspaceRoot }: Props): ReactElement | null {
     return () => window.removeEventListener('pointerdown', onPointerDown)
   }, [open])
 
+  useEffect(() => {
+    if (!open) setTooltip(null)
+  }, [open])
+
   const branches = useMemo(() => (result?.ok ? result.branches : []), [result])
   const filteredBranches = useMemo(() => {
     const q = query.trim().toLowerCase()
@@ -88,6 +112,28 @@ export function GitBranchPicker({ workspaceRoot }: Props): ReactElement | null {
   const canRunFooterAction = canCreate || canCheckoutWorktree
   const currentBranch = result?.ok ? result.currentBranch : null
   const label = currentBranch || (result?.ok ? t('gitDetached') : t('gitBranchUnavailable'))
+  const footerBranch = canCreate ? trimmedQuery : selectedWorktreeBranch
+  const footerBranchLabel = middleEllipsize(footerBranch, BRANCH_FOOTER_LABEL_MAX_LENGTH)
+  const footerActionLabel = canCreate
+    ? t('gitCreateNamedBranch', { branch: footerBranchLabel })
+    : selectedWorktreeBranch
+      ? t('gitCheckoutNamedBranchWorktree', { branch: footerBranchLabel })
+      : t('gitCreateBranch')
+  const footerActionTitle = canCreate
+    ? t('gitCreateNamedBranch', { branch: trimmedQuery })
+    : selectedWorktreeBranch
+      ? t('gitCheckoutNamedBranchWorktree', { branch: selectedWorktreeBranch })
+      : t('gitCreateBranch')
+  const showTooltip = useCallback((text: string, clientX: number, clientY: number): void => {
+    if (!text.trim()) return
+    setTooltip({ text, ...branchTooltipPosition(clientX, clientY) })
+  }, [])
+  const moveTooltip = useCallback((clientX: number, clientY: number): void => {
+    setTooltip((current) => current ? { ...current, ...branchTooltipPosition(clientX, clientY) } : current)
+  }, [])
+  const hideTooltip = useCallback((): void => {
+    setTooltip(null)
+  }, [])
 
   const moveActiveThreadToWorktree = async (record: {
     projectPath: string
@@ -175,10 +221,10 @@ export function GitBranchPicker({ workspaceRoot }: Props): ReactElement | null {
         type="button"
         className="flex h-8 max-w-[320px] min-w-0 items-center gap-2 rounded-lg px-2 text-[14px] font-medium text-ds-muted transition hover:bg-ds-hover hover:text-ds-ink"
         onClick={() => setOpen((v) => !v)}
-        title={t('gitBranch')}
+        aria-label={label}
       >
         <GitBranch className="h-4 w-4 shrink-0" strokeWidth={1.8} />
-        <span className="min-w-0 truncate">{label}</span>
+        <span className="min-w-0 truncate">{middleEllipsize(label, BRANCH_TRIGGER_LABEL_MAX_LENGTH)}</span>
         {loading ? (
           <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-ds-faint" strokeWidth={2} />
         ) : (
@@ -239,10 +285,17 @@ export function GitBranchPicker({ workspaceRoot }: Props): ReactElement | null {
                 className="flex w-full items-start gap-3 rounded-lg px-1 py-2.5 text-left text-ds-ink transition hover:bg-ds-hover"
                 onClick={() => void checkoutBranchWorktree(branch.name)}
                 disabled={actingBranch != null}
+                aria-label={branch.name}
+                onPointerEnter={(event) => showTooltip(branch.name, event.clientX, event.clientY)}
+                onPointerMove={(event) => moveTooltip(event.clientX, event.clientY)}
+                onPointerLeave={hideTooltip}
+                onPointerCancel={hideTooltip}
               >
                 <GitBranch className="mt-0.5 h-4 w-4 shrink-0 text-ds-faint" strokeWidth={1.8} />
                 <span className="min-w-0 flex-1">
-                  <span className="block truncate text-[15px] font-medium">{branch.name}</span>
+                  <span className="block truncate text-[15px] font-medium">
+                    {middleEllipsize(branch.name, BRANCH_ROW_LABEL_MAX_LENGTH)}
+                  </span>
                   {branch.current && result?.ok && result.dirtyCount > 0 ? (
                     <span className="mt-0.5 block text-[12px] text-ds-faint">
                       {t('gitDirtyFiles', { count: result.dirtyCount })}
@@ -267,7 +320,13 @@ export function GitBranchPicker({ workspaceRoot }: Props): ReactElement | null {
               type="button"
               disabled={!canRunFooterAction || actingBranch != null}
               className="flex w-full items-center gap-3 rounded-lg px-1 py-2 text-left text-[14px] font-medium text-ds-ink transition hover:bg-ds-hover disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:bg-transparent"
+              aria-label={footerActionTitle}
+              onPointerEnter={(event) => showTooltip(footerActionTitle, event.clientX, event.clientY)}
+              onPointerMove={(event) => moveTooltip(event.clientX, event.clientY)}
+              onPointerLeave={hideTooltip}
+              onPointerCancel={hideTooltip}
               onClick={() => {
+                hideTooltip()
                 if (canCreate) {
                   void createBranch()
                 } else {
@@ -281,15 +340,20 @@ export function GitBranchPicker({ workspaceRoot }: Props): ReactElement | null {
                 <Plus className="h-4 w-4 shrink-0 text-ds-muted" strokeWidth={1.9} />
               )}
               <span className="min-w-0 truncate">
-                {canCreate
-                  ? t('gitCreateNamedBranch', { branch: trimmedQuery })
-                  : selectedWorktreeBranch
-                    ? t('gitCheckoutNamedBranchWorktree', { branch: selectedWorktreeBranch })
-                    : t('gitCreateBranch')}
+                {footerActionLabel}
               </span>
             </button>
           </div>
         </div>
+      ) : null}
+      {tooltip ? createPortal(
+        <div
+          className="pointer-events-none fixed z-[9999] max-w-[min(34rem,calc(100vw-2rem))] break-all rounded-lg border border-ds-border bg-ds-elevated px-2.5 py-1.5 text-[12px] font-medium leading-5 text-ds-ink shadow-[0_14px_36px_rgba(15,23,42,0.22)]"
+          style={{ left: tooltip.x, top: tooltip.y }}
+        >
+          {tooltip.text}
+        </div>,
+        document.body
       ) : null}
     </div>
   )
