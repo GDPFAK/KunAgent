@@ -1240,6 +1240,14 @@ export function Workbench(): ReactElement {
     runtimeInfo?.capabilities.web.fetch.available === true ||
     runtimeInfo?.capabilities.web.search.available === true
 
+  useEffect(() => {
+    setAttachmentUploadError((prev) => {
+      if (prev !== t('composerAttachmentModelUnsupported')) return prev
+      if (composerAttachments.length === 0 || selectedModelSupportsImageInput) return null
+      return prev
+    })
+  }, [composerAttachments.length, selectedModelSupportsImageInput, t])
+
   const clearComposerAttachments = (): void => {
     setComposerAttachments([])
     canvasAutoAttachIdRef.current = null
