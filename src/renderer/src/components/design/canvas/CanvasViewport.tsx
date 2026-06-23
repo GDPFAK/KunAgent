@@ -22,7 +22,11 @@ import type { DesignArtifact } from '../../../design/design-types'
 import type { DesignHtmlElementContext } from '../../../design/design-composer-context'
 import { useDesignWorkspaceStore } from '../../../design/design-workspace-store'
 import { CanvasWorkspaceContext } from '../../../design/canvas/canvas-workspace-context'
-import { handleCanvasKeyDown, handleCanvasKeyUp } from '../../../design/canvas/canvas-shortcuts'
+import {
+  handleCanvasKeyDown,
+  handleCanvasKeyUp,
+  setCanvasPasteWorkspaceRoot
+} from '../../../design/canvas/canvas-shortcuts'
 import { hitTest } from '../../../design/canvas/canvas-hit-test'
 import { ShapeDispatcher } from './shapes/ShapeDispatcher'
 import { CanvasGrid } from './CanvasGrid'
@@ -280,6 +284,7 @@ export function CanvasViewport({
   }, [])
 
   useEffect(() => {
+    setCanvasPasteWorkspaceRoot(workspaceRoot || null)
     const onKeyDown = (e: KeyboardEvent): void => {
       handleCanvasKeyDown(e)
     }
@@ -289,10 +294,11 @@ export function CanvasViewport({
     window.addEventListener('keydown', onKeyDown)
     window.addEventListener('keyup', onKeyUp)
     return () => {
+      setCanvasPasteWorkspaceRoot(null)
       window.removeEventListener('keydown', onKeyDown)
       window.removeEventListener('keyup', onKeyUp)
     }
-  }, [])
+  }, [workspaceRoot])
 
   const viewBoxStr = `${vbox.x} ${vbox.y} ${vbox.width} ${vbox.height}`
   const cursor = activeTool === 'hand' ? 'grab' : tool.cursor

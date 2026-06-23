@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import { buildDesignTurnPrompt } from './design-turn-prompt'
+import { buildCodeCanvasTurnPrompt, buildDesignTurnPrompt } from './design-turn-prompt'
 import type { ScreenTurnOptions } from './design-turn-prompt'
+import { snapshotCanvas } from './canvas/canvas-snapshot'
+import { createDefaultShape, createEmptyDocument } from './canvas/canvas-types'
 
 describe('design turn prompt', () => {
   it('allows only the reserved HTML and companion design notes files for HTML turns', () => {
@@ -125,6 +127,97 @@ describe('design turn prompt', () => {
     expect(prompt).toContain('do not inline them wholesale')
     expect(prompt).toContain('Settings [html] → `.kun-design/board/settings/v1.html` (directory: `.kun-design/board/settings`)')
     expect(prompt).toContain('Hero [image] → `.deepseekgui-images/hero.png` (directory: `.deepseekgui-images`)')
+  })
+
+  it('canvas turn prompt instructs reference_image_paths when a selected image has imageUrl', () => {
+    const doc = createEmptyDocument()
+    const root = doc.objects[doc.rootId]
+    const img = createDefaultShape('image', 50, 60)
+    img.imageUrl = '.deepseekgui-images/old.png'
+    img.width = 200
+    img.height = 200
+    doc.objects[img.id] = { ...img, parentId: doc.rootId }
+    doc.objects[doc.rootId] = { ...root, children: [img.id] }
+    const canvasSnapshot = snapshotCanvas(doc, new Set([img.id]))
+
+    const prompt = buildDesignTurnPrompt({
+      target: 'canvas',
+      mode: 'text',
+      text: '把这张图改成夜晚风格',
+      artifactRelativePath: '.kun-design/board/canvas.json',
+      workspaceRoot: '/workspace',
+      canvasSnapshot
+    })
+
+    expect(prompt).toContain('reference_image_paths')
+    expect(prompt).toContain('Editing or restyling an EXISTING image')
+    expect(prompt).toContain('`imageUrl` for filled image shapes')
+    expect(prompt).toContain('.deepseekgui-images/old.png')
+    expect(prompt).toContain(
+      'Do NOT pass `reference_image_paths` when filling an empty `aiImageHolder`'
+    )
+  })
+
+  it('canvas turn prompt keeps empty holder rule intact (no imageUrl leaked, reference rule still gated)', () => {
+    const doc = createEmptyDocument()
+    const root = doc.objects[doc.rootId]
+    const empty = createDefaultShape('image', 0, 0)
+    doc.objects[empty.id] = { ...empty, parentId: doc.rootId }
+    doc.objects[doc.rootId] = { ...root, children: [empty.id] }
+    const canvasSnapshot = snapshotCanvas(doc, new Set([empty.id]))
+
+    const prompt = buildDesignTurnPrompt({
+      target: 'canvas',
+      mode: 'text',
+      text: 'Generate an image here',
+      artifactRelativePath: '.kun-design/board/canvas.json',
+      workspaceRoot: '/workspace',
+      canvasSnapshot
+    })
+
+    const snapshotBlockStart = prompt.indexOf('```json')
+    const snapshotBlockEnd = prompt.indexOf('```', snapshotBlockStart + 6)
+    const snapshotBlock = prompt.slice(snapshotBlockStart, snapshotBlockEnd)
+    expect(snapshotBlock).not.toContain('.deepseekgui-images/')
+
+    expect(prompt).toContain('selected EMPTY `image` holder')
+    expect(prompt).toContain('Editing or restyling an EXISTING image')
+    expect(prompt).toContain(
+      'Do NOT pass `reference_image_paths` when filling an empty `aiImageHolder`'
+    )
+  })
+
+  it('canvas turn prompt qualifies the selected-image-holder rule to empty holders only', () => {
+    const prompt = buildCodeCanvasTurnPrompt({ workspaceRoot: '/ws' })
+    expect(prompt).toContain('selected EMPTY `image` holder (no `imageUrl` field in the snapshot)')
+    expect(prompt).toContain('STOP — this is an EDIT, not a fill')
+    expect(prompt).not.toContain(
+      'selected `image` (or an `image` holder): `generate_image` with `aspect_ratio`'
+    )
+  })
+
+  it('canvas turn prompt routes frame/group containing one image child to the edit path', () => {
+    const prompt = buildCodeCanvasTurnPrompt({ workspaceRoot: '/ws' })
+    expect(prompt).toContain('Implicit target via container')
+    expect(prompt).toContain('EXACTLY ONE `image` child with an `imageUrl`')
+    expect(prompt).toContain('do NOT add a new image')
+  })
+
+  it('canvas turn prompt drops the unenforceable selection-order claim for multi-reference composition', () => {
+    const prompt = buildCodeCanvasTurnPrompt({ workspaceRoot: '/ws' })
+    expect(prompt).not.toContain('in selection order, capped at 4')
+    expect(prompt).toContain('treated symmetrically')
+    expect(prompt).toContain('order in the array is not load-bearing')
+  })
+
+  it('canvas turn prompt includes the verbatim-copy verification line for reference_image_paths', () => {
+    const prompt = buildCodeCanvasTurnPrompt({ workspaceRoot: '/ws' })
+    expect(prompt).toContain(
+      'Before constructing `reference_image_paths`, locate each target shape in the snapshot by its `id` and copy its `imageUrl` verbatim'
+    )
+    expect(prompt).toContain(
+      'do not guess or reconstruct a path from the shape name, position, or any other field'
+    )
   })
 
   it('tells the agent the canvas.json directory on a canvas turn', () => {

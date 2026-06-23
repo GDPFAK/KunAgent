@@ -154,6 +154,104 @@ describe('pasteClipboardImageToCanvas', () => {
     expect(useCanvasShapeStore.getState().getAllShapeIds()).toEqual([])
   })
 
+  it('persists bytes to .deepseekgui-images/ and stores the workspace-relative path', async () => {
+    const readClipboardImage = vi.fn().mockResolvedValue({
+      ok: true,
+      name: 'img-y',
+      localFilePath: '/ws/clipboard.png',
+      mimeType: 'image/png',
+      dataBase64: 'iVBORw0KGgo=',
+      byteSize: 8,
+      width: 800,
+      height: 600
+    })
+    const saveWorkspaceClipboardImage = vi.fn().mockResolvedValue({
+      ok: true,
+      path: '/ws/.deepseekgui-images/img-y.png',
+      markdownPath: '.deepseekgui-images/img-y.png',
+      createdAt: '2026-06-23T00:00:00.000Z'
+    })
+    vi.stubGlobal('window', {
+      kunGui: { readClipboardImage, saveWorkspaceClipboardImage }
+    })
+
+    const result = await pasteClipboardImageToCanvas({
+      vbox: { x: 0, y: 0, width: 800, height: 600 },
+      workspaceRoot: '/ws'
+    })
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(saveWorkspaceClipboardImage).toHaveBeenCalledWith(
+      expect.objectContaining({ workspaceRoot: '/ws' })
+    )
+    const shape = useCanvasShapeStore.getState().document.objects[result.shapeId]
+    expect(shape.imageUrl).toBe('.deepseekgui-images/img-y.png')
+    expect(shape.imageUrl?.startsWith('data:')).toBe(false)
+  })
+
+  it('does NOT use saved.markdownPath when the absolute path is missing or outside the workspace (would resolve outside workspace)', async () => {
+    const readClipboardImage = vi.fn().mockResolvedValue({
+      ok: true,
+      name: 'img-z',
+      localFilePath: '/ws/clipboard.png',
+      mimeType: 'image/png',
+      dataBase64: 'iVBORw0KGgo=',
+      byteSize: 8,
+      width: 800,
+      height: 600
+    })
+    // saved.path is null (or outside workspace) — only markdownPath is returned.
+    // markdownPath was computed relative to dirname(currentFilePath); since we
+    // pass workspaceRoot as currentFilePath, its dirname is the workspace's
+    // parent and the path would resolve OUTSIDE the workspace. We must fall
+    // back to the data: URL (snapshot safety-net strips it) rather than trust
+    // the wrongly-anchored markdownPath.
+    const saveWorkspaceClipboardImage = vi.fn().mockResolvedValue({
+      ok: true,
+      path: null,
+      markdownPath: 'ws/.deepseekgui-images/img-z.png',
+      createdAt: '2026-06-23T00:00:00.000Z'
+    })
+    vi.stubGlobal('window', {
+      kunGui: { readClipboardImage, saveWorkspaceClipboardImage }
+    })
+
+    const result = await pasteClipboardImageToCanvas({
+      vbox: { x: 0, y: 0, width: 800, height: 600 },
+      workspaceRoot: '/ws'
+    })
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    const shape = useCanvasShapeStore.getState().document.objects[result.shapeId]
+    expect(shape.imageUrl?.startsWith('data:image/png;base64,')).toBe(true)
+    expect(shape.imageUrl).not.toContain('ws/.deepseekgui-images/img-z.png')
+  })
+
+  it('falls back to data: URL when no workspaceRoot is provided (legacy unit-test path)', async () => {
+    const readClipboardImage = vi.fn().mockResolvedValue({
+      ok: true,
+      name: 'img-y',
+      localFilePath: '/tmp/clipboard.png',
+      mimeType: 'image/png',
+      dataBase64: 'iVBORw0KGgo=',
+      byteSize: 8,
+      width: 800,
+      height: 600
+    })
+    vi.stubGlobal('window', { kunGui: { readClipboardImage } })
+
+    const result = await pasteClipboardImageToCanvas({
+      vbox: { x: 0, y: 0, width: 800, height: 600 }
+    })
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    const shape = useCanvasShapeStore.getState().document.objects[result.shapeId]
+    expect(shape.imageUrl?.startsWith('data:image/png;base64,')).toBe(true)
+  })
+
   it('falls back to default name when clipboard image has no name', async () => {
     vi.stubGlobal('window', {
       kunGui: {

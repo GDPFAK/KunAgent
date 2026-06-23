@@ -47,8 +47,32 @@ export function computeImportedImagePlacement(
   }
 }
 
+/**
+ * Best-effort compute of a workspace-relative path from an absolute one without
+ * pulling node `path` into the renderer. Used as a fallback when the IPC
+ * response does not carry an explicit `workspaceRelativePath` field.
+ */
+function workspaceRelativeFromAbsolute(absolutePath: string, workspaceRoot: string): string | null {
+  if (!absolutePath || !workspaceRoot) return null
+  const normRoot = workspaceRoot.replace(/[\\/]+$/, '')
+  const normAbs = absolutePath.replace(/\\/g, '/')
+  const rootForward = normRoot.replace(/\\/g, '/')
+  if (normAbs.startsWith(rootForward + '/')) {
+    return normAbs.slice(rootForward.length + 1)
+  }
+  return null
+}
+
 export async function pasteClipboardImageToCanvas(options: {
   vbox: ViewBox
+  /**
+   * When provided, the pasted bytes are persisted to `.deepseekgui-images/` and
+   * the shape.imageUrl is the workspace-relative path. Without a workspace root
+   * we fall back to a data: URL (rendering-only). The snapshot layer is the
+   * second line of defense and will not emit a data: URL into the AI prompt.
+   */
+  workspaceRoot?: string
+  imageDirectory?: string
 }): Promise<CanvasImageImportResult> {
   if (typeof window.kunGui?.readClipboardImage !== 'function') {
     return { ok: false, message: 'Clipboard image reading is unavailable.' }
@@ -57,6 +81,34 @@ export async function pasteClipboardImageToCanvas(options: {
   const image = await window.kunGui.readClipboardImage()
   if (!image.ok) {
     return { ok: false, message: image.message }
+  }
+
+  // Prefer persisting to disk so shape.imageUrl is a workspace-relative path
+  // (parity with the file-picker flow). This is critical: the canvas snapshot
+  // emits imageUrl into the AI prompt, and a multi-MB data: URL would context-
+  // bomb the model or be passed verbatim into reference_image_paths.
+  let persistedRelativePath: string | null = null
+  const workspaceRoot = options.workspaceRoot?.trim()
+  if (workspaceRoot && typeof window.kunGui?.saveWorkspaceClipboardImage === 'function') {
+    try {
+      // saveWorkspaceClipboardImage needs a currentFilePath to anchor its
+      // markdownPath. We pass workspaceRoot itself; dirname(workspaceRoot) is
+      // the workspace's PARENT, so saved.markdownPath would resolve outside
+      // the workspace. Only use the workspace-anchored path derived from
+      // saved.path — if that fails, leave persistedRelativePath null so we
+      // fall back to the data: URL (the snapshot safety-net drops it before
+      // it reaches the AI).
+      const saved = await window.kunGui.saveWorkspaceClipboardImage({
+        workspaceRoot,
+        currentFilePath: workspaceRoot,
+        ...(options.imageDirectory ? { imageDirectory: options.imageDirectory } : {})
+      })
+      if (saved.ok && typeof saved.path === 'string') {
+        persistedRelativePath = workspaceRelativeFromAbsolute(saved.path, workspaceRoot)
+      }
+    } catch {
+      // fall through to data URL — snapshot safety-net will drop it before it reaches the AI
+    }
   }
 
   const dataUrl = `data:${image.mimeType};base64,${image.dataBase64}`
@@ -69,7 +121,7 @@ export async function pasteClipboardImageToCanvas(options: {
   shape.name = image.name || 'Pasted Image'
   shape.width = bounds.width
   shape.height = bounds.height
-  shape.imageUrl = dataUrl
+  shape.imageUrl = persistedRelativePath ?? dataUrl
 
   useCanvasShapeStore.getState().addShape(shape)
   useCanvasSelectionStore.getState().select([shape.id])

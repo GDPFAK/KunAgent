@@ -5,6 +5,17 @@ import { getSelectionBounds } from './canvas-hit-test'
 import { pasteClipboardImageToCanvas } from './canvas-image-import'
 import type { CanvasTool } from './canvas-types'
 
+/**
+ * Workspace root cached at attach time so the global keyboard handler can
+ * persist pasted images to disk without threading workspaceRoot through every
+ * key event. CanvasViewport sets/clears this when it mounts/unmounts the
+ * listener so we never paste against a stale workspace.
+ */
+let pasteWorkspaceRoot: string | null = null
+export function setCanvasPasteWorkspaceRoot(workspaceRoot: string | null): void {
+  pasteWorkspaceRoot = workspaceRoot && workspaceRoot.trim() ? workspaceRoot.trim() : null
+}
+
 const KEY_TO_TOOL: Record<string, CanvasTool> = {
   v: 'select',
   r: 'rect',
@@ -43,7 +54,10 @@ export function handleCanvasKeyDown(e: KeyboardEvent): boolean {
   if (meta && key === 'v') {
     e.preventDefault()
     const vbox = useCanvasViewportStore.getState().vbox
-    void pasteClipboardImageToCanvas({ vbox })
+    void pasteClipboardImageToCanvas({
+      vbox,
+      ...(pasteWorkspaceRoot ? { workspaceRoot: pasteWorkspaceRoot } : {})
+    })
     return true
   }
 

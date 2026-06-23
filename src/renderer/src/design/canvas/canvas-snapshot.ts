@@ -28,6 +28,15 @@ export type CanvasSnapshotShape = {
    * currently selected (auto-detected, so no manual marking is needed).
    */
   aiImageHolder?: boolean
+  /**
+   * Workspace-relative path of the picture already in this image shape
+   * (e.g. `.deepseekgui-images/img-….png`). Present only on `image` shapes
+   * that have been filled — empty image holders omit it. The agent passes
+   * this path back into `generate_image` as `reference_image_paths` when the
+   * user asks to edit/restyle/redo the existing picture.
+   */
+  imageUrl?: string
+
   /** Linear shapes only: vertices in ABSOLUTE canvas coords. */
   points?: Point[]
 }
@@ -55,8 +64,15 @@ export function snapshotCanvas(
       if (!s) continue
       const selected = selectedIds?.has(s.id) ?? false
       // A selected empty box is an implicit slot — the user shouldn't have to
-      // mark it for the agent to fill it on request.
-      const isHolder = Boolean(s.aiImageHolder) || (selected && isImplicitImageSlot(s))
+      // mark it for the agent to fill it on request. A selected image whose
+      // imageUrl is a data: URL is also effectively unreferenceable (the
+      // snapshot drops data: URLs to avoid base64 blowing the prompt), so we
+      // flag it as a holder too — otherwise the model would see neither
+      // imageUrl nor aiImageHolder and have no rule to follow.
+      const isUnreferenceableImage =
+        s.type === 'image' && typeof s.imageUrl === 'string' && s.imageUrl.startsWith('data:')
+      const isHolder =
+        Boolean(s.aiImageHolder) || (selected && (isImplicitImageSlot(s) || isUnreferenceableImage))
       shapes.push({
         id: s.id,
         name: s.name,
@@ -69,6 +85,7 @@ export function snapshotCanvas(
         parentName,
         ...(s.textContent ? { textContent: s.textContent.slice(0, 120) } : {}),
         ...(s.htmlArtifactId ? { htmlArtifactId: s.htmlArtifactId } : {}),
+        ...(s.imageUrl && !s.imageUrl.startsWith('data:') ? { imageUrl: s.imageUrl } : {}),
         ...(selected ? { selected: true } : {}),
         ...(isHolder ? { aiImageHolder: true } : {}),
         ...(s.points && s.points.length > 0
