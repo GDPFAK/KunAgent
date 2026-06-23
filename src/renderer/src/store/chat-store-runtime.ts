@@ -695,11 +695,21 @@ export function buildThreadEventSink(
         }
         let liveReasoning = s.liveReasoning
         let liveAssistant = s.liveAssistant
+        // Shared, cross-sink replay guard — see ChatState.liveDeltaSeqFloor.
+        // The per-sink `appliedDeltaSeqFloor` above only dedups within one
+        // subscription; while a flaky long turn briefly has more than one sink
+        // live, each independently re-applies the same replayed deltas. Gating
+        // on the store floor serializes them so each seq folds in just once.
+        let liveDeltaSeqFloor = s.liveDeltaSeqFloor
         let nextReasoningFirstAtByUserId = s.turnReasoningFirstAtByUserId
         let nextReasoningLastAtByUserId = s.turnReasoningLastAtByUserId
         const userId = s.currentTurnUserId
         let sawReasoning = false
         for (const delta of deltas) {
+          if (typeof delta.seq === 'number') {
+            if (delta.seq <= liveDeltaSeqFloor) continue
+            liveDeltaSeqFloor = delta.seq
+          }
           if (delta.kind === 'agent_reasoning') {
             liveReasoning += delta.text
             sawReasoning = true
@@ -719,6 +729,7 @@ export function buildThreadEventSink(
           ...base,
           ...(liveReasoning !== s.liveReasoning ? { liveReasoning } : {}),
           ...(liveAssistant !== s.liveAssistant ? { liveAssistant } : {}),
+          ...(liveDeltaSeqFloor !== s.liveDeltaSeqFloor ? { liveDeltaSeqFloor } : {}),
           ...(nextReasoningFirstAtByUserId !== s.turnReasoningFirstAtByUserId
             ? { turnReasoningFirstAtByUserId: nextReasoningFirstAtByUserId }
             : {}),

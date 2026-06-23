@@ -131,6 +131,53 @@ describe('thread event sink binding', () => {
     expect(getState().liveAssistant).toBe('hello world')
   })
 
+  it('serializes overlapping replays across concurrent sinks so live text is not duplicated', () => {
+    // Repro for the design-rail duplicate-text bug: a long, flaky turn can
+    // briefly leave two sinks live at once. Their per-sink floors are
+    // independent, so each re-appends the same replayed deltas. The shared
+    // store-level floor serializes them — each seq folds in at most once.
+    const { getState, set, get } = makeSinkHarness({
+      activeThreadId: 'thread-current',
+      lastSeq: 100,
+      liveDeltaSeqFloor: 100
+    })
+    const sinkA = buildThreadEventSink(set, get, { threadId: 'thread-current', sinceSeq: 100 })
+    const sinkB = buildThreadEventSink(set, get, { threadId: 'thread-current', sinceSeq: 100 })
+
+    sinkA.onDeltas([
+      { kind: 'agent_message', text: 'alpha', seq: 101 },
+      { kind: 'agent_message', text: 'beta', seq: 102 }
+    ])
+    // sinkB replays the very same persisted deltas. Its own closure floor is
+    // back at 100, so without the shared floor it would re-append them.
+    sinkB.onDeltas([
+      { kind: 'agent_message', text: 'alpha', seq: 101 },
+      { kind: 'agent_message', text: 'beta', seq: 102 }
+    ])
+
+    expect(getState().liveAssistant).toBe('alphabeta')
+    expect(getState().liveDeltaSeqFloor).toBe(102)
+  })
+
+  it('re-baselining the shared floor lets a new subscription apply lower seqs', () => {
+    // A thread switch resets liveDeltaSeqFloor to the new (per-thread) since_seq.
+    // Because seqs are per-thread, the shared floor must not strand the new
+    // thread's low seqs.
+    const { getState, set, get } = makeSinkHarness({
+      activeThreadId: 'thread-current',
+      liveDeltaSeqFloor: 0
+    })
+    const sink = buildThreadEventSink(set, get, { threadId: 'thread-current', sinceSeq: 0 })
+
+    sink.onDeltas([
+      { kind: 'agent_message', text: 'first', seq: 1 },
+      { kind: 'agent_message', text: ' second', seq: 2 }
+    ])
+
+    expect(getState().liveAssistant).toBe('first second')
+    expect(getState().liveDeltaSeqFloor).toBe(2)
+  })
+
   it('never rewinds lastSeq when a stale heartbeat seq arrives', () => {
     const { getState, set, get } = makeSinkHarness({ activeThreadId: 'thread-current', lastSeq: 500 })
     const sink = buildThreadEventSink(set, get, { threadId: 'thread-current' })

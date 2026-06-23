@@ -156,6 +156,21 @@ export type ChatState = {
   liveReasoning: string
   liveAssistant: string
   lastSeq: number
+  /**
+   * Highest delta `seq` (per-thread, monotonic) already folded into the live
+   * buffers. Unlike the per-sink `appliedDeltaSeqFloor` closure — which only
+   * dedups within ONE subscription — this lives in the store and is shared
+   * across every sink. When a long, tool-heavy turn loses its SSE stream and
+   * more than one sink is briefly live (recovery / re-subscribe), the per-sink
+   * floors are independent and each re-appends the same replayed deltas; the
+   * shared floor serializes them so a given seq folds into `liveAssistant` at
+   * most once. Reset to the new subscription's `sinceSeq` in lockstep with
+   * every `liveAssistant` reset (send / select / recover / live / clear) — and
+   * because seqs are per-thread, the reset is what keeps a thread switch from
+   * dropping the new thread's low seqs. A genuine new delta always has seq >
+   * sinceSeq, so this never drops live text.
+   */
+  liveDeltaSeqFloor: number
   usageRefreshKey: number
   /**
    * Latest turn's usage snapshot, tagged with the thread it belongs to. Used by
