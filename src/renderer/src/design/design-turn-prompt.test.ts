@@ -158,6 +158,41 @@ describe('design turn prompt', () => {
     )
   })
 
+  it('steers a selected filled image + change verb to image editing, not a new HTML screen', () => {
+    const doc = createEmptyDocument()
+    const root = doc.objects[doc.rootId]
+    const img = createDefaultShape('image', 50, 60)
+    img.imageUrl = '.deepseekgui-images/shot.png'
+    img.width = 1280
+    img.height = 800
+    doc.objects[img.id] = { ...img, parentId: doc.rootId }
+    doc.objects[doc.rootId] = { ...root, children: [img.id] }
+    const canvasSnapshot = snapshotCanvas(doc, new Set([img.id]))
+
+    // The user's real phrasing: ambiguous "把我的设计改成task" with the screenshot
+    // selected. It must edit the image, not emit add-screen and build HTML.
+    const prompt = buildDesignTurnPrompt({
+      target: 'canvas',
+      mode: 'text',
+      text: '把我的设计改成task',
+      artifactRelativePath: '.kun-design/board/canvas.json',
+      workspaceRoot: '/workspace',
+      canvasSnapshot
+    })
+
+    // The intent-triage lanes are hoisted ABOVE the add-screen vocabulary so the
+    // model commits to the image-edit lane before add-screen can pre-empt it.
+    const lanesAt = prompt.indexOf('FIRST classify the request')
+    const addScreenAt = prompt.indexOf('"op": "add-screen"')
+    expect(lanesAt).toBeGreaterThanOrEqual(0)
+    expect(addScreenAt).toBeGreaterThan(lanesAt)
+
+    expect(prompt).toContain('EDIT AN EXISTING IMAGE')
+    expect(prompt).toContain('MUST NOT use `add-screen`')
+    expect(prompt).toContain('把这张图改成…')
+    expect(prompt).toContain('do NOT `add-screen` — edit that image instead')
+  })
+
   it('canvas turn prompt keeps empty holder rule intact (no imageUrl leaked, reference rule still gated)', () => {
     const doc = createEmptyDocument()
     const root = doc.objects[doc.rootId]
