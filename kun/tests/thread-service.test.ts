@@ -221,6 +221,21 @@ describe('ThreadService.fork with side relation', () => {
     expect(fork.title).toBe('Forker fork')
   })
 
+  it('forks a plan-mode thread as a fresh agent conversation', async () => {
+    const { service } = buildService()
+    await service.create(
+      { workspace: '/tmp/p', model: 'deepseek-chat', mode: 'plan' },
+      { id: 'thr_plan', title: 'Planner' }
+    )
+    // A fork must NOT inherit plan mode, or a forked "new conversation" runs as
+    // a plan turn bound to a stale plan context (workspace mismatch + malformed
+    // plan-mode model requests). It starts a fresh agent conversation instead.
+    const fork = await service.fork('thr_plan')
+    expect(fork.mode).toBe('agent')
+    const side = await service.fork('thr_plan', { relation: 'side' })
+    expect(side.mode).toBe('agent')
+  })
+
   it('forks history through a requested turn only', async () => {
     const { service, sessionStore, threadStore, nowIso } = buildService()
     await seedParentWithTurns(service, threadStore, sessionStore, nowIso, {

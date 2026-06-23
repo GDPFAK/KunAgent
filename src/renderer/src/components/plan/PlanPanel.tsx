@@ -115,13 +115,24 @@ export function PlanPanel({
   useEffect(() => {
     const normalizedWorkspace = normalizeWorkspaceRoot(workspaceRoot)
     if (!normalizedWorkspace) {
-      if (activePlan) clearActivePlan()
+      if (activePlan) {
+        console.warn('[PlanPanel] clearing plan — workspace empty', { workspaceRoot, activePlan })
+        clearActivePlan()
+      }
       return
     }
     if (activePlan && guiPlanMatchesContext(activePlan, normalizedWorkspace, activeThreadId)) return
     const remembered = readRememberedGuiPlan(normalizedWorkspace, activeThreadId)
     if (!remembered) {
-      if (activePlan) clearActivePlan()
+      if (activePlan) {
+        console.warn('[PlanPanel] clearing plan — no match and no remembered', {
+          normalizedWorkspace,
+          activeThreadId,
+          planWorkspace: activePlan.workspaceRoot,
+          planThreadId: activePlan.threadId,
+        })
+        clearActivePlan()
+      }
       return
     }
     let cancelled = false

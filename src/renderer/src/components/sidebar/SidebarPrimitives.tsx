@@ -276,6 +276,9 @@ type SidebarTreeRowProps = {
   ariaLabel?: string
   onContextMenu?: (event: ReactMouseEvent<HTMLDivElement>) => void
   onDoubleClick?: () => void
+  onMouseEnter?: (event: ReactMouseEvent<HTMLDivElement>) => void
+  onMouseMove?: (event: ReactMouseEvent<HTMLDivElement>) => void
+  onMouseLeave?: (event: ReactMouseEvent<HTMLDivElement>) => void
   disabled?: boolean
   active?: boolean
   activeVariant?: 'rail' | 'outline'
@@ -295,6 +298,9 @@ export function SidebarTreeRow({
   ariaLabel,
   onContextMenu,
   onDoubleClick,
+  onMouseEnter,
+  onMouseMove,
+  onMouseLeave,
   disabled,
   active = false,
   activeVariant = 'rail',
@@ -337,6 +343,9 @@ export function SidebarTreeRow({
       )}
       title={title}
       onContextMenu={onContextMenu}
+      onMouseEnter={onMouseEnter}
+      onMouseMove={onMouseMove}
+      onMouseLeave={onMouseLeave}
     >
       {rail ? (
         <span

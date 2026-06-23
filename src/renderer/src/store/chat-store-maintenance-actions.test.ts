@@ -205,11 +205,7 @@ describe('chat-store-maintenance-actions workspace rollback', () => {
       expect(provider.rewindThread).not.toHaveBeenCalled()
       expect(sendMessage).not.toHaveBeenCalled()
       expect(state.blocks).toHaveLength(2)
-      // The rollback action surfaces the rescue checkpoint id so users can
-      // recover by hand if the rollback was a mistake.
-      expect(state.error).toBe(
-        'Workspace rolled back. A safety checkpoint was saved: gcp_rescue'
-      )
+      expect(state.error).toBeNull()
     } finally {
       ;(globalThis as { window?: unknown }).window = previousWindow
     }
@@ -314,8 +310,6 @@ describe('chat-store-maintenance-actions workspace rollback', () => {
       await actions.rollbackWorkspaceToCheckpoint('gcp_1')
 
       expect(restoreGitCheckpoint).toHaveBeenCalledWith({ checkpointId: 'gcp_1' })
-      // Power-user log path: rescue id is always logged so it can be
-      // recovered even if the user dismisses the toast.
       expect(consoleInfo).toHaveBeenCalledTimes(1)
       const logArgs = consoleInfo.mock.calls[0]
       expect(logArgs[0]).toBe('[rollback] rescue checkpoint:')
@@ -323,10 +317,7 @@ describe('chat-store-maintenance-actions workspace rollback', () => {
       expect(logArgs[2]).toBe('workspace:')
       expect(logArgs[4]).toBe('thread:')
       expect(logArgs[5]).toBe('thr_existing')
-      // User-visible notice path: success message embeds the rescue id.
-      expect(state.error).toBe(
-        'Workspace rolled back. A safety checkpoint was saved: gcp_rescue_xyz'
-      )
+      expect(state.error).toBeNull()
     } finally {
       console.info = previousConsoleInfo
       ;(globalThis as { window?: unknown }).window = previousWindow

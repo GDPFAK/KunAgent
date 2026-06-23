@@ -143,6 +143,7 @@ export class ThreadService {
     status?: ThreadStatus
     approvalPolicy?: ApprovalPolicy
     sandboxMode?: SandboxMode
+    pinned?: boolean
     costBudgetUsd?: number | null
     costBudgetWarningSent?: boolean
     relation?: ThreadRelation
@@ -392,7 +393,14 @@ export class ThreadService {
       title: options.title?.trim() || defaultTitle,
       workspace: current.workspace,
       model: current.model,
-      mode: current.mode,
+      // A fork is a fresh conversation branch, not a continuation of the
+      // parent's plan workflow — the plan artifact and its workspace belong to
+      // the source thread. Inheriting `mode: 'plan'` made a forked "new
+      // conversation" run as a plan turn bound to a stale plan context, which
+      // hard-failed create_plan (workspace mismatch) and produced malformed
+      // plan-mode model requests. Default forks to agent; the user can re-enter
+      // plan mode in the fork if they want a fresh plan.
+      mode: 'agent',
       status: 'idle',
       approvalPolicy: current.approvalPolicy,
       sandboxMode: current.sandboxMode,

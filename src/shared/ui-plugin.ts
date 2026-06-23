@@ -264,8 +264,25 @@ export function normalizeUiPluginManifest(raw: unknown): UiPluginValidationResul
 }
 
 /**
+ * 这些容器会在 dark 下的嵌套作用域里整体重声明 palette token
+ * (base-shell.css 的 `[data-theme='dark'] .ds-workbench-shell`),从而遮蔽
+ * 注入在 <html> 上的插件 token —— 这正是对话区(Workbench)在 dark 下不吃
+ * 插件配色的根因。对应 iKun 既有的
+ * `[data-theme='dark'][data-ikun-mode='on'] .ds-workbench-shell` 处理。
+ * '' = <html> 根自身;日后若有新容器整体重声明 token,在此追加后缀即可。
+ */
+const TOKEN_SCOPE_ROOTS = ['', ' .ds-workbench-shell'] as const
+
+/** 把单一锚点扩成「根 + 各重声明子作用域」的逗号选择器列表 */
+function scopedSelector(base: string): string {
+  return TOKEN_SCOPE_ROOTS.map((suffix) => `${base}${suffix}`).join(',\n')
+}
+
+/**
  * 生成插件 token 的样式文本。选择器锚定 html[data-ui-plugin='<id>'],
  * light 块用 :not([data-theme='dark']) 守卫,避免在暗色下错误覆盖。
+ * 选择器同时覆盖 .ds-workbench-shell 子作用域,确保对话区(dark 下会就地
+ * 重声明 palette token)也能采纳插件 token。
  */
 export function buildUiPluginTokenCss(manifest: UiPluginManifestV1): string {
   const blocks: string[] = []
@@ -273,11 +290,13 @@ export function buildUiPluginTokenCss(manifest: UiPluginManifestV1): string {
   const darkEntries = Object.entries(manifest.tokens?.dark ?? {})
   if (lightEntries.length > 0) {
     const body = lightEntries.map(([key, value]) => `  ${key}: ${value};`).join('\n')
-    blocks.push(`html[data-ui-plugin='${manifest.id}']:not([data-theme='dark']) {\n${body}\n}`)
+    const selector = scopedSelector(`html[data-ui-plugin='${manifest.id}']:not([data-theme='dark'])`)
+    blocks.push(`${selector} {\n${body}\n}`)
   }
   if (darkEntries.length > 0) {
     const body = darkEntries.map(([key, value]) => `  ${key}: ${value};`).join('\n')
-    blocks.push(`html[data-ui-plugin='${manifest.id}'][data-theme='dark'] {\n${body}\n}`)
+    const selector = scopedSelector(`html[data-ui-plugin='${manifest.id}'][data-theme='dark']`)
+    blocks.push(`${selector} {\n${body}\n}`)
   }
   return blocks.join('\n\n')
 }

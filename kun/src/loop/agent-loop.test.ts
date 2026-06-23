@@ -2,6 +2,7 @@ import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import {
   buildRuntimeContextInstruction,
+  isStalePlanContext,
   resolvePlanModeToolSpecs,
   shouldInjectInitialRuntimeContext
 } from './agent-loop.js'
@@ -34,6 +35,24 @@ const ALL_TOOLS: ModelToolSpec[] = [
 const READ_ONLY_TOOLS = new Set([
   'read', 'ls', 'find', 'grep', 'web_search', 'web_fetch'
 ])
+
+describe('isStalePlanContext', () => {
+  it('treats a workspace-mismatched plan context as stale (the fork bug)', () => {
+    // A fork keeps the source thread's workspace; a plan context pointing at a
+    // different workspace must be ignored, not passed to create_plan.
+    expect(isStalePlanContext({ workspaceRoot: '/work/a' }, '/work/b')).toBe(true)
+  })
+
+  it('keeps a matching plan context (normalizing trailing slash / case)', () => {
+    expect(isStalePlanContext({ workspaceRoot: '/work/a' }, '/work/a')).toBe(false)
+    expect(isStalePlanContext({ workspaceRoot: '/work/a/' }, '/work/a')).toBe(false)
+    expect(isStalePlanContext({ workspaceRoot: '/Work/A' }, '/work/a')).toBe(false)
+  })
+
+  it('is not stale when there is no plan context', () => {
+    expect(isStalePlanContext(undefined, '/work/a')).toBe(false)
+  })
+})
 
 describe('resolvePlanModeToolSpecs', () => {
   it('step 0: read-only tools + create_plan only', () => {
@@ -129,6 +148,51 @@ describe('resolvePlanModeToolSpecs', () => {
     expect(names).toContain('custom-plan')
     expect(names).not.toContain('write')
     expect(names).not.toContain('bash')
+  })
+
+  const WITH_INPUT_TOOLS: ModelToolSpec[] = [
+    spec('read'),
+    spec('write'),
+    spec('create_plan'),
+    spec('user_input'),
+    spec('request_user_input')
+  ]
+
+  it('step 0: allows the structured user-input tools (so plan turns can ask)', () => {
+    const result = resolvePlanModeToolSpecs(WITH_INPUT_TOOLS, {
+      planTurnActive: true,
+      createPlanSatisfied: false,
+      stepIndex: 0,
+      readOnlyToolNames: READ_ONLY_TOOLS
+    })
+    const names = result.map((t) => t.name)
+    expect(names).toContain('user_input')
+    expect(names).toContain('request_user_input')
+    expect(names).toContain('create_plan')
+    expect(names).not.toContain('write')
+  })
+
+  it('step > 0: drops the user-input tools, leaving only create_plan', () => {
+    const result = resolvePlanModeToolSpecs(WITH_INPUT_TOOLS, {
+      planTurnActive: true,
+      createPlanSatisfied: false,
+      stepIndex: 1,
+      readOnlyToolNames: READ_ONLY_TOOLS
+    })
+    expect(result.map((t) => t.name)).toEqual(['create_plan'])
+  })
+
+  it('custom interactiveToolNames overrides the default user-input set', () => {
+    const result = resolvePlanModeToolSpecs(WITH_INPUT_TOOLS, {
+      planTurnActive: true,
+      createPlanSatisfied: false,
+      stepIndex: 0,
+      readOnlyToolNames: READ_ONLY_TOOLS,
+      interactiveToolNames: new Set(['user_input'])
+    })
+    const names = result.map((t) => t.name)
+    expect(names).toContain('user_input')
+    expect(names).not.toContain('request_user_input')
   })
 })
 

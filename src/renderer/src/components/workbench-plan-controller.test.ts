@@ -3,7 +3,8 @@ import { createGuiPlanArtifact } from '../plan/plan-store'
 import {
   buildDraftGuiPlanTurnOverrides,
   buildGuiPlanTurnOverrides,
-  resolvePlanTurnWorkspaceRoot
+  resolvePlanTurnWorkspaceRoot,
+  shouldAutoOpenPlanPanel
 } from './workbench-plan-controller'
 
 describe('workbench plan controller helpers', () => {
@@ -36,6 +37,16 @@ describe('workbench plan controller helpers', () => {
     })
     expect(buildGuiPlanTurnOverrides(plan, '/Users/codex/app', 'thread-stale')).toBeUndefined()
     expect(buildGuiPlanTurnOverrides(plan, '/Users/codex/other', 'thread-current')).toBeUndefined()
+  })
+
+  it('auto-opens the plan panel only for a plan generated in the active thread', () => {
+    // Freshly generated in the active thread → open.
+    expect(shouldAutoOpenPlanPanel('thread-a', 'thread-a')).toBe(true)
+    // Plan turn started in thread A, but we switched to thread B → do not open.
+    expect(shouldAutoOpenPlanPanel('thread-a', 'thread-b')).toBe(false)
+    // Thread reload / no plan turn in flight → do not open.
+    expect(shouldAutoOpenPlanPanel(null, 'thread-a')).toBe(false)
+    expect(shouldAutoOpenPlanPanel(null, null)).toBe(false)
   })
 
   it('builds draft context for first-class GUI plan turns', () => {

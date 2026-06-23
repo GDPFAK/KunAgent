@@ -109,6 +109,10 @@ function cmakeArchValue(platform, arch) {
   return arch === 'arm64' ? 'arm64' : 'x86_64'
 }
 
+function shouldDisableNativeCpu(platform, arch) {
+  return platform === 'darwin' && arch !== process.arch
+}
+
 function buildRunner(platform, arch) {
   assertCommand('git', 'Install Git before building the bundled Whisper runner.')
   assertCommand('cmake', 'Install CMake before building the bundled Whisper runner.')
@@ -128,6 +132,7 @@ function buildRunner(platform, arch) {
   ]
   const osxArch = cmakeArchValue(platform, arch)
   if (osxArch) configureArgs.push(`-DCMAKE_OSX_ARCHITECTURES=${osxArch}`)
+  if (shouldDisableNativeCpu(platform, arch)) configureArgs.push('-DGGML_NATIVE=OFF')
   if (platform === 'linux') configureArgs.push('-DGGML_OPENMP=OFF')
 
   console.log(`[prepare-whisper-runner] Configuring whisper.cpp for ${platform}-${arch}`)

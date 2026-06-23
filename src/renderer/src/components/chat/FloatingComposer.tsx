@@ -112,8 +112,8 @@ export type { ComposerFileReference } from '../../lib/composer-file-references'
 export type { ComposerExecutionSettings } from './FloatingComposerExecutionPicker'
 export type { DesignComposerContext } from '../../design/design-composer-context'
 
-const CONTEXT_CAPACITY_RING_SIZE = 18
-const CONTEXT_CAPACITY_RING_STROKE = 2.25
+const CONTEXT_CAPACITY_RING_SIZE = 24
+const CONTEXT_CAPACITY_RING_STROKE = 2.5
 const CONTEXT_CAPACITY_RING_RADIUS = (CONTEXT_CAPACITY_RING_SIZE - CONTEXT_CAPACITY_RING_STROKE) / 2
 const CONTEXT_CAPACITY_RING_CIRCUMFERENCE = 2 * Math.PI * CONTEXT_CAPACITY_RING_RADIUS
 
@@ -121,6 +121,12 @@ function contextCapacityColor(usedRatio: number): string {
   if (usedRatio >= 0.9) return '#d9544e'
   if (usedRatio >= 0.75) return '#d9920f'
   return 'var(--ds-accent)'
+}
+
+function formatContextCapacityChipNumber(value: number | null): string {
+  if (value == null || !Number.isFinite(value)) return '-'
+  const percent = Math.max(0, Math.min(100, value * 100))
+  return String(Math.round(percent))
 }
 
 type Props = {
@@ -2234,7 +2240,7 @@ export function FloatingComposer({
                   <button
                     type="button"
                     onClick={() => setContextCapacityOpen((open) => !open)}
-                    className="ds-composer-context ds-no-drag inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full border border-ds-border-muted bg-ds-card/70 px-2.5 text-[12.5px] font-medium text-ds-muted transition hover:bg-ds-hover"
+                    className="ds-composer-context ds-no-drag relative inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-ds-border-muted bg-ds-card/70 p-0 text-[9px] font-semibold leading-none text-ds-muted transition hover:bg-ds-hover"
                     aria-label={t('contextCapacityChipAria', {
                       percent: formatPercent(contextCapacity.usedRatio)
                     })}
@@ -2242,7 +2248,7 @@ export function FloatingComposer({
                     title={t('contextCapacityTitle')}
                   >
                     <svg
-                      className="h-[18px] w-[18px] -rotate-90 shrink-0"
+                      className="h-6 w-6 -rotate-90 shrink-0"
                       viewBox={`0 0 ${CONTEXT_CAPACITY_RING_SIZE} ${CONTEXT_CAPACITY_RING_SIZE}`}
                       aria-hidden="true"
                     >
@@ -2269,8 +2275,8 @@ export function FloatingComposer({
                         }
                       />
                     </svg>
-                    <span className="shrink-0 tabular-nums">
-                      {formatPercent(contextCapacity.usedRatio)}
+                    <span className="pointer-events-none absolute inset-0 flex items-center justify-center tabular-nums">
+                      {formatContextCapacityChipNumber(contextCapacity.usedRatio)}
                     </span>
                   </button>
                   {contextCapacityOpen ? (

@@ -433,6 +433,7 @@ export function Workbench(): ReactElement {
     setComposerModel,
     setThreadSearch,
     renameThread,
+    pinThread,
     archiveThread,
     deleteThread,
     spawnSideConversation,
@@ -497,6 +498,7 @@ export function Workbench(): ReactElement {
       setComposerModel: s.setComposerModel,
       setThreadSearch: s.setThreadSearch,
       renameThread: s.renameThread,
+      pinThread: s.pinThread,
       archiveThread: s.archiveThread,
       deleteThread: s.deleteThread,
       spawnSideConversation: s.spawnSideConversation,
@@ -3029,7 +3031,7 @@ export function Workbench(): ReactElement {
 
   const renderPlanPanel = (className: string): ReactElement => (
     <PlanPanel
-      workspaceRoot={workspaceRoot}
+      workspaceRoot={activeSkillWorkspace}
       activeThreadId={activeThreadId}
       runtimeReady={runtimeConnection === 'ready'}
       busy={busy}
@@ -3276,6 +3278,7 @@ export function Workbench(): ReactElement {
               onThreadSearchChange={setThreadSearch}
               onSelectThread={openThread}
               onRenameThread={renameThread}
+              onPinThread={pinThread}
               onArchiveThread={(id) => archiveThread(id, true)}
               onDeleteThread={deleteThread}
               onRestoreThread={(id) => archiveThread(id, false)}

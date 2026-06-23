@@ -106,6 +106,12 @@ describe('buildUiPluginTokenCss', () => {
     expect(css).toContain("html[data-ui-plugin='starlight'][data-theme='dark']")
     expect(css).toContain('--ds-accent: #8a63e8;')
     expect(css).not.toContain('url(')
+    // 同时覆盖 .ds-workbench-shell 子作用域,否则 dark 下对话区会就地重声明
+    // palette token 而遮蔽插件 token(本次修复的核心)。
+    expect(css).toContain("html[data-ui-plugin='starlight'][data-theme='dark'] .ds-workbench-shell")
+    expect(css).toContain(
+      "html[data-ui-plugin='starlight']:not([data-theme='dark']) .ds-workbench-shell"
+    )
   })
 
   it('returns empty string when no tokens declared', () => {

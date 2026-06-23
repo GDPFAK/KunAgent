@@ -40,6 +40,7 @@ import {
   Trash2
 } from 'lucide-react'
 import { GuiUpdateControl } from './settings-gui-update'
+import { McpServersEditor } from './mcp/McpServersEditor'
 import {
   AdvancedSettingsDisclosure,
   InlineNoticeView,
@@ -315,6 +316,7 @@ export function AgentsSettingsSection({ ctx }: { ctx: Record<string, any> }): Re
   }
   const [tokenEconomySavingsState, setTokenEconomySavingsState] =
     useState<TokenEconomySavingsState>(EMPTY_TOKEN_ECONOMY_SAVINGS_STATE)
+  const [mcpRawMode, setMcpRawMode] = useState(false)
   useEffect(() => {
     let cancelled = false
     if (!tokenEconomy.enabled) {
@@ -1030,12 +1032,13 @@ export function AgentsSettingsSection({ ctx }: { ctx: Record<string, any> }): Re
                         <div className="rounded-xl border border-ds-border bg-ds-main/50 px-3 py-2 text-[12px] leading-5 text-ds-muted">
                           {mcpConfigExists ? t('mcpFileStatusReady') : t('mcpFileStatusMissing')}
                         </div>
-                        <textarea
+                        <McpServersEditor
                           value={mcpConfigText}
-                          onChange={(e) => setMcpConfigText(e.target.value)}
-                          spellCheck={false}
-                          placeholder={mcpLoading ? t('loading') : ''}
-                          className="min-h-[320px] w-full rounded-2xl border border-ds-border bg-ds-card px-4 py-3 font-mono text-[13px] leading-6 text-ds-ink shadow-sm focus:border-accent/40 focus:outline-none focus:ring-1 focus:ring-accent/30"
+                          onChange={setMcpConfigText}
+                          disabled={mcpLoading}
+                          rawMode={mcpRawMode}
+                          onToggleRawMode={setMcpRawMode}
+                          loadingPlaceholder={mcpLoading ? t('loading') : ''}
                         />
                       </div>
                     }
