@@ -1,13 +1,15 @@
 import { makeUserItem } from '../domain/item.js'
 import type { TurnItem } from '../contracts/items.js'
 import type { ModelClient, ModelRequest, ModelStreamChunk } from '../ports/model-client.js'
+import { estimateComplexity } from './router/complexity-estimator.js'
+import type { ComplexityTier } from './router/complexity-estimator.js'
 
 export const AUTO_MODEL_ROUTER_MODEL = 'deepseek-v4-flash'
 export const AUTO_MODEL_FLASH = 'deepseek-v4-flash'
 export const AUTO_MODEL_PRO = 'deepseek-v4-pro'
 export const AUTO_MODEL_ROUTER_TIMEOUT_MS = 4_000
 
-export type AutoModelRouteSource = 'flash-router' | 'heuristic'
+export type AutoModelRouteSource = 'flash-router' | 'heuristic' | 'complexity-estimator'
 export type AutoRouteReasoningEffort = 'off' | 'high' | 'max'
 
 export type AutoModelRouteSelection = {
@@ -34,8 +36,12 @@ export async function resolveAutoModelRoute(input: {
   abortSignal: AbortSignal
   timeoutMs?: number
 }): Promise<AutoModelRouteSelection> {
-  const fallback = fallbackAutoRoute(input.latestRequest, input.selectedModelMode)
-  if (input.abortSignal.aborted) return fallback
+  // Complexity-aware heuristic fallback (#364): when the LLM router
+  // fails (network error, timeout), use the complexity estimator's
+  // tier-based routing instead of the keyword-based heuristic alone.
+  const complexity = estimateComplexity(input.latestRequest)
+  const heuristicFallback = fallbackAutoRoute(input.latestRequest, input.selectedModelMode, complexity.tier)
+  if (input.abortSignal.aborted) return heuristicFallback
 
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), input.timeoutMs ?? AUTO_MODEL_ROUTER_TIMEOUT_MS)
@@ -71,16 +77,26 @@ export async function resolveAutoModelRoute(input: {
     }
     const text = await collectRouterText(input.modelClient.stream(request), controller.signal)
     const recommendation = parseAutoRouteRecommendation(text)
-    return recommendation ? { ...recommendation, source: 'flash-router' } : fallback
+    return recommendation ? { ...recommendation, source: 'flash-router' } : heuristicFallback
   } catch {
-    return fallback
+    return heuristicFallback
   } finally {
     clearTimeout(timeout)
     input.abortSignal.removeEventListener('abort', onAbort)
   }
 }
 
-export function autoModelHeuristic(input: string, _currentModel = ''): typeof AUTO_MODEL_FLASH | typeof AUTO_MODEL_PRO {
+export function autoModelHeuristic(
+  input: string,
+  _currentModel = '',
+  complexityTier?: ComplexityTier
+): typeof AUTO_MODEL_FLASH | typeof AUTO_MODEL_PRO {
+  // Complexity-based tier from the estimator takes precedence for clear-cut
+  // cases; use the keyword+length heuristic as fallback for medium or
+  // when no complexity assessment is available.
+  if (complexityTier === 'low') return AUTO_MODEL_FLASH
+  if (complexityTier === 'high') return AUTO_MODEL_PRO
+
   const len = [...input].length
   const lower = input.toLowerCase()
   const complexKeywords = [
@@ -143,10 +159,11 @@ export function recentAutoRouterContext(items: readonly TurnItem[], currentTurnI
 
 function fallbackAutoRoute(
   latestRequest: string,
-  selectedModelMode: string
+  selectedModelMode: string,
+  complexityTier?: ComplexityTier
 ): AutoModelRouteSelection {
   return {
-    model: autoModelHeuristic(latestRequest, selectedModelMode),
+    model: autoModelHeuristic(latestRequest, selectedModelMode, complexityTier),
     reasoningEffort: autoReasoningHeuristic(latestRequest),
     source: 'heuristic'
   }
