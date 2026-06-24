@@ -124,6 +124,8 @@ export class KunRuntimeProvider implements AgentProvider {
   }
 
   async connect(): Promise<void> {
+    // Initialize RouteRegistry before any API calls (#237)
+    await rendererRuntimeClient.initRouteRegistry().catch(() => { /* fallback to defaults */ })
     const health = await rendererRuntimeClient.runtimeRequest('/health', 'GET')
     if (!health.ok) {
       throw runtimeErrorToError(readRuntimeError(health.body, `runtime unhealthy (${health.status || 0})`))

@@ -5,10 +5,22 @@ import type {
   SseErrorPayload,
   SseEventPayload
 } from '@shared/kun-gui-api'
+import { routeRegistry, type RouteRegistryFetch } from './route-registry.js'
 
 class RendererRuntimeClient {
   private cachedSettings: AppSettingsV1 | null = null
   private settingsPromise: Promise<AppSettingsV1> | null = null
+  private routeRegistryInitialized = false
+
+  /** Wire RouteRegistry into the IPC bridge so GUI paths stay in sync with the backend. */
+  async initRouteRegistry(): Promise<void> {
+    if (this.routeRegistryInitialized) return
+    const fetchFn: RouteRegistryFetch = async (path, method) => {
+      return this.runtimeRequest(path, method)
+    }
+    await routeRegistry.init(fetchFn)
+    this.routeRegistryInitialized = true
+  }
 
   async getSettings(options?: { forceRefresh?: boolean }): Promise<AppSettingsV1> {
     if (options?.forceRefresh) {
