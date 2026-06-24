@@ -230,9 +230,6 @@ jobs:
             "Kun-${DEV_VERSION}-mac-x64.zip"
             "Kun-${DEV_VERSION}-win-x64.exe"
             "Kun-${DEV_VERSION}-linux-x86_64.AppImage"
-            "latest-mac.yml"
-            "latest.yml"
-            "latest-linux.yml"
           )
 
           for file in "${required[@]}"; do
