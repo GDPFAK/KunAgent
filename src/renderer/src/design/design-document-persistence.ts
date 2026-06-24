@@ -96,6 +96,14 @@ export function parseDocumentsIndex(raw: string): DesignDocumentsIndex | null {
 
 let _saveTimer: ReturnType<typeof setTimeout> | null = null
 
+function writeDocumentsIndex(workspaceRoot: string, content: string): Promise<void> {
+  if (typeof window.kunGui?.writeWorkspaceFile !== 'function') return Promise.resolve()
+  return window.kunGui
+    .writeWorkspaceFile({ path: documentsIndexPath(), workspaceRoot, content })
+    .then(() => undefined)
+    .catch(() => undefined)
+}
+
 /** Fire-and-forget, debounced write of the documents index (one hot file). */
 export function persistDocumentsIndex(
   workspaceRoot: string,
@@ -107,16 +115,34 @@ export function persistDocumentsIndex(
   if (_saveTimer) clearTimeout(_saveTimer)
   _saveTimer = setTimeout(() => {
     _saveTimer = null
-    void window.kunGui
-      ?.writeWorkspaceFile({ path: documentsIndexPath(), workspaceRoot, content })
-      .catch(() => undefined)
+    void writeDocumentsIndex(workspaceRoot, content)
   }, 400)
 }
 
+/**
+ * Immediate, non-debounced write of the documents index. Cancels any pending
+ * debounced write so a structural change (e.g. deleting a 设计稿) lands on disk
+ * right away and can't be resurrected by a reload that reads a stale index
+ * before the 400ms debounce flushes.
+ */
+export function flushDocumentsIndex(
+  workspaceRoot: string,
+  documents: readonly DesignDocument[],
+  activeDocumentId: string | null
+): Promise<void> {
+  if (!workspaceRoot || typeof window.kunGui?.writeWorkspaceFile !== 'function') return Promise.resolve()
+  if (_saveTimer) {
+    clearTimeout(_saveTimer)
+    _saveTimer = null
+  }
+  return writeDocumentsIndex(workspaceRoot, serializeDocumentsIndex(documents, activeDocumentId))
+}
+
 /** Fire-and-forget delete of a 设计稿's whole on-disk dir (and all its 画布). */
-export function deleteDocumentDir(workspaceRoot: string, docId: string): void {
-  if (!workspaceRoot || typeof window.kunGui?.deleteWorkspaceEntry !== 'function') return
-  void window.kunGui
+export function deleteDocumentDir(workspaceRoot: string, docId: string): Promise<void> {
+  if (!workspaceRoot || typeof window.kunGui?.deleteWorkspaceEntry !== 'function') return Promise.resolve()
+  return window.kunGui
     .deleteWorkspaceEntry({ path: documentDirPath(docId), workspaceRoot })
+    .then(() => undefined)
     .catch(() => undefined)
 }

@@ -1424,19 +1424,20 @@ export function Workbench(): ReactElement {
 
   // Auto-attach selected canvas image to design composer
   useEffect(() => {
-    if (route !== 'design') {
-      if (canvasAutoAttachIdRef.current) {
-        setComposerAttachments((cur) => cur.filter((a) => a.id !== canvasAutoAttachIdRef.current))
+    // Capture the id into a local before clearing the ref: the functional
+    // updater below runs during a later render, so reading the ref inside it
+    // would see the already-nulled value and remove nothing (leaking attachments).
+    const removeAutoAttach = (): void => {
+      const id = canvasAutoAttachIdRef.current
+      if (id) {
+        setComposerAttachments((cur) => cur.filter((a) => a.id !== id))
         canvasAutoAttachIdRef.current = null
       }
-      return
     }
 
-    const removeAutoAttach = (): void => {
-      if (canvasAutoAttachIdRef.current) {
-        setComposerAttachments((cur) => cur.filter((a) => a.id !== canvasAutoAttachIdRef.current))
-        canvasAutoAttachIdRef.current = null
-      }
+    if (route !== 'design') {
+      removeAutoAttach()
+      return
     }
 
     if (canvasSelectedIds.size !== 1) {

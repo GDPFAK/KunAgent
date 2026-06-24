@@ -15,6 +15,7 @@ import {
 import {
   deleteDocumentDir,
   documentsIndexPath,
+  flushDocumentsIndex,
   parseDocumentsIndex,
   persistDocumentsIndex
 } from './design-document-persistence'
@@ -289,6 +290,13 @@ export const useDesignWorkspaceStore = create<DesignWorkspaceState>((set, get) =
     persistDocumentsIndex(s.workspaceRoot, s.documents, s.activeDocumentId)
   }
 
+  // Structural deletes must hit disk immediately — a debounced write can be lost
+  // to a reload before it flushes, resurrecting the just-deleted 设计稿/画布.
+  const persistIndexNow = (): void => {
+    const s = get()
+    void flushDocumentsIndex(s.workspaceRoot, s.documents, s.activeDocumentId)
+  }
+
   return {
     workspaceRoot: '',
     documents: [],
@@ -397,7 +405,7 @@ export const useDesignWorkspaceStore = create<DesignWorkspaceState>((set, get) =
           state.activeDocumentId === documentId ? documents[0]?.id ?? null : state.activeDocumentId
         return { documents, activeDocumentId, ...projectActiveDoc(documents, activeDocumentId), fileError: null }
       })
-      persistIndex()
+      persistIndexNow()
     },
 
     switchActiveDocument: (documentId) => {
@@ -509,7 +517,7 @@ export const useDesignWorkspaceStore = create<DesignWorkspaceState>((set, get) =
         const documents = state.documents.map((d, i) => (i === idx ? nextDoc : d))
         return { documents, artifacts, activeArtifactId }
       })
-      persistIndex()
+      persistIndexNow()
     },
 
     renameArtifact: (artifactId, title) => {
