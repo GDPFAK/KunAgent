@@ -59,6 +59,7 @@ import {
   comparableSkillRootPath,
   guiSkillManagedComparablePaths,
   guiSkillRootsForRuntime,
+  isCodexPluginCacheSkillRoot,
   normalizeSkillRootPath
 } from './services/skill-service'
 
@@ -599,11 +600,16 @@ async function skillCapabilityConfigForRuntime(
   const managed = guiSkillManagedComparablePaths(settings)
   const manualExisting = stringArrayValue(existing.roots)
     .map(normalizeSkillRootPath)
-    .filter((path) => path.length > 0 && !managed.has(comparableSkillRootPath(path)))
+    .filter((path) =>
+      path.length > 0 &&
+      !managed.has(comparableSkillRootPath(path)) &&
+      !isCodexPluginCacheSkillRoot(path)
+    )
   const roots = uniqueStrings([
     ...manualExisting,
     ...(await guiSkillRootsForRuntime(settings)).map((root) => root.path)
   ])
+  const disabledIds = normalizeDisabledSkillIds(settings?.disabledSkillIds)
   return {
     ...existing,
     // Auto-enable once we discover skill roots. There is no user-facing skills
@@ -612,8 +618,15 @@ async function skillCapabilityConfigForRuntime(
     // skills. An explicit `true` still forces on even with no roots.
     enabled: roots.length > 0 || existing.enabled === true,
     roots,
+    disabledIds,
     legacySkillMd: existing.legacySkillMd === false ? false : true
   }
+}
+
+function normalizeDisabledSkillIds(value: unknown): string[] {
+  return uniqueStrings(stringArrayValue(value)
+    .map((item) => item.trim().replace(/^\/?skill:/i, '').trim())
+    .filter(Boolean))
 }
 
 function stringArrayValue(value: unknown): string[] {

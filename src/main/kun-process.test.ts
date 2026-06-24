@@ -814,6 +814,38 @@ describe('syncGuiManagedKunConfig', () => {
     ]))
   })
 
+  it('passes disabled skill ids and drops stale Codex plugin cache roots from runtime capabilities', async () => {
+    if (!tempRoot) throw new Error('temp root not initialized')
+    const configPath = join(tempRoot, 'config.json')
+    const stalePluginRoot = join(homedir(), '.codex', 'plugins', 'cache', 'github', '0.1.0', 'skills')
+    const manualRoot = join(tempRoot, 'manual-skills')
+    writeFileSync(configPath, JSON.stringify({
+      capabilities: {
+        skills: {
+          enabled: true,
+          roots: [stalePluginRoot, manualRoot],
+          disabledIds: ['old-disabled'],
+          legacySkillMd: true
+        }
+      }
+    }), 'utf8')
+    const module = await import('./kun-process')
+    const settings = createSettings('/tmp/fake-kun-child.js')
+    settings.disabledSkillIds = ['gmail', '/skill:vercel-agent', '']
+
+    await module.syncGuiManagedKunConfig(tempRoot, defaultKunRuntimeSettings(), {
+      scheduleMcp: {
+        settings,
+        launch: { appPath: '/tmp/deepseek-gui-test-app', execPath: '/tmp/electron', isPackaged: false }
+      }
+    })
+
+    const parsed = JSON.parse(readFileSync(configPath, 'utf8')) as any
+    expect(parsed.capabilities.skills.roots).toContain(manualRoot)
+    expect(parsed.capabilities.skills.roots).not.toContain(stalePluginRoot)
+    expect(parsed.capabilities.skills.disabledIds).toEqual(['gmail', 'vercel-agent'])
+  })
+
   it('re-enables skills when roots are discovered despite a persisted enabled:false', async () => {
     if (!tempRoot) throw new Error('temp root not initialized')
     const configPath = join(tempRoot, 'config.json')

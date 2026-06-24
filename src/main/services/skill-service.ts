@@ -31,7 +31,7 @@ export type GuiSkillRoot = {
   scope: GuiSkillScope
 }
 
-export type GuiSkillRootSource = 'common' | 'extra'
+export type GuiSkillRootSource = 'common' | 'codex-plugin' | 'extra'
 
 export type GuiSkillRootListItem = {
   /** Stable id: a common-directory id (e.g. `global-codex`) or the path for custom dirs. */
@@ -65,8 +65,10 @@ type SkillRootCandidate = {
  * Enabled, on-disk skill roots passed to the Kun runtime. Builds the common
  * directory conventions (.agents/.claude/.codex/skills + global equivalents)
  * plus configured extra dirs, drops any the user toggled off, and appends
- * enabled Codex plugin caches. Precedence (earlier wins on duplicate skill
- * id): project commons → global commons → plugin caches → extra dirs.
+ * enabled Codex plugin caches. Disabling `global-codex` also disables the
+ * plugin cache roots because they are Codex-owned global skill sources.
+ * Precedence (earlier wins on duplicate skill id): project commons → global
+ * commons → plugin caches → extra dirs.
  */
 export async function guiSkillRootsForRuntime(
   settings: AppSettingsV1 | undefined,
@@ -84,10 +86,12 @@ export async function guiSkillRootsForRuntime(
   const projectCommon = candidates.filter((c) => c.source === 'common' && c.scope === 'project')
   const globalCommon = candidates.filter((c) => c.source === 'common' && c.scope === 'global')
   const extra = candidates.filter((c) => c.source === 'extra')
-  const pluginRoots = (await discoverCodexPluginSkillRoots())
-    .filter((root) => existsSync(root))
-    .filter((root) => !disabled.has(comparablePath(root)))
-    .map((path) => ({ path, scope: 'global' as const }))
+  const pluginRoots = isCodexPluginSkillSourceDisabled(disabled)
+    ? []
+    : (await discoverCodexPluginSkillRoots())
+        .filter((root) => existsSync(root))
+        .filter((root) => !disabled.has(comparablePath(root)))
+        .map((path) => ({ path, scope: 'global' as const }))
 
   return uniqueSkillRoots([
     ...projectCommon.map(toGuiSkillRoot),
@@ -100,8 +104,9 @@ export async function guiSkillRootsForRuntime(
 /**
  * Full list of detected common skill directories + configured extra dirs for
  * the settings UI, including ones the user disabled or that do not exist yet,
- * annotated with skill counts and enabled state. Codex plugin caches are
- * always-on and intentionally excluded from this user-toggleable list.
+ * annotated with skill counts and enabled state. Codex plugin caches follow
+ * the global Codex switch and are intentionally excluded from the list until
+ * the UI has a dedicated aggregate row for them.
  */
 export async function listGuiSkillRoots(
   settings: AppSettingsV1,
@@ -139,7 +144,8 @@ export async function listGuiSkillRoots(
  * Comparable paths of every GUI-managed candidate (common dirs + extra dirs),
  * regardless of enabled state. Lets the runtime config builder tell apart
  * roots it manages (and may need to drop when toggled off) from roots a user
- * added by hand to the Kun config file.
+ * added by hand to the Kun config file. Codex plugin cache roots are managed
+ * by prefix so deleted old plugin versions do not stick around forever.
  */
 export function guiSkillManagedComparablePaths(
   settings: AppSettingsV1 | undefined,
@@ -149,6 +155,12 @@ export function guiSkillManagedComparablePaths(
     .map((candidate) => comparablePath(candidate.path))
     .filter(Boolean)
   return new Set(paths)
+}
+
+export function isCodexPluginCacheSkillRoot(path: string): boolean {
+  const comparable = comparablePath(normalizeSkillRootPath(path))
+  const prefix = comparablePath(join(homedir(), '.codex', 'plugins', 'cache'))
+  return comparable === prefix || comparable.startsWith(`${prefix}/`)
 }
 
 function buildSkillRootCandidates(
@@ -218,6 +230,10 @@ function buildDisabledKeySet(settings: AppSettingsV1 | undefined): Set<string> {
 
 function isCandidateDisabled(candidate: SkillRootCandidate, disabled: Set<string>): boolean {
   return disabled.has(candidate.id) || disabled.has(comparablePath(candidate.path))
+}
+
+function isCodexPluginSkillSourceDisabled(disabled: Set<string>): boolean {
+  return disabled.has('global-codex')
 }
 
 function toGuiSkillRoot(candidate: SkillRootCandidate): GuiSkillRoot {

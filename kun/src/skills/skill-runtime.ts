@@ -105,7 +105,7 @@ export class SkillRuntime {
     config: SkillsCapabilityConfig | undefined,
     options: SkillRuntimeOptions = {}
   ): Promise<SkillRuntime> {
-    const normalized = config ?? { enabled: false, roots: [], legacySkillMd: true }
+    const normalized = config ?? { enabled: false, roots: [], disabledIds: [], legacySkillMd: true }
     const resolvedOptions = {
       activeLimit: options.activeLimit ?? DEFAULT_ACTIVE_LIMIT,
       instructionBudgetBytes: options.instructionBudgetBytes ?? DEFAULT_INSTRUCTION_BUDGET_BYTES,
@@ -324,7 +324,9 @@ async function discoverSkills(config: SkillsCapabilityConfig): Promise<{
     if (!unique.has(skill.id)) unique.set(skill.id, skill)
     else validationErrors.push({ root: skill.root, message: `duplicate Skill id: ${skill.id}` })
   }
-  return { skills: [...unique.values()].sort((a, b) => a.id.localeCompare(b.id)), validationErrors }
+  const disabled = new Set(config.disabledIds.map((id) => slug(id)))
+  const enabledSkills = [...unique.values()].filter((skill) => !disabled.has(skill.id))
+  return { skills: enabledSkills.sort((a, b) => a.id.localeCompare(b.id)), validationErrors }
 }
 
 async function packageCandidates(root: string): Promise<string[]> {

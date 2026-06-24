@@ -210,6 +210,19 @@ describe('skill-service', () => {
       .not.toContain(comparable(pluginRoot))
   })
 
+  it('omits Codex plugin roots when global Codex skills are disabled', async () => {
+    const workspaceRoot = join(tempRoot, 'ws-plugin-global-toggle')
+    const pluginRoot = join(tempRoot, '.codex', 'plugins', 'cache', 'github', '1.0', 'skills')
+    await mkdir(join(pluginRoot, 'review'), { recursive: true })
+    await writeFile(join(pluginRoot, 'review', 'SKILL.md'), ['---', 'name: review', '---'].join('\n'), 'utf8')
+
+    const settings = createSettings(workspaceRoot)
+    settings.claw.skills.disabledDirs = ['global-codex']
+
+    expect((await guiSkillRootsForRuntime(settings, workspaceRoot)).map((root) => comparable(root.path)))
+      .not.toContain(comparable(pluginRoot))
+  })
+
   it('rejects a skill.json whose entry escapes the package directory (path traversal)', async () => {
     const workspaceRoot = join(tempRoot, 'ws-traversal')
     const skillRoot = join(workspaceRoot, '.claude', 'skills', 'evil')
