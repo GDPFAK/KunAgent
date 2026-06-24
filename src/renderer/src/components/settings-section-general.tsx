@@ -309,14 +309,16 @@ export function GeneralSettingsSection({ ctx }: { ctx: Record<string, any> }): R
                   title={t('workspaceRoot')}
                   description={t('workspaceRootDesc')}
                   control={
-                    <div className="w-full min-w-[200px] md:max-w-xl">
-                      <div className="flex items-center gap-2">
+                    <div className="grid w-full min-w-0 gap-2 md:max-w-xl">
+                      <div className="min-w-0">
                         <input
-                          className="w-full rounded-xl border border-ds-border bg-ds-card px-3 py-2 text-[14px] text-ds-ink shadow-sm focus:border-accent/40 focus:outline-none focus:ring-1 focus:ring-accent/30"
+                          className="w-full min-w-0 rounded-xl border border-ds-border bg-ds-card px-3 py-2 text-[14px] text-ds-ink shadow-sm focus:border-accent/40 focus:outline-none focus:ring-1 focus:ring-accent/30"
                           value={compactHomePath(form.workspaceRoot)}
                           onChange={(e) => update({ workspaceRoot: expandHomePath(e.target.value) })}
                           placeholder={t('workspaceRootPlaceholder')}
                         />
+                      </div>
+                      <div className="flex flex-wrap justify-end gap-2">
                         <button
                           type="button"
                           onClick={resetWorkspaceToDefault}
