@@ -282,7 +282,7 @@ describe('chat-store app actions composer model loading', () => {
     expect(state.composerProviderId).toBe('')
   })
 
-  it('blocks switching an active chat with user messages from vision to text-only', () => {
+  it('blocks switching an active chat with image attachments from vision to text-only', () => {
     const { actions, state } = buildHarness({
       ok: true,
       modelIds: ['vision-model', 'text-model'],
@@ -290,7 +290,14 @@ describe('chat-store app actions composer model loading', () => {
       modelGroups: []
     })
     state.route = 'chat'
-    state.blocks = [{ kind: 'user', id: 'user-1', text: 'hello' }] as ChatState['blocks']
+    state.blocks = [{
+      kind: 'user',
+      id: 'user-1',
+      text: 'hello',
+      meta: {
+        attachments: [{ id: 'img-1', kind: 'image', name: 'photo.png', mimeType: 'image/png' }]
+      }
+    }] as ChatState['blocks']
     state.activeThreadId = 'thread-a'
     state.threads = [{
       id: 'thread-a',
@@ -408,6 +415,47 @@ describe('chat-store app actions composer model loading', () => {
     expect(state.composerModel).toBe('vision-model')
     expect(state.composerProviderId).toBe('test-provider')
     expect(localStorage.getItem(COMPOSER_MODEL_STORAGE_KEY)).toBe('vision-model')
+  })
+
+  it('allows switching an active chat with only text messages from vision to text-only', () => {
+    const { actions, state } = buildHarness({
+      ok: true,
+      modelIds: ['vision-model', 'text-model'],
+      defaultModelId: 'vision-model',
+      modelGroups: []
+    })
+    state.route = 'chat'
+    state.blocks = [{ kind: 'user', id: 'user-1', text: 'hello' }] as ChatState['blocks']
+    state.composerModel = 'vision-model'
+    state.composerProviderId = 'test-provider'
+    state.composerModelGroups = [{
+      providerId: 'test-provider',
+      label: 'Test',
+      modelIds: ['vision-model', 'text-model'],
+      modelProfiles: {
+        'vision-model': {
+          inputModalities: ['text', 'image'],
+          outputModalities: ['text'],
+          supportsToolCalling: true,
+          messageParts: ['text', 'image_url']
+        },
+        'text-model': {
+          inputModalities: ['text'],
+          outputModalities: ['text'],
+          supportsToolCalling: true,
+          messageParts: ['text']
+        }
+      }
+    }]
+
+    actions.setComposerModel('text-model', 'test-provider')
+
+    expect(state.composerModel).toBe('text-model')
+    expect(state.composerProviderId).toBe('test-provider')
+    expect(localStorage.getItem(COMPOSER_MODEL_STORAGE_KEY)).toBe('text-model')
+    expect(window.kunGui.saveSettingsSilent).toHaveBeenCalledWith({
+      agents: { kun: { model: 'text-model' } }
+    })
   })
 
   it('does not overwrite a stored custom model when only fallback models are available', async () => {

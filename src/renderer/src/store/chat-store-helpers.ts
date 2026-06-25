@@ -203,6 +203,29 @@ export function canSwitchComposerModel(
   return modelSupportsImageInput(nextProfile)
 }
 
+/**
+ * Whether any user message in the timeline carried an image attachment.
+ *
+ * Only image attachments are uploaded to the runtime and assigned real
+ * attachment IDs; document/PDF attachments stay local and are excluded
+ * from `attachmentIds`. So a non-empty `attachmentIds` on a reloaded
+ * user block is a reliable proxy for "images were sent". On a live
+ * session the full `attachments` array with `kind` is still present.
+ */
+export function sessionHasImageAttachments(blocks: readonly ChatBlock[]): boolean {
+  return blocks.some((block) => {
+    if (block.kind !== 'user') return false
+    const meta = block.meta
+    if (!meta) return false
+    const attachments = meta.attachments
+    if (Array.isArray(attachments) && attachments.some((a) => a.kind === 'image')) {
+      return true
+    }
+    const attachmentIds = meta.attachmentIds
+    return Array.isArray(attachmentIds) && attachmentIds.length > 0
+  })
+}
+
 function modelProfileForComposerSelection(
   modelGroups: readonly ModelProviderModelGroup[],
   modelId: string,

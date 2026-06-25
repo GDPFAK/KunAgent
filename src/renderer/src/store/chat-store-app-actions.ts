@@ -15,6 +15,7 @@ import {
   readThreadComposerSelection,
   rememberThreadComposerMode,
   rememberThreadComposerSelection,
+  sessionHasImageAttachments,
   readStoredComposerProviderId
 } from './chat-store-helpers'
 
@@ -100,7 +101,7 @@ export function createAppActions(options: CreateAppActionsOptions): Pick<
       const lockVisionToTextSwitch =
         state.route === 'chat' &&
         Array.isArray(state.blocks) &&
-        state.blocks.some((block) => block.kind === 'user')
+        sessionHasImageAttachments(state.blocks)
       if (!canSwitchComposerModel(
         lockVisionToTextSwitch,
         state.composerModelGroups,

@@ -31,7 +31,8 @@ import { useChatStore } from '../store/chat-store'
 import {
   isClawThread,
   providerIdForComposerModel,
-  resolveComposerContextWindowTokens
+  resolveComposerContextWindowTokens,
+  sessionHasImageAttachments
 } from '../store/chat-store-helpers'
 import { threadHasPendingRuntimeWork } from '../store/chat-store-runtime-helpers'
 import {
@@ -567,7 +568,7 @@ export function Workbench(): ReactElement {
   const sddTitleSyncTimerRef = useRef<number | null>(null)
   const lastSyncedSddTitleRef = useRef<Record<string, string>>({})
   const timelineBlocks = blocks
-  const lockVisionToTextModelSwitch = route === 'chat' && timelineBlocks.some((block) => block.kind === 'user')
+  const lockVisionToTextModelSwitch = route === 'chat' && sessionHasImageAttachments(timelineBlocks)
   const timelineLiveReasoning = liveReasoning
   const timelineLiveAssistant = liveAssistant
   const devPreviewBlocks = useMemo<ChatBlock[]>(() => {
