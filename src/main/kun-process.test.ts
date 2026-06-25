@@ -907,6 +907,16 @@ describe('syncGuiManagedKunConfig', () => {
       tempRoot,
       {
         ...defaultKunRuntimeSettings(),
+        modelProfiles: {
+          'long-writer': {
+            contextWindowTokens: 128_000,
+            maxOutputTokens: 16_384,
+            inputModalities: ['text'],
+            outputModalities: ['text'],
+            supportsToolCalling: true,
+            messageParts: ['text']
+          }
+        },
         storage: {
           backend: 'hybrid',
           sqlitePath: '/tmp/kun-index.sqlite3'
@@ -996,6 +1006,10 @@ describe('syncGuiManagedKunConfig', () => {
       contextCompaction: {
         softThreshold: 86000
       }
+    })
+    expect(parsed.models.profiles['long-writer']).toMatchObject({
+      contextWindowTokens: 128_000,
+      maxOutputTokens: 16_384
     })
     expect(parsed.models.profiles['deepseek-v4-pro']).toMatchObject({
       contextWindowTokens: 1_000_000,

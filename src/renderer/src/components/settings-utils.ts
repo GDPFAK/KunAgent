@@ -15,6 +15,7 @@ import {
   mergeWorkflowSettings,
   mergeWriteSettings,
   mergeTerminalSettings,
+  normalizeUiFontScalePercent,
   normalizeAppBehaviorSettings,
   normalizeClawSettings,
   normalizeCheckpointCleanupSettings,
@@ -26,6 +27,7 @@ import {
   normalizeWorkflowSettings,
   normalizeWriteSettings,
   normalizeTerminalSettings,
+  uiFontScaleFromPercent,
   type AppSettingsPatch,
   type AppSettingsV1
 } from '@shared/app-settings'
@@ -100,11 +102,13 @@ export function coerceRendererSettings(settings: AppSettingsV1): AppSettingsV1 {
     raw.uiFontScale === 'small' || raw.uiFontScale === 'medium' || raw.uiFontScale === 'large'
       ? raw.uiFontScale
       : 'medium'
+  const uiFontScalePercent = normalizeUiFontScalePercent(raw.uiFontScalePercent, uiFontScale)
   return {
     version: 1,
     locale: raw.locale === 'zh' ? 'zh' : 'en',
     theme,
-    uiFontScale,
+    uiFontScale: uiFontScaleFromPercent(uiFontScalePercent),
+    uiFontScalePercent,
     cursorSpotlight: raw.cursorSpotlight !== false,
     cursorSpotlightColor: normalizeCursorSpotlightColor(raw.cursorSpotlightColor),
     provider: normalizeModelProviderSettings(raw.provider),

@@ -1,13 +1,13 @@
 import i18n from '../i18n'
 
-const DEFAULT_WORKSPACE_LABEL = 'default'
+const DEFAULT_WORKSPACE_LABEL = 'Kun'
 
 function normalizePathForMatch(path: string): string {
   return path.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase()
 }
 
-// 新旧两代默认工作区路径都按 “default” 标签展示(老安装在迁移完成前
-// 仍会持有 ~/.deepseekgui 形式的路径)。
+// Keep both current and legacy default workspace paths under the product name
+// so the sidebar does not expose an implementation folder name.
 function isDefaultWorkspacePath(path: string): boolean {
   const normalized = normalizePathForMatch(path)
   return (

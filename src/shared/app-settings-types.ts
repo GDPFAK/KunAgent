@@ -24,6 +24,29 @@ export {
 export const KUN_TOOL_PERMISSION_MODES = ['always-ask', 'read-only', 'sensitive-ask', 'workspace-write', 'bypass'] as const
 export type KunToolPermissionMode = (typeof KUN_TOOL_PERMISSION_MODES)[number]
 export type UiFontScale = 'small' | 'medium' | 'large'
+export const UI_FONT_SCALE_PERCENT_MIN = 80
+export const UI_FONT_SCALE_PERCENT_MAX = 120
+export const UI_FONT_SCALE_PERCENT_DEFAULT = 82
+export function uiFontScaleToPercent(scale: UiFontScale | null | undefined): number {
+  if (scale === 'large') return 100
+  if (scale === 'medium') return 88
+  return UI_FONT_SCALE_PERCENT_DEFAULT
+}
+export function uiFontScaleFromPercent(value: number): UiFontScale {
+  if (value >= 95) return 'large'
+  if (value >= 86) return 'medium'
+  return 'small'
+}
+export function normalizeUiFontScalePercent(value: unknown, fallbackScale?: UiFontScale | null): number {
+  const raw = typeof value === 'number'
+    ? value
+    : typeof value === 'string' && value.trim() !== ''
+      ? Number(value)
+      : Number.NaN
+  const fallback = uiFontScaleToPercent(fallbackScale)
+  if (!Number.isFinite(raw)) return fallback
+  return Math.min(UI_FONT_SCALE_PERCENT_MAX, Math.max(UI_FONT_SCALE_PERCENT_MIN, Math.round(raw)))
+}
 export type ScheduleRunMode = 'agent' | 'plan'
 export type ScheduleKind = 'manual' | 'interval' | 'daily' | 'at'
 export type ScheduleTaskStatus = 'idle' | 'queued' | 'running' | 'success' | 'error'
@@ -119,6 +142,7 @@ export type ModelProviderReasoningCapabilityV1 = {
 export type ModelProviderModelProfileV1 = {
   aliases?: string[]
   contextWindowTokens?: number
+  maxOutputTokens?: number
   inputModalities: ModelProviderInputModality[]
   outputModalities: ModelProviderInputModality[]
   supportsToolCalling: boolean
@@ -1651,6 +1675,7 @@ export type AppSettingsV1 = {
   locale: 'en' | 'zh'
   theme: 'system' | 'light' | 'dark'
   uiFontScale: UiFontScale
+  uiFontScalePercent?: number
   cursorSpotlight?: boolean
   cursorSpotlightColor?: string
   provider: ModelProviderSettingsV1

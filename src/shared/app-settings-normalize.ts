@@ -6,6 +6,8 @@ import {
   DEFAULT_CURSOR_SPOTLIGHT_COLOR,
   DEFAULT_LOG_RETENTION_DAYS,
   normalizeGuiUpdateChannel,
+  normalizeUiFontScalePercent,
+  uiFontScaleFromPercent,
   type AppBehaviorConfigV1,
   type AppSettingsV1,
   type CheckpointCleanupConfigV1,
@@ -76,12 +78,24 @@ export function normalizeAppSettings(settings: AppSettingsV1): AppSettingsV1 {
       maybeSettings.theme === 'light' || maybeSettings.theme === 'dark' || maybeSettings.theme === 'system'
         ? maybeSettings.theme
         : 'system',
-    uiFontScale:
+    uiFontScale: uiFontScaleFromPercent(
+      normalizeUiFontScalePercent(
+        maybeSettings.uiFontScalePercent,
+        maybeSettings.uiFontScale === 'small' ||
+        maybeSettings.uiFontScale === 'medium' ||
+        maybeSettings.uiFontScale === 'large'
+          ? maybeSettings.uiFontScale
+          : 'small'
+      )
+    ),
+    uiFontScalePercent: normalizeUiFontScalePercent(
+      maybeSettings.uiFontScalePercent,
       maybeSettings.uiFontScale === 'small' ||
       maybeSettings.uiFontScale === 'medium' ||
       maybeSettings.uiFontScale === 'large'
         ? maybeSettings.uiFontScale
-        : 'small',
+        : 'small'
+    ),
     cursorSpotlight: maybeSettings.cursorSpotlight !== false,
     cursorSpotlightColor: normalizeCursorSpotlightColor(maybeSettings.cursorSpotlightColor),
     provider: providerSettings,

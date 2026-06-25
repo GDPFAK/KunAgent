@@ -8,8 +8,12 @@ import {
   DEFAULT_WRITE_INLINE_COMPLETION_MODEL,
   DEFAULT_WRITE_INLINE_LONG_COMPLETION_MAX_TOKENS,
   DEFAULT_KUN_DATA_DIR,
+  UI_FONT_SCALE_PERCENT_MAX,
+  UI_FONT_SCALE_PERCENT_MIN,
   WRITE_INLINE_COMPLETION_MODEL_IDS,
-  isKunRuntimeInsecure
+  isKunRuntimeInsecure,
+  normalizeUiFontScalePercent,
+  uiFontScaleFromPercent
 } from '@shared/app-settings'
 import type { SkillRootId } from '../lib/skill-root-preference'
 import { FolderOpen, Loader2, PencilLine, RefreshCw, Settings } from 'lucide-react'
@@ -236,9 +240,7 @@ export function GeneralSettingsSection({ ctx }: { ctx: Record<string, any> }): R
   const closeActionOptions: WindowCloseAction[] = ['ask', 'tray', 'quit']
   const fontScaleOptions: AppSettingsV1['uiFontScale'][] = ['small', 'medium', 'large']
   const checkpointCleanupIntervalOptions = Array.from(CHECKPOINT_CLEANUP_INTERVAL_DAYS)
-  const selectedFontScaleIndex = fontScaleOptions.indexOf(form.uiFontScale)
-  const fontScaleIndex = selectedFontScaleIndex >= 0 ? selectedFontScaleIndex : 0
-  const currentFontScale = fontScaleOptions[fontScaleIndex]
+  const fontScalePercent = normalizeUiFontScalePercent(form.uiFontScalePercent, form.uiFontScale)
   const fontScaleLabel = (scale: AppSettingsV1['uiFontScale']): string => {
     if (scale === 'large') return t('fontScaleLarge')
     if (scale === 'medium') return t('fontScaleMedium')
@@ -290,19 +292,22 @@ export function GeneralSettingsSection({ ctx }: { ctx: Record<string, any> }): R
                       </div>
                       <input
                         type="range"
-                        min={0}
-                        max={fontScaleOptions.length - 1}
+                        min={UI_FONT_SCALE_PERCENT_MIN}
+                        max={UI_FONT_SCALE_PERCENT_MAX}
                         step={1}
-                        value={fontScaleIndex}
+                        value={fontScalePercent}
                         aria-label={t('fontScale')}
                         className="mt-2 w-full accent-accent"
                         onChange={(e) => {
-                          const nextScale = fontScaleOptions[Number(e.target.value)] ?? 'medium'
-                          update({ uiFontScale: nextScale })
+                          const nextPercent = normalizeUiFontScalePercent(Number(e.target.value), form.uiFontScale)
+                          update({
+                            uiFontScale: uiFontScaleFromPercent(nextPercent),
+                            uiFontScalePercent: nextPercent
+                          })
                         }}
                       />
                       <div className="mt-1.5 text-[13px] font-medium text-ds-muted">
-                        {t('fontScaleCurrent', { value: fontScaleLabel(currentFontScale) })}
+                        {t('fontScaleCurrent', { value: `${fontScalePercent}%` })}
                       </div>
                     </div>
                   }

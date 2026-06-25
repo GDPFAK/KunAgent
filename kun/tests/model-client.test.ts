@@ -8,6 +8,7 @@ import {
   makeToolResultItem,
   makeUserItem
 } from '../src/domain/item.js'
+import type { ModelCapabilityMetadata } from '../src/contracts/capabilities.js'
 import type { ModelRequest, ModelStreamChunk } from '../src/ports/model-client.js'
 
 function buildRequest(abortSignal: AbortSignal): ModelRequest {
@@ -230,6 +231,91 @@ describe('CompatModelClient', () => {
       expect.objectContaining({ kind: 'usage', usage: expect.objectContaining({ promptTokens: 2, completionTokens: 3 }) }),
       { kind: 'completed', stopReason: 'stop' }
     ])
+  })
+
+  it('uses model profile maxOutputTokens when the turn does not set an explicit maxTokens', async () => {
+    const sentBodies: Array<Record<string, unknown>> = []
+    const fetchImpl: typeof fetch = async (url, init) => {
+      sentBodies.push(JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>)
+      const target = String(url)
+      if (target.endsWith('/responses')) {
+        return new Response(JSON.stringify({
+          id: 'resp_1',
+          status: 'completed',
+          output_text: 'ok'
+        }), { status: 200, headers: { 'content-type': 'application/json' } })
+      }
+      if (target.endsWith('/messages')) {
+        return new Response(JSON.stringify({
+          content: [{ type: 'text', text: 'ok' }],
+          stop_reason: 'end_turn'
+        }), { status: 200, headers: { 'content-type': 'application/json' } })
+      }
+      return new Response(JSON.stringify({
+        choices: [{ index: 0, finish_reason: 'stop', message: { content: 'ok' } }]
+      }), { status: 200, headers: { 'content-type': 'application/json' } })
+    }
+    const modelCapabilities = (model: string): ModelCapabilityMetadata => ({
+      id: model,
+      inputModalities: ['text'],
+      outputModalities: ['text'],
+      supportsToolCalling: true,
+      maxOutputTokens: 16_384,
+      messageParts: ['text']
+    })
+
+    for (const endpointFormat of ['chat_completions', 'responses', 'messages'] as const) {
+      const client = new CompatModelClient({
+        baseUrl: 'https://example.com/api/v1',
+        apiKey: 'k',
+        model: 'deepseek-chat',
+        endpointFormat,
+        fetchImpl,
+        nonStreaming: true,
+        modelCapabilities
+      })
+      for await (const _chunk of client.stream(buildRequest(new AbortController().signal))) {
+        // drain
+      }
+    }
+
+    expect(sentBodies[0]?.max_tokens).toBe(16_384)
+    expect(sentBodies[1]?.max_output_tokens).toBe(16_384)
+    expect(sentBodies[2]?.max_tokens).toBe(16_384)
+  })
+
+  it('lets request maxTokens override model profile maxOutputTokens', async () => {
+    const sentBodies: Array<Record<string, unknown>> = []
+    const fetchImpl: typeof fetch = async (_url, init) => {
+      sentBodies.push(JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>)
+      return new Response(JSON.stringify({
+        choices: [{ index: 0, finish_reason: 'stop', message: { content: 'ok' } }]
+      }), { status: 200, headers: { 'content-type': 'application/json' } })
+    }
+    const client = new CompatModelClient({
+      baseUrl: 'https://example.com/api/v1',
+      apiKey: 'k',
+      model: 'deepseek-chat',
+      endpointFormat: 'chat_completions',
+      fetchImpl,
+      nonStreaming: true,
+      modelCapabilities: (model): ModelCapabilityMetadata => ({
+        id: model,
+        inputModalities: ['text'],
+        outputModalities: ['text'],
+        supportsToolCalling: true,
+        maxOutputTokens: 16_384,
+        messageParts: ['text']
+      })
+    })
+    const request = buildRequest(new AbortController().signal)
+    request.maxTokens = 256
+
+    for await (const _chunk of client.stream(request)) {
+      // drain
+    }
+
+    expect(sentBodies[0]?.max_tokens).toBe(256)
   })
 
   it('injects read-tool images as chat completions image parts for vision models', async () => {

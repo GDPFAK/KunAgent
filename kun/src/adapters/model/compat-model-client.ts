@@ -368,6 +368,10 @@ export class CompatModelClient implements ModelClient {
     return this.config.modelCapabilities?.(model).reasoning
   }
 
+  private maxOutputTokensFor(model: string, request: ModelRequest): number | undefined {
+    return request.maxTokens ?? this.config.modelCapabilities?.(model).maxOutputTokens
+  }
+
   private async postChatCompletion(
     url: string,
     headers: Record<string, string>,
@@ -480,8 +484,9 @@ export class CompatModelClient implements ModelClient {
       stream,
       messages: splitToolImageMessagesForOpenAi(messages)
     }
-    if (request.maxTokens !== undefined) {
-      body.max_tokens = request.maxTokens
+    const maxOutputTokens = this.maxOutputTokensFor(model, request)
+    if (maxOutputTokens !== undefined) {
+      body.max_tokens = maxOutputTokens
     }
     if (request.temperature !== undefined) {
       body.temperature = request.temperature
@@ -536,8 +541,9 @@ export class CompatModelClient implements ModelClient {
       stream,
       input: messagesToResponsesInput(splitToolImageMessagesForOpenAi(messages))
     }
-    if (request.maxTokens !== undefined) {
-      body.max_output_tokens = request.maxTokens
+    const maxOutputTokens = this.maxOutputTokensFor(model, request)
+    if (maxOutputTokens !== undefined) {
+      body.max_output_tokens = maxOutputTokens
     }
     if (request.temperature !== undefined) {
       body.temperature = request.temperature
@@ -579,7 +585,7 @@ export class CompatModelClient implements ModelClient {
     const body: Record<string, unknown> = {
       model,
       stream,
-      max_tokens: request.maxTokens ?? DEFAULT_MESSAGES_MAX_TOKENS,
+      max_tokens: this.maxOutputTokensFor(model, request) ?? DEFAULT_MESSAGES_MAX_TOKENS,
       messages: converted.messages
     }
     const systemText = request.responseFormat === 'json_object'

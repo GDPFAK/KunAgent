@@ -41,6 +41,8 @@ import {
   SCHEDULE_REASONING_EFFORT_IDS,
   SPEECH_TO_TEXT_PROTOCOLS,
   TEXT_TO_SPEECH_PROTOCOLS,
+  UI_FONT_SCALE_PERCENT_MAX,
+  UI_FONT_SCALE_PERCENT_MIN,
   VIDEO_GENERATION_PROTOCOLS,
   WRITE_INLINE_COMPLETION_MODEL_IDS
 } from '../../shared/app-settings'
@@ -208,6 +210,7 @@ export const runtimeRequestPayloadSchema = z
 const localeSchema = z.enum(['en', 'zh'])
 const themeSchema = z.enum(['system', 'light', 'dark'])
 const uiFontScaleSchema = z.enum(['small', 'medium', 'large'])
+const uiFontScalePercentSchema = z.number().int().min(UI_FONT_SCALE_PERCENT_MIN).max(UI_FONT_SCALE_PERCENT_MAX)
 const hexColorSchema = z.string().trim().regex(/^#[0-9a-fA-F]{6}$/)
 const approvalPolicySchema = z.enum(['always', 'on-request', 'untrusted', 'never', 'auto', 'suggest'])
 const sandboxModeSchema = z.enum(['read-only', 'workspace-write', 'danger-full-access', 'external-sandbox'])
@@ -257,6 +260,7 @@ const modelReasoningRequestProtocolSchema = z.enum(MODEL_REASONING_REQUEST_PROTO
 const modelProfilePatchSchema = z.object({
   aliases: z.array(modelIdSchema).max(50).optional(),
   contextWindowTokens: z.number().int().positive().max(10_000_000).optional(),
+  maxOutputTokens: z.number().int().positive().max(1_000_000).optional(),
   inputModalities: z.array(modelProviderInputModalitySchema).max(8).optional(),
   outputModalities: z.array(modelProviderInputModalitySchema).max(8).optional(),
   supportsToolCalling: z.boolean().optional(),
@@ -1289,6 +1293,7 @@ const settingsPatchObjectSchema = z.object({
   locale: localeSchema.optional(),
   theme: themeSchema.optional(),
   uiFontScale: uiFontScaleSchema.optional(),
+  uiFontScalePercent: uiFontScalePercentSchema.optional(),
   cursorSpotlight: z.boolean().optional(),
   cursorSpotlightColor: hexColorSchema.optional(),
   provider: modelProviderPatchSchema.optional(),

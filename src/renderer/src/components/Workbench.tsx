@@ -93,7 +93,7 @@ import { RuntimeBanner } from './RuntimeBanner'
 import { CODE_PANEL_PREFERRED, useWorkbenchLayout } from './workbench-layout'
 import { useWorkbenchPlanController } from './workbench-plan-controller'
 import { prepareImageAttachmentUpload } from '../lib/image-attachment-upload'
-import { isChatAttachmentUploadEnabled } from '../lib/attachment-upload-availability'
+import { chatBlocksContainImageAttachments, isChatAttachmentUploadEnabled } from '../lib/attachment-upload-availability'
 import { normalizeWorkspaceRoot } from '../lib/workspace-path'
 import { useKeyboardShortcutSettings } from '../lib/keyboard-shortcut-settings'
 import { collectComposerChangeSummary } from '../lib/composer-change-summary'
@@ -567,7 +567,7 @@ export function Workbench(): ReactElement {
   const sddTitleSyncTimerRef = useRef<number | null>(null)
   const lastSyncedSddTitleRef = useRef<Record<string, string>>({})
   const timelineBlocks = blocks
-  const lockVisionToTextModelSwitch = route === 'chat' && timelineBlocks.some((block) => block.kind === 'user')
+  const lockVisionToTextModelSwitch = route === 'chat' && chatBlocksContainImageAttachments(timelineBlocks)
   const timelineLiveReasoning = liveReasoning
   const timelineLiveAssistant = liveAssistant
   const devPreviewBlocks = useMemo<ChatBlock[]>(() => {

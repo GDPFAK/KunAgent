@@ -1,4 +1,16 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, Notification, powerSaveBlocker, Tray } from 'electron'
+import {
+  app,
+  BrowserWindow,
+  dialog,
+  ipcMain,
+  Menu,
+  nativeImage,
+  Notification,
+  powerSaveBlocker,
+  Tray,
+  type ContextMenuParams,
+  type MenuItemConstructorOptions
+} from 'electron'
 import { existsSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
@@ -277,6 +289,26 @@ function syncCheckpointCleanupTimer(settings: AppSettingsV1): void {
   run()
   checkpointCleanupTimer = setInterval(run, intervalMs)
   checkpointCleanupTimer.unref?.()
+}
+
+function showRendererContextMenu(params: ContextMenuParams): void {
+  const template: MenuItemConstructorOptions[] = []
+  if (params.isEditable) {
+    template.push(
+      { role: 'undo' },
+      { role: 'redo' },
+      { type: 'separator' },
+      { role: 'cut' },
+      { role: 'copy' },
+      { role: 'paste' },
+      { type: 'separator' },
+      { role: 'selectAll' }
+    )
+  } else if (params.selectionText.trim()) {
+    template.push({ role: 'copy' })
+  }
+  if (template.length === 0 || !mainWindow || mainWindow.isDestroyed()) return
+  Menu.buildFromTemplate(template).popup({ window: mainWindow })
 }
 
 async function stopManagedRuntimesForQuit(): Promise<void> {
@@ -1177,6 +1209,9 @@ function createWindow(options: { suppressInitialShow?: boolean } = {}): void {
     const message = error instanceof Error ? error.message : String(error)
     console.error(`[kun-gui] failed to load preload ${preloadPath}:`, error)
     logError('preload', 'Failed to load preload script', { preloadPath, message })
+  })
+  mainWindow.webContents.on('context-menu', (_event, params) => {
+    showRendererContextMenu(params)
   })
   const showWindow = (): void => {
     if (options.suppressInitialShow) return

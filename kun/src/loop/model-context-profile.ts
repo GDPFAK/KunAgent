@@ -22,6 +22,7 @@ export type ModelContextProfile = ModelContextThresholds & {
   canonicalModel: string
   modelIds: readonly string[]
   contextWindowTokens: number
+  maxOutputTokens?: number
   inputModalities: readonly ModelInputModality[]
   outputModalities: readonly ModelInputModality[]
   supportsToolCalling: boolean
@@ -33,6 +34,7 @@ export type ModelContextProfile = ModelContextThresholds & {
 export type ModelContextProfileConfig = {
   aliases?: readonly string[]
   contextWindowTokens?: number
+  maxOutputTokens?: number
   contextCompaction?: ModelContextCompactionProfileConfig
   /** @deprecated Use contextCompaction.softRatio. */
   softRatio?: number
@@ -152,6 +154,7 @@ export function modelCapabilitiesForModel(
     outputModalities: [...(profile?.outputModalities ?? DEFAULT_MODEL_OUTPUT_MODALITIES)],
     supportsToolCalling: profile?.supportsToolCalling ?? true,
     contextWindowTokens: profile?.contextWindowTokens ?? DEFAULT_CONTEXT_WINDOW_TOKENS,
+    ...(profile?.maxOutputTokens ? { maxOutputTokens: profile.maxOutputTokens } : {}),
     messageParts: [...(profile?.messageParts ?? DEFAULT_MODEL_MESSAGE_PARTS)],
     ...(profile?.reasoning ? { reasoning: copyReasoningCapability(profile.reasoning) } : {}),
     ...(profile?.endpointFormat ? { endpointFormat: profile.endpointFormat } : {})
@@ -243,6 +246,9 @@ function mergeModelContextProfile(
     canonicalModel,
     modelIds,
     contextWindowTokens,
+    ...(input.maxOutputTokens ?? current?.maxOutputTokens
+      ? { maxOutputTokens: input.maxOutputTokens ?? current?.maxOutputTokens }
+      : {}),
     softThreshold,
     hardThreshold,
     inputModalities: uniqueModelCapabilityValues(input.inputModalities ?? current?.inputModalities ?? DEFAULT_MODEL_INPUT_MODALITIES),

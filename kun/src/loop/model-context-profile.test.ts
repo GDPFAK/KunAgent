@@ -60,13 +60,14 @@ describe('per-model endpointFormat', () => {
       models: {
         profiles: {
           'minimax-m3': { contextWindowTokens: 256_000, endpointFormat: 'messages' },
-          'glm-5.1': { contextWindowTokens: 131_072 }
+          'glm-5.1': { contextWindowTokens: 131_072, maxOutputTokens: 16_384 }
         }
       }
     })
     expect(modelCapabilitiesForModel('minimax-m3', profiles).endpointFormat).toBe('messages')
     // A model without an override inherits (no endpointFormat emitted).
     expect(modelCapabilitiesForModel('glm-5.1', profiles).endpointFormat).toBeUndefined()
+    expect(modelCapabilitiesForModel('glm-5.1', profiles).maxOutputTokens).toBe(16_384)
   })
 
   it('omits endpointFormat for unknown models so they inherit the provider format', () => {

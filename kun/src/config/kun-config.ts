@@ -53,6 +53,7 @@ export const ModelContextProfileConfigSchema = z
   .object({
     aliases: z.array(z.string().min(1)).optional(),
     contextWindowTokens: PositiveInt.optional(),
+    maxOutputTokens: PositiveInt.optional(),
     contextCompaction: ModelContextCompactionProfileConfigSchema.optional(),
     softRatio: PositiveRatio.optional(),
     hardRatio: PositiveRatio.optional(),

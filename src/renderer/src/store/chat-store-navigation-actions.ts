@@ -373,7 +373,7 @@ export function createNavigationActions(
         saveCodeWorkspaceRoots(codeWorkspaceRoots)
         const needsInitialSetup = !getActiveAgentApiKey(settings).trim()
         applyTheme(settings.theme)
-        applyUiFontScale(settings.uiFontScale)
+        applyUiFontScale(settings.uiFontScalePercent ?? settings.uiFontScale)
         applyCursorSpotlight(settings.cursorSpotlight !== false)
         applyCursorSpotlightColor(settings.cursorSpotlightColor)
         if (settings.write?.typography) applyWriteTypography(settings.write.typography)

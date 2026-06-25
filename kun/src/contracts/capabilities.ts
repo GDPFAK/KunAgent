@@ -51,6 +51,7 @@ export const ModelCapabilityMetadata = z
     outputModalities: z.array(ModelInputModality).min(1),
     supportsToolCalling: z.boolean(),
     contextWindowTokens: z.number().int().positive().optional(),
+    maxOutputTokens: z.number().int().positive().optional(),
     messageParts: z.array(ModelMessagePartSupport).min(1),
     reasoning: ModelReasoningCapabilityMetadata.optional(),
     // Per-model wire-format override. Lets one provider route some models to

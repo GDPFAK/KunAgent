@@ -31,7 +31,7 @@ type CreateAppActionsOptions = {
   getComposerModelLoadPromise: () => Promise<void> | null
   setComposerModelLoadPromise: (promise: Promise<void> | null) => void
   applyTheme: (theme: AppSettingsV1['theme']) => void
-  applyUiFontScale: (scale: AppSettingsV1['uiFontScale']) => void
+  applyUiFontScale: (scale: AppSettingsV1['uiFontScale'] | AppSettingsV1['uiFontScalePercent']) => void
   applyCursorSpotlight: (enabled: boolean) => void
   applyCursorSpotlightColor: (color: AppSettingsV1['cursorSpotlightColor']) => void
   applyWriteTypography: (typography: AppSettingsV1['write']['typography']) => void
@@ -232,7 +232,7 @@ export function createAppActions(options: CreateAppActionsOptions): Pick<
       const settings = await rendererRuntimeClient.getSettings({ forceRefresh: true })
       const workspaceRoot = normalizeWorkspaceRoot(settings.workspaceRoot)
       applyTheme(settings.theme)
-      applyUiFontScale(settings.uiFontScale)
+      applyUiFontScale(settings.uiFontScalePercent ?? settings.uiFontScale)
       applyCursorSpotlight(settings.cursorSpotlight !== false)
       applyCursorSpotlightColor(settings.cursorSpotlightColor)
       if (settings.write?.typography) applyWriteTypography(settings.write.typography)

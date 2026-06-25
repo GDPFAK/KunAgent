@@ -145,6 +145,7 @@ export function SettingsView(): ReactElement {
   const permissionsSectionRef = useRef<HTMLDivElement | null>(null)
   const formTheme = form?.theme
   const formUiFontScale = form?.uiFontScale
+  const formUiFontScalePercent = form?.uiFontScalePercent
   const writeTypography = form?.write?.typography
   const formWorkspaceRoot = form?.workspaceRoot
   const formKun = form ? getKunRuntimeSettings(form) : null
@@ -203,8 +204,8 @@ export function SettingsView(): ReactElement {
   useEffect(() => {
     if (!formTheme || !formUiFontScale) return
     applyTheme(formTheme)
-    applyUiFontScale(formUiFontScale)
-  }, [formTheme, formUiFontScale])
+    applyUiFontScale(formUiFontScalePercent ?? formUiFontScale)
+  }, [formTheme, formUiFontScale, formUiFontScalePercent])
 
   useEffect(() => {
     if (typeof formCursorSpotlight === 'boolean') {
