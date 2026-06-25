@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { clearWritePdfTextCache, readWritePdfText } from './write-pdf-text-service'
+import { clearWritePdfTextCache, readLocalPdfText, readWritePdfText } from './write-pdf-text-service'
 
 function escapePdfText(text: string): string {
   return text.replaceAll('\\', '\\\\').replaceAll('(', '\\(').replaceAll(')', '\\)')
@@ -63,5 +63,19 @@ describe('write PDF text service', () => {
       charStart: 0
     })
     expect(result.pages[0].text).toContain('PDF BM25 keyword retrieval context')
-  })
+  }, 15_000)
+
+  it('extracts text for local PDF attachments', async () => {
+    const workspaceRoot = await mkdtemp(join(tmpdir(), 'ds-gui-local-pdf-text-'))
+    const pdfPath = join(workspaceRoot, 'fixture.pdf')
+    await writeFile(pdfPath, createSimpleTextPdf('Local PDF attachment text'))
+
+    const result = await readLocalPdfText({ path: pdfPath })
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.pageCount).toBe(1)
+    expect(result.hasText).toBe(true)
+    expect(result.pages[0]?.text).toContain('Local PDF attachment text')
+  }, 15_000)
 })

@@ -33,7 +33,7 @@ function createSettings(patch: Partial<AppSettingsV1['schedule']['internal']> = 
     version: 1,
     locale: 'en',
     theme: 'system',
-    uiFontScale: 'small',
+    uiFontScale: 0.82,
     provider: defaultModelProviderSettings(),
     agents: {
       kun: defaultKunRuntimeSettings()
@@ -43,6 +43,7 @@ function createSettings(patch: Partial<AppSettingsV1['schedule']['internal']> = 
       enabled: true,
       retentionDays: 2
     },
+    checkpointCleanup: { enabled: false, intervalDays: 3 },
     notifications: {
       turnComplete: true
     },

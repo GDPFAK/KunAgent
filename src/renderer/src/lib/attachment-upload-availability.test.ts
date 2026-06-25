@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { isChatAttachmentUploadEnabled } from './attachment-upload-availability'
 
 describe('isChatAttachmentUploadEnabled', () => {
-  it('enables composer attachments in chat when the Kun attachment store is ready', () => {
+  it('enables composer attachments in chat when the runtime is ready', () => {
     expect(isChatAttachmentUploadEnabled({
       runtimeConnection: 'ready',
       route: 'chat',
@@ -19,7 +19,7 @@ describe('isChatAttachmentUploadEnabled', () => {
     })).toBe(true)
   })
 
-  it('enables composer attachments in Write mode assistants when the selected model can read images', () => {
+  it('enables composer attachments in Write mode assistants', () => {
     expect(isChatAttachmentUploadEnabled({
       runtimeConnection: 'ready',
       route: 'write',
@@ -44,12 +44,15 @@ describe('isChatAttachmentUploadEnabled', () => {
       attachmentStoreAvailable: true,
       modelSupportsImageInput: true
     })).toBe(false)
+  })
+
+  it('keeps the attachment picker reachable for non-image documents', () => {
     expect(isChatAttachmentUploadEnabled({
       runtimeConnection: 'ready',
       route: 'chat',
       mode: 'agent',
-      attachmentStoreAvailable: true,
+      attachmentStoreAvailable: false,
       modelSupportsImageInput: false
-    })).toBe(false)
+    })).toBe(true)
   })
 })

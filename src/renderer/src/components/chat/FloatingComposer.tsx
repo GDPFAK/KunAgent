@@ -91,6 +91,9 @@ import {
   FloatingComposerModelPicker,
   type ComposerReasoningEffort
 } from './FloatingComposerModelPicker'
+import { FloatingComposerAgentPicker } from './FloatingComposerAgentPicker'
+import { FloatingComposerUserInputPanel } from './FloatingComposerUserInputPanel'
+import { useComposerUserInput, type PendingUserInputBlock } from './use-composer-user-input'
 import {
   FloatingComposerQueuedMessages,
   type QueuedComposerMessage
@@ -314,6 +317,10 @@ function imageMimeTypeFromFileName(name: string | undefined): string | undefined
   return undefined
 }
 
+function isPdfFile(file: File): boolean {
+  return file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')
+}
+
 function comparablePath(path: string | undefined): string {
   return (path ?? '').replace(/\\/g, '/').replace(/\/+$/g, '').toLowerCase()
 }
@@ -522,7 +529,22 @@ export function FloatingComposer({
   const clearActiveThreadGoal = useChatStore((s) => s.clearActiveThreadGoal)
   const clawChannels = useChatStore((s) => s.clawChannels)
   const activeClawChannelId = useChatStore((s) => s.activeClawChannelId)
+  const blocks = useChatStore((s) => s.blocks)
+  const resolveUserInput = useChatStore((s) => s.resolveUserInput)
   const compact = variant === 'compact'
+  // The pending ask-user request for the active thread, surfaced as a panel
+  // docked above this composer. Only the main chat composer hosts it: `blocks`
+  // is the active thread's, so a compact side composer would otherwise mirror
+  // it. The timeline bubble remains the record in every surface.
+  const pendingUserInputBlock = useMemo<PendingUserInputBlock | null>(() => {
+    if (compact || route !== 'chat') return null
+    for (let i = blocks.length - 1; i >= 0; i -= 1) {
+      const block = blocks[i]
+      if (block.kind === 'user_input' && block.status === 'pending') return block
+    }
+    return null
+  }, [blocks, compact, route])
+  const userInput = useComposerUserInput(pendingUserInputBlock, resolveUserInput)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const speechToTextSettings = useSpeechToTextSettings()
   const dictationInputRef = useRef(input)
@@ -658,26 +680,19 @@ export function FloatingComposer({
     typeof runtimeSkillCount === 'number' ? runtimeSkillCount : lastKnownSkillCountRef.current
   const canShowContextCapacity =
     !compact && route === 'chat' && Boolean(activeThreadId) && effectiveContextWindow > 0
-  // Freeze the measured total for the duration of a turn: the runtime can emit
-  // several `usage` events while streaming, and tracking them live makes the
-  // chip jitter (visible flicker). Adopt the latest value only while idle.
   const liveMeasuredTotal =
     lastTurnUsage && lastTurnUsage.threadId === activeThreadId
       ? lastTurnUsage.snapshot.inputTokens
       : null
-  const measuredTotalRef = useRef<number | null>(null)
-  if (!busy) measuredTotalRef.current = liveMeasuredTotal
-  const measuredContextTotal = busy ? measuredTotalRef.current : liveMeasuredTotal
+  const measuredContextTotal = liveMeasuredTotal
   // The message estimate feeds the per-category split (popover), the
   // no-measured-total fallback, AND the sanity check that rejects an inflated
   // measured total (some providers over-report prompt_tokens — see
-  // buildContextCapacity). We therefore need it whenever the gauge is idle, not
-  // just when the popover is open. Never subscribe to `blocks` while streaming
-  // with the popover closed — blocks churn on every delta and re-render the
-  // whole composer; the frozen ref is good enough for that transient window.
-  const needMessageEstimate =
-    canShowContextCapacity && (contextCapacityOpen || measuredContextTotal == null || !busy)
-  const subscribeContextBlocks = needMessageEstimate && (contextCapacityOpen || !busy)
+  // buildContextCapacity). We therefore keep it live whenever the gauge can render, not
+  // just when the popover is open. Subscribe while streaming too so the context
+  // usage ring reflects the assistant reply as it becomes future context.
+  const needMessageEstimate = canShowContextCapacity
+  const subscribeContextBlocks = needMessageEstimate
   const contextBlocks = useChatStore((s) => (subscribeContextBlocks ? s.blocks : EMPTY_CONTEXT_BLOCKS))
   const conversationTokensRef = useRef(0)
   const conversationTokens = useMemo(() => {
@@ -730,6 +745,8 @@ export function FloatingComposer({
   const goalRuntimeStartedAtRef = useRef<number | null>(null)
   const placeholder = !runtimeReady
     ? t('runtimeActionNeedsConnection')
+    : pendingUserInputBlock
+      ? t('userInputComposerPlaceholder')
     : !hasActiveThread && !effectiveWorkspaceRoot
       ? t('workspaceRequiredToCreateThread')
       : goalPanelOpen && route !== 'claw'
@@ -1320,6 +1337,21 @@ export function FloatingComposer({
   }
 
   const handlePrimaryAction = (): void => {
+    // While an ask-user request is pending, a plain text reply answers the
+    // current question instead of being sent/queued as a chat message. Routing
+    // through resolveUserInput (not onSend) bypasses the busy-turn queue. Slash
+    // commands (input starting with "/") fall through so they stay escape
+    // hatches; an empty composer is a no-op (chips still work via the panel).
+    if (userInput.active) {
+      const trimmed = input.trim()
+      if (!trimmed.startsWith('/')) {
+        if (trimmed && userInput.submitTypedText(input)) {
+          setInput('')
+          draft.focusComposer()
+        }
+        return
+      }
+    }
     if (highlightedSlashCommand) {
       if (highlightedSlashCommand.disabled) return
       applySlashCommand(highlightedSlashCommand.id)
@@ -1378,6 +1410,14 @@ export function FloatingComposer({
         return
       }
     }
+    // Trailing fallback for a pending ask: text that began with "/" but matched
+    // no real command (e.g. a free-form answer like "/usr/local/bin") still
+    // answers the current question instead of leaking into chat via onSend.
+    if (userInput.active && input.trim() && userInput.submitTypedText(input)) {
+      setInput('')
+      draft.focusComposer()
+      return
+    }
     onSend()
   }
   dictationPrimaryActionRef.current = primaryActionDisabled ? null : handlePrimaryAction
@@ -1431,6 +1471,15 @@ export function FloatingComposer({
         setInput('')
         return
       }
+    }
+
+    // Esc cancels a pending ask-user request. (Option picking is click-only:
+    // a bare-digit accelerator would hijack the first character of a
+    // digit-leading custom answer, which the type-to-answer design must allow.)
+    if (!composing && userInput.active && event.key === 'Escape') {
+      event.preventDefault()
+      userInput.cancel()
+      return
     }
 
     if (!sendByEnter || composing) return
@@ -1495,7 +1544,8 @@ export function FloatingComposer({
   const handleComposerDragOver = (event: ReactDragEvent<HTMLDivElement>): void => {
     const dataTransferTypes = Array.from(event.dataTransfer.types ?? [])
     const canAcceptImages = canPickAttachment && imageTransferHasImages(event.dataTransfer)
-    if (!dataTransferTypes.includes('Files') && !canAcceptImages) return
+    const canAcceptPdf = canPickAttachment && Array.from(event.dataTransfer.files ?? []).some(isPdfFile)
+    if (!dataTransferTypes.includes('Files') && !canAcceptImages && !canAcceptPdf) return
     event.preventDefault()
     event.dataTransfer.dropEffect = 'copy'
   }
@@ -1528,11 +1578,12 @@ export function FloatingComposer({
     const rawFiles = Array.from(event.dataTransfer.files ?? [])
     const isImageLike = (file: File): boolean =>
       isImageMimeType(file.type) || Boolean(imageMimeTypeFromFileName(file.name))
-    const pathFiles = rawFiles.filter((file) => !isImageLike(file))
-    if (imageFiles.length === 0 && pathFiles.length === 0) return
+    const pdfFiles = canPickAttachment ? rawFiles.filter(isPdfFile) : []
+    const pathFiles = rawFiles.filter((file) => !isImageLike(file) && !isPdfFile(file))
+    if (imageFiles.length === 0 && pdfFiles.length === 0 && pathFiles.length === 0) return
     event.preventDefault()
-    if (imageFiles.length > 0 && onPickAttachments) {
-      onPickAttachments(imageFiles)
+    if ((imageFiles.length > 0 || pdfFiles.length > 0) && onPickAttachments) {
+      onPickAttachments([...imageFiles, ...pdfFiles])
     }
     if (pathFiles.length > 0) {
       const paths: string[] = []
@@ -1562,7 +1613,7 @@ export function FloatingComposer({
       />
 
       <div className="relative">
-        {showGoalFloater && activeThreadGoal ? (
+        {showGoalFloater && activeThreadGoal && !pendingUserInputBlock ? (
           <div className="pointer-events-none absolute inset-x-3 bottom-full z-20 mb-2 flex justify-center">
             <div className="pointer-events-auto flex min-h-11 w-full max-w-[46rem] items-center gap-2 rounded-full border border-ds-border bg-ds-card/95 px-3 py-1.5 text-ds-muted shadow-[0_12px_34px_rgba(20,47,95,0.10)] backdrop-blur-xl dark:bg-ds-card/90">
               <Target className="h-3.5 w-3.5 shrink-0 text-ds-faint" strokeWidth={1.9} />
@@ -1844,7 +1895,7 @@ export function FloatingComposer({
           </div>
         ) : null}
 
-        {goalPanelOpen && slashQuery == null ? (
+        {goalPanelOpen && slashQuery == null && !pendingUserInputBlock ? (
           <div
             ref={goalPanelRef}
             className="absolute inset-x-2 bottom-full z-30 mb-3 overflow-hidden rounded-[26px] border border-ds-border bg-ds-card/95 p-3 shadow-[0_18px_52px_rgba(20,47,95,0.14)] backdrop-blur-xl dark:bg-ds-card/90"
@@ -1928,6 +1979,10 @@ export function FloatingComposer({
               </button>
             </div>
           </div>
+        ) : null}
+
+        {userInput.active ? (
+          <FloatingComposerUserInputPanel controller={userInput} t={t} />
         ) : null}
 
         <div
@@ -2060,10 +2115,19 @@ export function FloatingComposer({
                   <span
                     key={attachment.id}
                     className="ds-no-drag inline-flex h-7 max-w-full items-center gap-1.5 rounded-lg border border-ds-border-muted bg-ds-card/80 px-2 text-[12px] font-medium text-ds-muted"
-                    title={attachment.id}
+                    title={attachment.name || attachment.id}
                   >
-                    <ImagePlus className="h-3.5 w-3.5 shrink-0 text-ds-faint" strokeWidth={1.8} />
+                    {attachment.kind === 'document' ? (
+                      <FileText className="h-3.5 w-3.5 shrink-0 text-ds-faint" strokeWidth={1.8} />
+                    ) : (
+                      <ImagePlus className="h-3.5 w-3.5 shrink-0 text-ds-faint" strokeWidth={1.8} />
+                    )}
                     <span className="max-w-40 truncate">{attachment.name || attachment.id}</span>
+                    {attachment.kind === 'document' && attachment.pageCount ? (
+                      <span className="shrink-0 text-[11px] text-ds-faint">
+                        {attachment.pageCount}p{attachment.truncated ? '+' : ''}
+                      </span>
+                    ) : null}
                     {onRemoveAttachment ? (
                       <button
                         type="button"
@@ -2089,7 +2153,7 @@ export function FloatingComposer({
             <input
               ref={fileInputRef}
               type="file"
-              accept="image/png,image/jpeg,image/webp"
+              accept="image/png,image/jpeg,image/webp,application/pdf,.pdf"
               multiple
               className="hidden"
               onChange={handleAttachmentInput}
@@ -2253,6 +2317,9 @@ export function FloatingComposer({
                   onComposerReasoningEffortChange={onComposerReasoningEffortChange}
                   onConfigureProviders={onConfigureProviders}
                 />
+              )}
+              {hideModelPicker ? null : (
+                <FloatingComposerAgentPicker compact={compact} disabled={!canChangeModel} />
               )}
               {showVoiceDictation ? (
                 <button

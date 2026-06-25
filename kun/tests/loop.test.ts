@@ -10,6 +10,7 @@ import { GET_GOAL_TOOL_NAME, UPDATE_GOAL_TOOL_NAME } from '../src/adapters/tool/
 import { FileThreadStore, FileSessionStore } from '../src/adapters/file/index.js'
 import { RuntimeEventRecorder } from '../src/services/runtime-event-recorder.js'
 import { ContextCompactor } from '../src/loop/context-compactor.js'
+import { COMPACTION_SYSTEM_PROMPT } from '../src/loop/compaction-summary.js'
 import { effectiveHistoryAfterLatestCompaction } from '../src/loop/compaction-history.js'
 import { resolveModelContextProfile } from '../src/loop/model-context-profile.js'
 import { isPlanClarifyingQuestion } from '../src/loop/agent-loop.js'
@@ -2347,7 +2348,7 @@ describe('AgentLoop', () => {
         async *stream(request: ModelRequest): AsyncIterable<ModelStreamChunk> {
           requests.push(request)
           const isSummaryRequest = request.tools.length === 0 &&
-            request.contextInstructions?.some((text) => text.includes('history fold'))
+            request.systemPrompt === COMPACTION_SYSTEM_PROMPT
           if (isSummaryRequest) {
             yield {
               kind: 'usage',
@@ -2398,23 +2399,25 @@ describe('AgentLoop', () => {
     const status = await h.loop.runTurn(h.threadId, h.turnId)
     const [summaryRequest, mainRequest] = requests
     if (!summaryRequest || !mainRequest) throw new Error('expected summary and main model requests')
-    const summaryPromptItem = summaryRequest.history[0]
+    const summaryContinuation = summaryRequest.history[summaryRequest.history.length - 1]
     const persisted = await h.sessionStore.loadItems(h.threadId)
     const persistedSummary = persisted.find((item) => item.kind === 'compaction')
     const mainSummary = mainRequest.history.find((item) => item.kind === 'compaction')
 
     expect(status).toBe('completed')
     expect(requests).toHaveLength(2)
-    expect(summaryRequest.systemPrompt).toBe('be brief')
-    expect(summaryRequest.prefix).toBe(h.prefix.fewShots)
+    // Compaction-mode turn: dedicated summarizer system prompt, no main prefix,
+    // and the real conversation fed as messages with a free-form continuation.
+    expect(summaryRequest.systemPrompt).toBe(COMPACTION_SYSTEM_PROMPT)
+    expect(summaryRequest.prefix).toEqual([])
     expect(summaryRequest.tools).toEqual([])
     expect(summaryRequest.maxTokens).toBe(333)
     expect(summaryRequest.temperature).toBe(0)
     expect(summaryRequest.reasoningEffort).toBe('off')
-    expect(summaryRequest.contextInstructions?.join('\n')).toContain('history fold')
-    expect(summaryPromptItem?.kind).toBe('user_message')
-    expect(summaryPromptItem?.kind === 'user_message' ? summaryPromptItem.text : '')
-      .toContain('Conversation history to fold')
+    expect(summaryRequest.history.some((item) => item.id === 'model_summary_hist_0')).toBe(true)
+    expect(summaryContinuation?.kind).toBe('user_message')
+    expect(summaryContinuation?.kind === 'user_message' ? summaryContinuation.text : '')
+      .toContain('Provide a detailed summary of our conversation above')
     expect(mainSummary?.kind === 'compaction' ? mainSummary.summary : '')
       .toContain('Model summary: preserve alpha.txt')
     expect(persistedSummary?.kind === 'compaction' ? persistedSummary.summary : '')
@@ -2430,7 +2433,7 @@ describe('AgentLoop', () => {
         async *stream(request: ModelRequest): AsyncIterable<ModelStreamChunk> {
           requests.push(request)
           const isSummaryRequest = request.tools.length === 0 &&
-            request.contextInstructions?.some((text) => text.includes('history fold'))
+            request.systemPrompt === COMPACTION_SYSTEM_PROMPT
           if (isSummaryRequest) {
             yield { kind: 'error', message: 'summary model unavailable', code: 'summary_down' }
             return

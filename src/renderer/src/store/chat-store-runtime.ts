@@ -1082,6 +1082,24 @@ export function buildThreadEventSink(
           : { threads: nextThreads }
       })
     },
+    onThreadUpdated: (ev) => {
+      if (!isCurrentStream()) return
+      if (!ev.threadId) return
+      const nextTitle = ev.title?.trim()
+      // Only the title-upgrade path carries a title; ignore status-only updates.
+      if (!nextTitle) return
+      set((s) => ({
+        threads: s.threads.map((thread) =>
+          thread.id === ev.threadId
+            ? {
+                ...thread,
+                title: nextTitle,
+                ...(ev.titleAuto !== undefined ? { titleAuto: ev.titleAuto } : {})
+              }
+            : thread
+        )
+      }))
+    },
     onTurnComplete: () => {
       if (!isCurrentStream()) return
       resetBusyRecoveryAttempts()

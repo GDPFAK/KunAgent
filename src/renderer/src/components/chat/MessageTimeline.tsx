@@ -483,7 +483,11 @@ function MessageTurn({
   )
   const onlyCompactionProcess = processBlocks.length > 0 && workProcessBlocks.length === 0
   const hasProcessError = workProcessBlocks.some(processBlockHasError)
-  const workExpanded = hasProcessError || (workExpandedOverride ?? isProcessing)
+  // Only force the work process open (and lock it open) while the turn is still
+  // running. Once the turn completes — even if a tool call failed mid-turn — the
+  // panel should auto-collapse like a normal completed turn and stay user-toggleable.
+  const forceExpandForError = isProcessing && hasProcessError
+  const workExpanded = forceExpandForError || (workExpandedOverride ?? isProcessing)
   const reviewBlocks = useMemo(
     () => turn.blocks.filter((block) => block.kind === 'review'),
     [turn.blocks]
@@ -559,7 +563,7 @@ function MessageTurn({
             durationMs={durationMs}
             reasoningDurationMs={reasoningDurationMs}
             expanded={workExpanded}
-            collapsible={!hasProcessError}
+            collapsible={!forceExpandForError}
             onToggle={() => setWorkExpandedOverride((value) => !(value ?? isProcessing))}
           />
           {workExpanded && processSections.length > 0 ? (

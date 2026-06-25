@@ -28,6 +28,24 @@ export async function decideApproval(input: {
   if (!approval) {
     return ERRORS.notFound(`approval not found: ${input.approvalId}`)
   }
+  if (approval.status !== 'pending') {
+    const resolvedDecision =
+      approval.status === 'allowed'
+        ? 'allow'
+        : approval.status === 'denied'
+          ? 'deny'
+          : null
+    if (resolvedDecision && resolvedDecision === parsed.data.decision) {
+      const response: ApprovalDecisionResponse = {
+        approvalId: input.approvalId,
+        decision: parsed.data.decision,
+        status: approval.status,
+        alreadyResolved: true
+      }
+      return jsonResponse(response)
+    }
+    return ERRORS.conflict(`approval already decided: ${input.approvalId}`)
+  }
   const ok = input.gate.decide(input.approvalId, parsed.data.decision, parsed.data.reason)
   if (!ok) {
     return ERRORS.conflict(`approval already decided: ${input.approvalId}`)

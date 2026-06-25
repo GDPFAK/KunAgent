@@ -132,7 +132,7 @@ function SddDesignContextBar({
   const chipClass = (active: boolean): string =>
     `rounded-full border px-2.5 py-1 text-[12px] transition-colors ${
       active
-        ? 'border-ds-accent bg-ds-accent/12 text-ds-accent'
+        ? 'border-accent bg-accent/12 text-accent'
         : 'border-ds-border-muted bg-ds-main/40 text-ds-muted hover:text-ds-ink'
     }`
   return (
@@ -143,7 +143,7 @@ function SddDesignContextBar({
         className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left"
       >
         <span className="flex items-center gap-1.5 text-[13px] font-medium text-ds-ink">
-          <Sparkles className="h-3.5 w-3.5 text-ds-accent" />
+          <Sparkles className="h-3.5 w-3.5 text-accent" />
           {t('sddDesignContextTitle')}
         </span>
         <span className="min-w-0 flex-1 truncate text-right text-[12px] text-ds-faint">{summary}</span>
@@ -185,7 +185,7 @@ function SddDesignContextBar({
                 value={brandColor}
                 placeholder={t('sddDesignBrandColorPlaceholder')}
                 onChange={(e) => onChange({ brandColor: e.target.value })}
-                className="h-7 flex-1 rounded-lg border border-ds-border-muted bg-ds-main/40 px-2 text-[12px] text-ds-ink outline-none focus:border-ds-accent"
+                className="h-7 flex-1 rounded-lg border border-ds-border-muted bg-ds-main/40 px-2 text-[12px] text-ds-ink outline-none focus:border-accent"
               />
               {brandColor ? (
                 <button

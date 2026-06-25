@@ -1,4 +1,5 @@
 import {
+  DEFAULT_CHECKPOINT_CLEANUP_INTERVAL_DAYS,
   DEFAULT_LOG_RETENTION_DAYS,
   DEFAULT_GUI_UPDATE_CHANNEL,
   MIN_KUN_LOCAL_PORT,
@@ -16,6 +17,7 @@ import {
   mergeTerminalSettings,
   normalizeAppBehaviorSettings,
   normalizeClawSettings,
+  normalizeCheckpointCleanupSettings,
   normalizeCursorSpotlightColor,
   normalizeGuiUpdateChannel,
   normalizeKeyboardShortcuts,
@@ -24,6 +26,7 @@ import {
   normalizeWorkflowSettings,
   normalizeWriteSettings,
   normalizeTerminalSettings,
+  normalizeUiFontScale,
   type AppSettingsPatch,
   type AppSettingsV1
 } from '@shared/app-settings'
@@ -61,6 +64,10 @@ export function mergeSettings(current: AppSettingsV1, patch: SettingsPatch): App
       ...safeCurrent.log,
       ...(patch.log ?? {})
     },
+    checkpointCleanup: normalizeCheckpointCleanupSettings({
+      ...safeCurrent.checkpointCleanup,
+      ...(patch.checkpointCleanup ?? {})
+    }),
     notifications: {
       ...safeCurrent.notifications,
       ...(patch.notifications ?? {})
@@ -90,10 +97,7 @@ export function coerceRendererSettings(settings: AppSettingsV1): AppSettingsV1 {
     raw.theme === 'system' || raw.theme === 'light' || raw.theme === 'dark'
       ? raw.theme
       : 'system'
-  const uiFontScale =
-    raw.uiFontScale === 'small' || raw.uiFontScale === 'medium' || raw.uiFontScale === 'large'
-      ? raw.uiFontScale
-      : 'medium'
+  const uiFontScale = normalizeUiFontScale(raw.uiFontScale)
   return {
     version: 1,
     locale: raw.locale === 'zh' ? 'zh' : 'en',
@@ -110,6 +114,9 @@ export function coerceRendererSettings(settings: AppSettingsV1): AppSettingsV1 {
         ? raw.log.retentionDays
         : DEFAULT_LOG_RETENTION_DAYS
     },
+    checkpointCleanup: normalizeCheckpointCleanupSettings(
+      raw.checkpointCleanup ?? { intervalDays: DEFAULT_CHECKPOINT_CLEANUP_INTERVAL_DAYS }
+    ),
     notifications: {
       turnComplete: raw.notifications?.turnComplete !== false
     },

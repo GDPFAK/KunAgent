@@ -23,13 +23,17 @@ export type ThreadEntity = ThreadRecord
 export function createThreadRecord(input: {
   id: string
   title: string
+  titleAuto?: boolean
   workspace: string
   model: string
   providerId?: string
+  agentId?: string
+  systemPrompt?: string
   mode?: ThreadMode
   status?: ThreadStatus
   approvalPolicy?: ApprovalPolicy
   sandboxMode?: SandboxMode
+  pinned?: boolean
   costBudgetUsd?: number
   costBudgetWarningSent?: boolean
   relation?: ThreadRelation
@@ -47,13 +51,17 @@ export function createThreadRecord(input: {
   return {
     id: input.id,
     title: input.title,
+    ...(input.titleAuto !== undefined ? { titleAuto: input.titleAuto } : {}),
     workspace: input.workspace,
     model: input.model,
     ...(input.providerId ? { providerId: input.providerId } : {}),
+    ...(input.agentId ? { agentId: input.agentId } : {}),
+    ...(input.systemPrompt ? { systemPrompt: input.systemPrompt } : {}),
     mode: input.mode ?? 'agent',
     status: input.status ?? 'idle',
     approvalPolicy: input.approvalPolicy ?? DEFAULT_APPROVAL_POLICY,
     sandboxMode: input.sandboxMode ?? DEFAULT_SANDBOX_MODE,
+    ...(input.pinned !== undefined ? { pinned: input.pinned } : {}),
     ...(input.costBudgetUsd !== undefined ? { costBudgetUsd: input.costBudgetUsd } : {}),
     ...(input.costBudgetWarningSent !== undefined ? { costBudgetWarningSent: input.costBudgetWarningSent } : {}),
     relation: input.relation ?? 'primary',
@@ -79,7 +87,7 @@ export function toThreadSummary(
   thread: ThreadEntity
 ): Pick<
   ThreadEntity,
-  'id' | 'title' | 'workspace' | 'model' | 'providerId' | 'mode' | 'status' | 'approvalPolicy' | 'sandboxMode' | 'createdAt' | 'updatedAt'
+  'id' | 'title' | 'titleAuto' | 'summary' | 'workspace' | 'model' | 'providerId' | 'agentId' | 'systemPrompt' | 'mode' | 'status' | 'approvalPolicy' | 'sandboxMode' | 'pinned' | 'createdAt' | 'updatedAt'
   | 'costBudgetUsd' | 'costBudgetWarningSent'
   | 'relation' | 'parentThreadId'
   | 'forkedFromThreadId' | 'forkedFromTitle' | 'forkedAt' | 'forkedFromMessageCount' | 'forkedFromTurnCount'
@@ -88,13 +96,18 @@ export function toThreadSummary(
   return {
     id: thread.id,
     title: thread.title,
+    ...(thread.titleAuto !== undefined ? { titleAuto: thread.titleAuto } : {}),
+    ...(thread.summary ? { summary: thread.summary } : {}),
     workspace: thread.workspace,
     model: thread.model,
     ...(thread.providerId ? { providerId: thread.providerId } : {}),
+    ...(thread.agentId ? { agentId: thread.agentId } : {}),
+    ...(thread.systemPrompt ? { systemPrompt: thread.systemPrompt } : {}),
     mode: thread.mode,
     status: thread.status,
     approvalPolicy: thread.approvalPolicy,
     sandboxMode: thread.sandboxMode,
+    ...(thread.pinned !== undefined ? { pinned: thread.pinned } : {}),
     ...(thread.costBudgetUsd !== undefined ? { costBudgetUsd: thread.costBudgetUsd } : {}),
     ...(thread.costBudgetWarningSent !== undefined ? { costBudgetWarningSent: thread.costBudgetWarningSent } : {}),
     relation: thread.relation ?? 'primary',

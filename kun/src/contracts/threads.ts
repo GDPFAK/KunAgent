@@ -93,6 +93,20 @@ export type ThreadTodoList = z.infer<typeof ThreadTodoListSchema>
 export const ThreadSchema = z.object({
   id: z.string().min(1),
   title: z.string(),
+  /**
+   * Whether the current title was auto-derived (client-side first-message
+   * heuristic or the backend LLM titler) rather than set by the user.
+   * - `true`  → provisional/auto title; the backend LLM titler may upgrade it.
+   * - `false` → the user renamed it manually; never auto-overwrite.
+   * - absent  → legacy/unknown; the backend only upgrades placeholder titles.
+   */
+  titleAuto: z.boolean().optional(),
+  /**
+   * Optional whole-conversation summary (~1 paragraph) produced on demand by
+   * the Summary internal-LLM role. Surfaced as the conversation's hover /
+   * subtitle in the thread list. Absent until the user runs "summarize".
+   */
+  summary: z.string().optional(),
   workspace: z.string(),
   model: z.string(),
   /**
@@ -102,10 +116,24 @@ export const ThreadSchema = z.object({
    * bridges pin a non-runtime provider per thread.
    */
   providerId: z.string().optional(),
+  /**
+   * Optional subagent profile id this thread is bound to. When set, the
+   * thread persona (model / providerId / systemPrompt below) is a snapshot
+   * of the agent at thread-create time so later agent edits don't drift
+   * historical conversations.
+   */
+  agentId: z.string().optional(),
+  /**
+   * Optional thread-level systemPrompt override. When non-empty, it
+   * replaces the runtime's base systemPrompt in every ModelRequest on this
+   * thread (primary-agent persona snapshot path).
+   */
+  systemPrompt: z.string().optional(),
   mode: ThreadMode,
   status: ThreadStatus,
   approvalPolicy: ApprovalPolicySchema.default(DEFAULT_APPROVAL_POLICY),
   sandboxMode: SandboxModeSchema.default(DEFAULT_SANDBOX_MODE),
+  pinned: z.boolean().optional(),
   costBudgetUsd: z.number().positive().optional(),
   costBudgetWarningSent: z.boolean().optional(),
   relation: ThreadRelation.default('primary'),
@@ -126,13 +154,18 @@ export type ThreadRecord = z.infer<typeof ThreadSchema>
 export const ThreadSummarySchema = ThreadSchema.pick({
   id: true,
   title: true,
+  titleAuto: true,
+  summary: true,
   workspace: true,
   model: true,
   providerId: true,
+  agentId: true,
+  systemPrompt: true,
   mode: true,
   status: true,
   approvalPolicy: true,
   sandboxMode: true,
+  pinned: true,
   costBudgetUsd: true,
   costBudgetWarningSent: true,
   relation: true,
@@ -151,6 +184,8 @@ export type ThreadSummary = z.infer<typeof ThreadSummarySchema>
 
 export const CreateThreadRequest = z.object({
   title: z.string().optional(),
+  /** Marks the provided title as an auto/provisional title (see ThreadSchema.titleAuto). */
+  titleAuto: z.boolean().optional(),
   workspace: z.string().min(1),
   model: z.string().min(1),
   /**
@@ -160,6 +195,10 @@ export const CreateThreadRequest = z.object({
    * provider's HTTP client.
    */
   providerId: z.string().optional(),
+  /** Optional subagent profile id to bind this thread to. */
+  agentId: z.string().optional(),
+  /** Optional persona systemPrompt snapshot applied to every ModelRequest on this thread. */
+  systemPrompt: z.string().optional(),
   mode: ThreadMode.default('agent'),
   approvalPolicy: ApprovalPolicySchema.optional(),
   sandboxMode: SandboxModeSchema.optional(),
@@ -242,10 +281,13 @@ export type ClearThreadTodosResponse = z.infer<typeof ClearThreadTodosResponse>
 export const UpdateThreadRequest = z
   .object({
     title: z.string().optional(),
+    /** Marks the new title as auto/provisional (true) or user-set/locked (false). */
+    titleAuto: z.boolean().optional(),
     workspace: z.string().min(1).optional(),
     status: ThreadStatus.optional(),
     approvalPolicy: ApprovalPolicySchema.optional(),
     sandboxMode: SandboxModeSchema.optional(),
+    pinned: z.boolean().optional(),
     costBudgetUsd: z.number().positive().nullable().optional(),
     costBudgetWarningSent: z.boolean().optional(),
     relation: ThreadRelation.optional()
@@ -253,10 +295,12 @@ export const UpdateThreadRequest = z
   .refine(
     (value) =>
       value.title !== undefined ||
+      value.titleAuto !== undefined ||
       value.workspace !== undefined ||
       value.status !== undefined ||
       value.approvalPolicy !== undefined ||
       value.sandboxMode !== undefined ||
+      value.pinned !== undefined ||
       value.costBudgetUsd !== undefined ||
       value.costBudgetWarningSent !== undefined ||
       value.relation !== undefined,

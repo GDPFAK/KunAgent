@@ -51,6 +51,11 @@ export const ModelCapabilityMetadata = z
     outputModalities: z.array(ModelInputModality).min(1),
     supportsToolCalling: z.boolean(),
     contextWindowTokens: z.number().int().positive().optional(),
+    // Maximum tokens the model may emit per response. When set it caps the
+    // request's output budget (max_tokens / max_output_tokens). Absent means
+    // "use the runtime default" — which is reasoning-aware for the Anthropic
+    // Messages format so thinking models don't truncate their tool calls.
+    maxOutputTokens: z.number().int().positive().optional(),
     messageParts: z.array(ModelMessagePartSupport).min(1),
     reasoning: ModelReasoningCapabilityMetadata.optional(),
     // Per-model wire-format override. Lets one provider route some models to
@@ -112,6 +117,7 @@ export const McpServerConfig = z
     transport: McpTransportKind,
     command: z.string().min(1).optional(),
     args: z.array(z.string()).default([]),
+    cwd: z.string().min(1).optional(),
     url: z.string().min(1).optional(),
     headers: StringRecord.default({}),
     env: StringRecord.default({}),
@@ -182,12 +188,26 @@ export type WebCapabilityConfig = z.infer<typeof WebCapabilityConfig>
 
 export const SkillsCapabilityConfig = CapabilityToggleConfig.extend({
   roots: z.array(z.string().min(1)).default([]),
+  workspaceRoots: z.array(z.string().min(1)).default([]),
+  /** Global skill roots (e.g. ~/.kun/skills). Scanned after project roots. */
+  globalRoots: z.array(z.string().min(1)).default([]),
+  /**
+   * Skill ids the user disabled in the GUI. Excluded everywhere a skill can
+   * surface (catalog, auto-match, load_skill, diagnostics) so a disabled skill
+   * is truly gone from the runtime, not merely hidden in the UI. Compared after
+   * `slug()` normalization on both sides.
+   */
+  disabledIds: z.array(z.string().min(1)).default([]),
   legacySkillMd: z.boolean().default(true)
 }).strict()
 export type SkillsCapabilityConfig = z.infer<typeof SkillsCapabilityConfig>
 
 export const SubagentToolPolicy = z.enum(['readOnly', 'inherit'])
 export type SubagentToolPolicy = z.infer<typeof SubagentToolPolicy>
+
+/** Where an agent can be used: a delegated subagent, a primary session persona, or both. */
+export const SubagentMode = z.enum(['subagent', 'primary', 'all'])
+export type SubagentMode = z.infer<typeof SubagentMode>
 
 /**
  * Tools a `readOnly` subagent may call. The list is enforced twice: the
@@ -200,12 +220,43 @@ export const SUBAGENT_READ_ONLY_TOOL_NAMES = ['read', 'grep', 'find', 'ls'] as c
 
 export const SubagentProfileConfig = z
   .object({
+    /** Display name for the GUI roster and pickers (falls back to the profile key). */
+    name: z.string().min(1).optional(),
+    /** When-to-use description shown in the delegate_task schema and the GUI. */
+    description: z.string().min(1).optional(),
+    /** UI accent color (hex) for the agent's chip/avatar. */
+    color: z.string().min(1).optional(),
+    /** Where the agent can be used: delegated subagent, primary session persona, or both. */
+    mode: SubagentMode.default('subagent'),
     /** Overrides the child model for this role (falls back to the server default). */
     model: z.string().min(1).optional(),
+    /** Routes this role's child to a specific provider id (falls back to the runtime default provider). */
+    providerId: z.string().min(1).optional(),
+    /** Persona/instructions appended to the base system prompt for this role (not a full replace). */
+    systemPrompt: z.string().min(1).optional(),
     /** Short instruction prepended to the delegated task prompt. */
     promptPreamble: z.string().min(1).optional(),
-    /** Whether the child is restricted to read-only tools or inherits the full set. */
-    toolPolicy: SubagentToolPolicy.default('readOnly')
+    /**
+     * Whether the child is restricted to read-only tools or inherits the
+     * parent agent's full tool set + approval policy. Defaults to `inherit`
+     * (follow the main agent); a profile that needs read-only must say so
+     * explicitly (e.g. the built-in reviewers).
+     */
+    toolPolicy: SubagentToolPolicy.default('inherit'),
+    /** Exact tool allow-list; overrides toolPolicy when set (e.g. ['read','grep','bash']). */
+    allowedTools: z.array(z.string().min(1)).min(1).optional(),
+    /** Built-in tool names blocked for this profile (deny-list, layered on `inherit`; e.g. ['bash','write']). */
+    blockedTools: z.array(z.string().min(1)).optional(),
+    /** MCP server ids blocked for this profile (deny-list; the server's entire toolset is hidden from the child). */
+    blockedMcpServers: z.array(z.string().min(1)).optional(),
+    /** Skill ids blocked for this profile (deny-list; default inherits every available skill). */
+    blockedSkills: z.array(z.string().min(1)).optional(),
+    /**
+     * Reasoning depth applied to this profile's child model requests. Default
+     * 'off' (cheap); a profile opts into deeper thinking explicitly. Flows to
+     * the child agent's ModelRequest.reasoningEffort.
+     */
+    reasoningEffort: ModelReasoningEffort.optional()
   })
   .strict()
 export type SubagentProfileConfig = z.infer<typeof SubagentProfileConfig>
@@ -215,8 +266,16 @@ export const SubagentsCapabilityConfig = CapabilityToggleConfig.extend({
   maxParallel: z.number().int().nonnegative().default(0),
   /** Hard cap on total children per parent thread. */
   maxChildRuns: z.number().int().nonnegative().default(0),
-  /** Tool policy applied to children that do not resolve a profile. */
-  defaultToolPolicy: SubagentToolPolicy.default('readOnly'),
+  /**
+   * Tool policy applied to children that do not resolve a profile. Defaults to
+   * `inherit` so a delegated subagent follows the MAIN agent's tools AND
+   * approval/permission policy (it can edit/run shell iff the parent can).
+   * `inherit` never escalates beyond the parent: the child loop runs under the
+   * parent thread's approvalPolicy/sandboxMode, so a read-only parent yields a
+   * read-only child. Per-profile `toolPolicy` (e.g. the built-in read-only
+   * reviewers) still wins over this default.
+   */
+  defaultToolPolicy: SubagentToolPolicy.default('inherit'),
   /** Profile chosen when `delegate_task` omits an explicit profile. */
   defaultProfile: z.string().min(1).optional(),
   /** Named subagent roles (e.g. researcher/reviewer/verifier). */

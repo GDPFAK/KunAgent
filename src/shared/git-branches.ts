@@ -1,12 +1,23 @@
 export type GitBranchRow = {
   name: string
   current: boolean
+  /**
+   * Absolute path of another worktree that already has this branch checked out.
+   * Git only allows a branch to live in one worktree at a time, so when this is
+   * set an in-place `git switch` would fail — the UI navigates to this path
+   * instead. Unset when the branch is free to be checked out here.
+   */
+  worktreePath?: string
+  /** True when {@link worktreePath} is the repository's primary (main) worktree. */
+  worktreePrimary?: boolean
 }
 
 export type GitBranchesResult =
   | {
       ok: true
       repositoryRoot: string
+      /** Absolute path of the repository's primary (main) worktree. */
+      primaryRepositoryRoot: string
       currentBranch: string | null
       branches: GitBranchRow[]
       dirtyCount: number
@@ -21,6 +32,7 @@ export type GitWorktreeCheckoutResult =
   | {
       ok: true
       repositoryRoot: string
+      primaryRepositoryRoot: string
       sourceRepositoryRoot: string
       worktreePath: string
       currentBranch: string | null

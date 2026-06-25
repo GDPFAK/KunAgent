@@ -15,7 +15,7 @@ import type { SkillRuntime } from '../../skills/skill-runtime.js'
 export function buildSkillToolProviders(
   skillRuntime: SkillRuntime | undefined
 ): CapabilityToolProvider[] {
-  if (!skillRuntime || skillRuntime.count() === 0) return []
+  if (!skillRuntime || !skillRuntime.enabled()) return []
   return [{
     id: 'skill',
     kind: 'skill',
@@ -43,10 +43,10 @@ export function buildSkillToolProviders(
           additionalProperties: false
         },
         policy: 'auto',
-        execute: async (args) => {
+        execute: async (args, context) => {
           const skillId = typeof args.skill_id === 'string' ? args.skill_id : ''
           if (!skillId.trim()) return { output: { error: 'skill_id is required' }, isError: true }
-          const result = skillRuntime.loadSkillById(skillId)
+          const result = await skillRuntime.loadSkillById(skillId, context.workspace, context.blockedSkillIds)
           if ('error' in result) return { output: result, isError: true }
           return { output: result }
         }

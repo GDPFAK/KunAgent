@@ -1,12 +1,18 @@
 import { type Dirent } from 'node:fs'
 import { readdir, readFile, stat } from 'node:fs/promises'
-import { basename, extname, join, resolve } from 'node:path'
+import { basename, extname, isAbsolute, join, relative, resolve } from 'node:path'
 import { z } from 'zod'
 import type { SkillsCapabilityConfig } from '../contracts/capabilities.js'
 
 const DEFAULT_ACTIVE_LIMIT = 3
 const DEFAULT_INSTRUCTION_BUDGET_BYTES = 24_000
 const DEFAULT_CATALOG_BUDGET_BYTES = 8_000
+const WORKSPACE_SKILL_RELATIVE_DIRS = [
+  '.agents/skills',
+  '.claude/skills',
+  '.codex/skills',
+  'skills'
+] as const
 
 const SkillTriggerManifest = z.object({
   commands: z.array(z.string().min(1)).default([]),
@@ -40,6 +46,8 @@ export type LoadedSkill = {
   assets: string[]
   priority: number
   legacy: boolean
+  /** Source of the skill: 'project' (workspace) or 'global' (user-level). */
+  source: 'project' | 'global'
 }
 
 export type SkillActivation = {
@@ -51,6 +59,7 @@ export type SkillActivation = {
 export type SkillTurnResolution = {
   activeSkillIds: string[]
   activations: SkillActivation[]
+  catalogInstruction?: string
   instructions: string[]
   allowedToolNames?: string[]
   injectedBytes: number
@@ -59,12 +68,14 @@ export type SkillTurnResolution = {
 export type SkillRuntimeDiagnostics = {
   enabled: boolean
   roots: string[]
+  globalRoots: string[]
   skills: Array<{
     id: string
     name: string
     description?: string
     version: string
     root: string
+    source: 'project' | 'global'
     legacy: boolean
     triggers: LoadedSkill['triggers']
     allowedTools: string[]
@@ -82,13 +93,18 @@ export type SkillRuntimeDiagnostics = {
 export type SkillRuntimeOptions = {
   activeLimit?: number
   instructionBudgetBytes?: number
-  /** Byte budget for the always-on available-skills catalog folded into the prefix. */
+  /** Byte budget for the per-turn available-skills catalog. */
   catalogBudgetBytes?: number
 }
 
 export class SkillRuntime {
   private skills: LoadedSkill[]
   private validationErrors: Array<{ root: string; message: string }>
+  private readonly workspaceSkillCache = new Map<string, {
+    rootsKey: string
+    skills: LoadedSkill[]
+    validationErrors: Array<{ root: string; message: string }>
+  }>()
   private lastActivations: SkillActivation[] = []
   private lastInjection: SkillRuntimeDiagnostics['lastInjection']
 
@@ -99,13 +115,18 @@ export class SkillRuntime {
   ) {
     this.skills = loaded.skills
     this.validationErrors = loaded.validationErrors
+    this.workspaceSkillCache.clear()
+  }
+
+  enabled(): boolean {
+    return this.config.enabled
   }
 
   static async create(
     config: SkillsCapabilityConfig | undefined,
     options: SkillRuntimeOptions = {}
   ): Promise<SkillRuntime> {
-    const normalized = config ?? { enabled: false, roots: [], legacySkillMd: true }
+    const normalized = config ?? { enabled: false, roots: [], workspaceRoots: [], globalRoots: [], disabledIds: [], legacySkillMd: true }
     const resolvedOptions = {
       activeLimit: options.activeLimit ?? DEFAULT_ACTIVE_LIMIT,
       instructionBudgetBytes: options.instructionBudgetBytes ?? DEFAULT_INSTRUCTION_BUDGET_BYTES,
@@ -123,18 +144,25 @@ export class SkillRuntime {
       : { skills: [], validationErrors: [] }
     this.skills = loaded.skills
     this.validationErrors = loaded.validationErrors
+    this.workspaceSkillCache.clear()
   }
 
-  resolveTurn(input: {
+  async resolveTurn(input: {
     prompt: string
     workspace: string
     filePaths?: readonly string[]
-  }): SkillTurnResolution {
+    /** Per-call skill-id deny-list (e.g. a subagent profile's blockedSkills). Hidden from catalog + auto-activation. */
+    blockedSkillIds?: readonly string[]
+  }): Promise<SkillTurnResolution> {
     if (!this.config.enabled) return emptyResolution()
-    const matches = this.matchSkills(input)
+    const skills = filterBlockedSkills(await this.skillsForWorkspace(input.workspace), input.blockedSkillIds)
+    const catalogInstruction = renderCatalogInstruction(skills, this.options.catalogBudgetBytes)
+    const matches = this.matchSkills(input, skills)
     const active = matches.slice(0, this.options.activeLimit)
     const injection = buildInjection(active, this.options.instructionBudgetBytes)
-    const blockedToolNames = blockedToolsFor(this.skills, injection.allowedToolNames)
+    const catalogBytes = catalogInstruction ? Buffer.byteLength(catalogInstruction, 'utf8') : 0
+    const injectedBytes = injection.injectedBytes + catalogBytes
+    const blockedToolNames = blockedToolsFor(skills, injection.allowedToolNames)
     this.lastActivations = active.map(({ skill, reason, score }) => ({
       skillId: skill.id,
       reason,
@@ -142,61 +170,26 @@ export class SkillRuntime {
     }))
     this.lastInjection = {
       activeSkillIds: injection.activeSkillIds,
-      injectedBytes: injection.injectedBytes,
+      injectedBytes,
       budgetBytes: this.options.instructionBudgetBytes,
       blockedToolNames
     }
     return {
       activeSkillIds: injection.activeSkillIds,
       activations: this.lastActivations,
+      ...(catalogInstruction ? { catalogInstruction } : {}),
       instructions: injection.instructions,
       ...(injection.allowedToolNames ? { allowedToolNames: injection.allowedToolNames } : {}),
-      injectedBytes: injection.injectedBytes
+      injectedBytes
     }
   }
 
   /**
-   * Renders the always-on catalog of available skills, folded once into the
-   * stable prefix at session start. Unlike {@link resolveTurn} (which only
-   * injects a skill once its triggers fire on the user prompt), the catalog
-   * lets the model learn that skills exist at all and read the linked
-   * `SKILL.md` on demand. Mirrors codex's `render_available_skills_body`.
-   * Returns `undefined` when skills are disabled or none are loaded so the
-   * prefix stays byte-identical to the no-skills case.
-   */
+   * Renders the global catalog for diagnostics and compatibility. Runtime turns
+   * use resolveTurn so workspace-local skills stay out of the immutable prefix.
+  */
   catalogInstruction(): string | undefined {
-    if (!this.config.enabled || this.skills.length === 0) return undefined
-    const budget = this.options.catalogBudgetBytes
-    const header = '## Skills\n' +
-      'A skill is a reusable set of instructions stored on disk. The skills below ' +
-      'are available in this workspace. When a user request matches one, read its ' +
-      '`SKILL.md` (the file path is listed) before acting, then follow it.'
-    const footer = '### How to use skills\n' +
-      '- A skill activates automatically when the user mentions it by id ' +
-      '(`$id`, `@id`, or `/skill:id`) or trips one of its triggers; its full ' +
-      'instructions are then injected for that turn.\n' +
-      '- Otherwise, if a request clearly matches a skill above, call the ' +
-      '`load_skill` tool with its id to pull the full instructions, then follow ' +
-      'them. (You can also read the listed file directly.)'
-    const lines: string[] = []
-    let used = Buffer.byteLength(`${header}\n\n### Available skills\n\n${footer}`, 'utf8')
-    let dropped = 0
-    for (const skill of this.skills) {
-      const desc = skill.description ? `: ${skill.description}` : ''
-      const line = `- ${skill.name} (${skill.id})${desc} (file: ${skill.entryPath})`
-      const cost = Buffer.byteLength(`${line}\n`, 'utf8')
-      if (used + cost > budget) {
-        dropped += 1
-        continue
-      }
-      lines.push(line)
-      used += cost
-    }
-    if (lines.length === 0) return undefined
-    if (dropped > 0) {
-      lines.push(`- …and ${dropped} more skill${dropped === 1 ? '' : 's'} omitted (catalog budget reached).`)
-    }
-    return `${header}\n\n### Available skills\n${lines.join('\n')}\n\n${footer}`
+    return renderCatalogInstruction(this.skills, this.options.catalogBudgetBytes)
   }
 
   /**
@@ -206,19 +199,20 @@ export class SkillRuntime {
    * Returns an error payload (never throws) so the tool can surface it to the
    * model as a normal tool result.
    */
-  loadSkillById(skillId: string): {
+  async loadSkillById(skillId: string, workspace = '', blockedIds?: readonly string[]): Promise<{
     skillId: string
     name: string
     instruction: string
     allowedTools: string[]
     truncated: boolean
-  } | { error: string } {
+  } | { error: string }> {
     if (!this.config.enabled) return { error: 'skills are disabled' }
+    const skills = filterBlockedSkills(await this.skillsForWorkspace(workspace), blockedIds)
     const normalized = slug(skillId.trim().replace(/^[$@]/, '').replace(/^skill:/i, ''))
-    const skill = this.skills.find((candidate) => candidate.id === normalized) ??
-      this.skills.find((candidate) => slug(candidate.name) === normalized)
+    const skill = skills.find((candidate) => candidate.id === normalized) ??
+      skills.find((candidate) => slug(candidate.name) === normalized)
     if (!skill) {
-      const available = this.skills.map((candidate) => candidate.id).join(', ')
+      const available = skills.map((candidate) => candidate.id).join(', ')
       return { error: `unknown skill id "${skillId}". Available: ${available || '(none)'}` }
     }
     let instruction = formatSkillInstruction(skill, 'load_skill')
@@ -242,15 +236,19 @@ export class SkillRuntime {
   }
 
   diagnostics(): SkillRuntimeDiagnostics {
+    const projectRoots = this.config.roots ?? []
+    const globalRoots = this.config.globalRoots ?? []
     return {
       enabled: this.config.enabled,
-      roots: [...this.config.roots],
+      roots: [...projectRoots],
+      globalRoots: [...globalRoots],
       skills: this.skills.map((skill) => ({
         id: skill.id,
         name: skill.name,
         ...(skill.description ? { description: skill.description } : {}),
         version: skill.version,
         root: skill.root,
+        source: skill.source,
         legacy: skill.legacy,
         triggers: skill.triggers,
         allowedTools: skill.allowedTools
@@ -265,16 +263,21 @@ export class SkillRuntime {
     return this.skills.length
   }
 
+  async countForWorkspace(workspace: string): Promise<number> {
+    if (!this.config.enabled) return 0
+    return (await this.skillsForWorkspace(workspace)).length
+  }
+
   private matchSkills(input: {
     prompt: string
     workspace: string
     filePaths?: readonly string[]
-  }): Array<SkillActivation & { skill: LoadedSkill }> {
+  }, skills: LoadedSkill[]): Array<SkillActivation & { skill: LoadedSkill }> {
     const prompt = input.prompt
     const lowerPrompt = prompt.toLowerCase()
     const fileTypes = fileTypesFrom(input.filePaths ?? [], prompt)
     const matches: Array<SkillActivation & { skill: LoadedSkill }> = []
-    for (const skill of this.skills) {
+    for (const skill of skills) {
       const explicit = explicitSkillMention(skill, prompt)
       if (explicit) {
         matches.push({ skill, skillId: skill.id, reason: explicit, score: 1_000 + skill.priority })
@@ -297,6 +300,139 @@ export class SkillRuntime {
     }
     return matches.sort((a, b) => b.score - a.score || a.skill.id.localeCompare(b.skill.id))
   }
+
+  private async skillsForWorkspace(workspace: string): Promise<LoadedSkill[]> {
+    const workspaceRoot = normalizeRoot(workspace)
+    const workspaceLoaded = workspaceRoot
+      ? await this.loadWorkspaceSkills(workspaceRoot)
+      : { skills: [], validationErrors: [] }
+    const knownWorkspaceRoots = [
+      workspaceRoot,
+      ...(this.config.workspaceRoots ?? []).map(normalizeRoot)
+    ].filter(Boolean)
+    const staticSkills = this.skills.filter((skill) =>
+      skillVisibleForWorkspace(skill.root, workspaceRoot, knownWorkspaceRoots)
+    )
+    const unique = new Map<string, LoadedSkill>()
+    for (const skill of [...workspaceLoaded.skills, ...staticSkills]) {
+      if (!unique.has(skill.id)) unique.set(skill.id, skill)
+    }
+    return [...unique.values()].sort((a, b) => a.id.localeCompare(b.id))
+  }
+
+  private async loadWorkspaceSkills(workspaceRoot: string): Promise<{
+    skills: LoadedSkill[]
+    validationErrors: Array<{ root: string; message: string }>
+  }> {
+    const discoveredRoots = await existingWorkspaceSkillRoots(workspaceRoot)
+    const configRoots = new Set((this.config.roots ?? []).map(normalizeRoot).filter(Boolean))
+    const knownWorkspaceRoots = (this.config.workspaceRoots ?? []).map(normalizeRoot).filter(Boolean)
+    const isKnownWorkspace = knownWorkspaceRoots.some((candidate) => candidate === workspaceRoot)
+    const roots = isKnownWorkspace
+      ? discoveredRoots.filter((root) => configRoots.has(normalizeRoot(root)))
+      : discoveredRoots
+    const rootsKey = roots.join('\0')
+    const cached = this.workspaceSkillCache.get(workspaceRoot)
+    if (cached?.rootsKey === rootsKey) {
+      return { skills: cached.skills, validationErrors: cached.validationErrors }
+    }
+    const loaded = roots.length > 0
+      ? await discoverSkills({ ...this.config, roots })
+      : { skills: [], validationErrors: [] }
+    this.workspaceSkillCache.set(workspaceRoot, { rootsKey, ...loaded })
+    return loaded
+  }
+}
+
+function renderCatalogInstruction(skills: LoadedSkill[], budget: number): string | undefined {
+  if (skills.length === 0) return undefined
+  const header = '## Skills\n' +
+    'A skill is a reusable set of instructions stored on disk. The skills below ' +
+    'are available in this workspace. When a user request matches one, read its ' +
+    '`SKILL.md` (the file path is listed) before acting, then follow it.'
+  const footer = '### How to use skills\n' +
+    '- A skill activates automatically when the user mentions it by id ' +
+    '(`$id`, `@id`, or `/skill:id`) or trips one of its triggers; its full ' +
+    'instructions are then injected for that turn.\n' +
+    '- Otherwise, if a request clearly matches a skill above, call the ' +
+    '`load_skill` tool with its id to pull the full instructions, then follow ' +
+    'them. (You can also read the listed file directly.)'
+  const lines: string[] = []
+  let used = Buffer.byteLength(`${header}\n\n### Available skills\n\n${footer}`, 'utf8')
+  let dropped = 0
+  for (const skill of skills) {
+    const desc = skill.description ? `: ${skill.description}` : ''
+    const line = `- ${skill.name} (${skill.id})${desc} (file: ${skill.entryPath})`
+    const cost = Buffer.byteLength(`${line}\n`, 'utf8')
+    if (used + cost > budget) {
+      dropped += 1
+      continue
+    }
+    lines.push(line)
+    used += cost
+  }
+  if (lines.length === 0) return undefined
+  if (dropped > 0) {
+    lines.push(`- ...and ${dropped} more skill${dropped === 1 ? '' : 's'} omitted (catalog budget reached).`)
+  }
+  return `${header}\n\n### Available skills\n${lines.join('\n')}\n\n${footer}`
+}
+
+function normalizeRoot(path: string | undefined): string {
+  const trimmed = path?.trim()
+  return trimmed ? resolve(trimmed) : ''
+}
+
+function isSameOrInside(parent: string, target: string): boolean {
+  if (!parent || !target) return false
+  const rel = relative(parent, target)
+  return rel === '' || (!!rel && !rel.startsWith('..') && !isAbsolute(rel))
+}
+
+function skillVisibleForWorkspace(
+  skillRoot: string,
+  workspaceRoot: string,
+  knownWorkspaceRoots: string[]
+): boolean {
+  const root = normalizeRoot(skillRoot)
+  if (workspaceRoot && isSameOrInside(workspaceRoot, root)) return true
+  const ownerWorkspace = knownWorkspaceRoots.find((candidate) => isSameOrInside(candidate, root))
+  if (ownerWorkspace) return workspaceRoot !== '' && ownerWorkspace === workspaceRoot
+  if (workspaceRoot && looksLikeWorkspaceSkillRoot(root) && !isSameOrInside(workspaceRoot, root)) {
+    return false
+  }
+  return true
+}
+
+function looksLikeWorkspaceSkillRoot(root: string): boolean {
+  const parts = root.split(/[\\/]+/)
+  if (parts.length < 2) return false
+  const tail2 = parts.slice(-2).join('/')
+  return tail2 === '.agents/skills' || tail2 === '.claude/skills' || tail2 === '.codex/skills'
+}
+
+async function existingWorkspaceSkillRoots(workspaceRoot: string): Promise<string[]> {
+  const roots: string[] = []
+  for (const relativeDir of WORKSPACE_SKILL_RELATIVE_DIRS) {
+    const root = resolve(workspaceRoot, ...relativeDir.split('/'))
+    if (await exists(root)) roots.push(root)
+  }
+  return roots
+}
+
+/**
+ * Per-call skill deny-list. Mirrors the global `disabledIds` discovery filter
+ * (slug both sides) but applies to a single resolveTurn/loadSkill call — e.g. a
+ * subagent profile that blocks specific skills — without mutating the shared
+ * runtime instance, so sibling children are unaffected.
+ */
+function filterBlockedSkills(skills: LoadedSkill[], blockedIds: readonly string[] | undefined): LoadedSkill[] {
+  if (!blockedIds || blockedIds.length === 0) return skills
+  // Normalize like loadSkillById's lookup (strip leading $/@ and a `skill:`
+  // prefix before slugging) so a `skill:gmail` / `$gmail` deny entry matches
+  // the discovered, slugged id.
+  const blocked = new Set(blockedIds.map((id) => slug(id.trim().replace(/^[$@]/, '').replace(/^skill:/i, ''))))
+  return skills.filter((skill) => !blocked.has(skill.id))
 }
 
 async function discoverSkills(config: SkillsCapabilityConfig): Promise<{
@@ -305,6 +441,13 @@ async function discoverSkills(config: SkillsCapabilityConfig): Promise<{
 }> {
   const skills: LoadedSkill[] = []
   const validationErrors: Array<{ root: string; message: string }> = []
+  // Skill ids the user disabled. Slug both sides so `gmail`, `Gmail`, and
+  // `skill:gmail` all match the discovered `slug(manifest.id)`. A disabled
+  // skill is dropped here at the single discovery chokepoint, so it stays out
+  // of the catalog, auto-match, load_skill, diagnostics, and counts alike.
+  const disabledIds = new Set((config.disabledIds ?? []).map(slug))
+
+  // Scan project roots (priority over global — loaded first)
   for (const rawRoot of config.roots) {
     const root = resolve(rawRoot)
     const candidates = await packageCandidates(root).catch((error) => {
@@ -312,15 +455,34 @@ async function discoverSkills(config: SkillsCapabilityConfig): Promise<{
       return []
     })
     for (const candidate of candidates) {
-      const loaded = await loadSkillPackage(candidate, config.legacySkillMd).catch((error) => {
+      const loaded = await loadSkillPackage(candidate, config.legacySkillMd, 'project').catch((error) => {
         validationErrors.push({ root: candidate, message: errorMessage(error) })
         return null
       })
       if (loaded) skills.push(loaded)
     }
   }
+
+  // Scan global roots (#149: global skill loading fix)
+  const globalRoots = config.globalRoots ?? []
+  for (const rawRoot of globalRoots) {
+    const root = resolve(rawRoot)
+    const candidates = await packageCandidates(root).catch((error) => {
+      validationErrors.push({ root, message: errorMessage(error) })
+      return []
+    })
+    for (const candidate of candidates) {
+      const loaded = await loadSkillPackage(candidate, config.legacySkillMd, 'global').catch((error) => {
+        validationErrors.push({ root: candidate, message: errorMessage(error) })
+        return null
+      })
+      if (loaded) skills.push(loaded)
+    }
+  }
+
   const unique = new Map<string, LoadedSkill>()
   for (const skill of skills) {
+    if (disabledIds.has(skill.id)) continue
     if (!unique.has(skill.id)) unique.set(skill.id, skill)
     else validationErrors.push({ root: skill.root, message: `duplicate Skill id: ${skill.id}` })
   }
@@ -361,7 +523,7 @@ async function entryIsDirectory(entry: Dirent, path: string): Promise<boolean> {
   }
 }
 
-async function loadSkillPackage(root: string, allowLegacy: boolean): Promise<LoadedSkill | null> {
+async function loadSkillPackage(root: string, allowLegacy: boolean, source: 'project' | 'global'): Promise<LoadedSkill | null> {
   const manifestPath = join(root, 'skill.json')
   if (await exists(manifestPath)) {
     const manifest = SkillManifest.parse(JSON.parse(await readFile(manifestPath, 'utf8')))
@@ -379,7 +541,8 @@ async function loadSkillPackage(root: string, allowLegacy: boolean): Promise<Loa
       allowedTools: manifest.allowedTools,
       assets: manifest.assets.map((asset) => resolve(root, asset)),
       priority: manifest.priority,
-      legacy: false
+      legacy: false,
+      source,
     }
   }
   if (!allowLegacy) return null
@@ -401,7 +564,8 @@ async function loadSkillPackage(root: string, allowLegacy: boolean): Promise<Loa
     allowedTools: [],
     assets: [],
     priority: 0,
-    legacy: true
+    legacy: true,
+    source,
   }
 }
 

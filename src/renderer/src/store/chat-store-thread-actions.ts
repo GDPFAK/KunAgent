@@ -111,6 +111,7 @@ type StoreActionContext = {
 }
 
 let drainingQueuedMessages = false
+const checkpointGitUnavailableWorkspaces = new Set<string>()
 
 function fallbackComposerProviderIdForSend(state: ChatState): string {
   return state.route === 'claw' ? '' : state.composerProviderId.trim()
@@ -259,10 +260,27 @@ export function createThreadActions(
           return
         }
       }
+      // Primary-agent persona snapshot: bind this thread to the picked
+      // subagent profile and freeze its providerId / model / systemPrompt
+      // at create time so later agent edits don't drift the thread.
+      const pickedAgentId = options.agentId?.trim() || get().composerAgentId?.trim() || ''
+      const personaProfile = pickedAgentId
+        ? settings.agents?.kun?.subagents?.profiles?.find(
+            (profile) => profile.id === pickedAgentId &&
+              profile.enabled &&
+              (profile.mode === 'primary' || profile.mode === 'all')
+          )
+        : undefined
       const t = await p.createThread({
         workspace: workspaceRoot,
         title: getDefaultThreadTitle(),
-        mode: 'agent'
+        mode: 'agent',
+        ...(personaProfile ? {
+          agentId: personaProfile.id,
+          ...(personaProfile.providerId ? { providerId: personaProfile.providerId } : {}),
+          ...(personaProfile.model ? { model: personaProfile.model } : {}),
+          ...(personaProfile.systemPrompt ? { systemPrompt: personaProfile.systemPrompt } : {})
+        } : {})
       })
       // Register + activate optimistically before refreshing. A freshly created
       // Kun thread may not be listed until the first message is written.
@@ -393,10 +411,25 @@ export function createThreadActions(
         latestUserMessageId,
         turnDurationByUserId = {},
         usage: threadUsage,
+        relation: threadRelation,
+        parentThreadId: threadParentId,
+        model: threadModel,
         goal,
         todos
       } = await p.getThreadDetail(id)
-      const blocks = hydrateBlockModelLabels(id, rawBlocks)
+      // A subagent's `side` thread has no locally-stored per-turn model labels
+      // (it was never sent through the composer). Backfill the user blocks with
+      // the child thread's resolved model so the session shows "which model",
+      // matching the main conversation. Safe: a child runs on a single model.
+      const labeledBlocks =
+        threadRelation === 'side' && threadModel
+          ? rawBlocks.map((block) =>
+              block.kind === 'user' && !block.modelLabel
+                ? { ...block, modelLabel: threadModel }
+                : block
+            )
+          : rawBlocks
+      const blocks = hydrateBlockModelLabels(id, labeledBlocks)
       const busy = threadSnapshotLooksRunning(blocks, threadStatus)
       const currentTurnUserId = busy
         ? latestUserMessageId ?? findLatestUserBlockId(blocks)
@@ -408,6 +441,8 @@ export function createThreadActions(
         watchTurnCompletion: nextWatch,
         unreadThreadIds: nextUnread,
         activeThreadId: id,
+        activeThreadRelation: threadRelation ?? 'primary',
+        activeThreadParentId: threadParentId ?? null,
         activeThreadGoal: goal ?? null,
         activeThreadTodos: todos ?? null,
         blocks,
@@ -761,6 +796,8 @@ export function createThreadActions(
             ? await p.createThread({
                 workspace: workspaceRoot,
                 title: generatedTitle,
+                // Provisional first-message title; let the backend LLM titler upgrade it.
+                titleAuto: true,
                 mode: mode ?? 'agent'
               })
             : null
@@ -774,6 +811,10 @@ export function createThreadActions(
         }
         set((s) => ({
           activeThreadId: threadId,
+          // Freshly created threads are always primary — clear any side-session
+          // relation carried over from the previously active thread.
+          activeThreadRelation: 'primary',
+          activeThreadParentId: null,
           codeWorkspaceRoots: rememberCodeWorkspaceRoots(s.codeWorkspaceRoots, [workspaceRoot, createdThread?.workspace]),
           lastSeq: 0,
           inspectorSelectedId: null,
@@ -826,7 +867,12 @@ export function createThreadActions(
       let workspaceCheckpointId: string | undefined
       const checkpointThread = get().threads.find((thread) => thread.id === activeThreadId)
       const checkpointWorkspaceRoot = normalizeWorkspaceRoot(checkpointThread?.workspace) || normalizeWorkspaceRoot(settings.workspaceRoot)
-      if (checkpointWorkspaceRoot && typeof window.kunGui.createGitCheckpoint === 'function') {
+      const checkpointWorkspaceKey = checkpointWorkspaceRoot.replaceAll('\\', '/').toLowerCase()
+      if (
+        checkpointWorkspaceRoot &&
+        !checkpointGitUnavailableWorkspaces.has(checkpointWorkspaceKey) &&
+        typeof window.kunGui.createGitCheckpoint === 'function'
+      ) {
         const checkpoint = await window.kunGui.createGitCheckpoint({
           workspaceRoot: checkpointWorkspaceRoot,
           threadId: activeThreadId
@@ -838,11 +884,20 @@ export function createThreadActions(
         if (checkpoint.ok) {
           workspaceCheckpointId = checkpoint.checkpointId
         } else if (checkpoint.reason !== 'not_git_repo' && checkpoint.reason !== 'no_workspace') {
-          void window.kunGui.logError('git-checkpoint', 'Failed to create Git checkpoint', {
-            message: checkpoint.message,
-            reason: checkpoint.reason,
-            workspaceRoot: checkpointWorkspaceRoot
-          }).catch(() => undefined)
+          if (checkpoint.reason === 'git_unavailable') {
+            checkpointGitUnavailableWorkspaces.add(checkpointWorkspaceKey)
+          }
+          void window.kunGui.logError(
+            'git-checkpoint',
+            checkpoint.reason === 'git_unavailable'
+              ? 'Git checkpoint disabled for this workspace because Git was not found'
+              : 'Failed to create Git checkpoint',
+            {
+              message: checkpoint.message,
+              reason: checkpoint.reason,
+              workspaceRoot: checkpointWorkspaceRoot
+            }
+          ).catch(() => undefined)
         }
       }
       let runtimeText: string
@@ -935,25 +990,31 @@ export function createThreadActions(
           })
         }
       }
-      if (shouldRenameThreadAfterSend) {
-        const renamed = await p.renameThread(activeThreadId, generatedTitle).then(() => true).catch(() => {
-          /* keep message delivery successful even if auto-title update fails */
-          return false
-        })
-        if (renamed) {
-          set((s) => ({
-            threads: s.threads.map((thread) =>
-              thread.id === activeThreadId ? { ...thread, title: generatedTitle } : thread
-            )
-          }))
-        }
-      }
+      // Subscribe to the turn's event stream BEFORE the cosmetic title rename so
+      // a slow/blocked title write never delays the conversation. Title naming
+      // must not be a blocking point of the conversation flow.
       set({ currentTurnId: turnId })
       const ac = new AbortController()
       sseAbortRef.current = ac
       const sink = buildThreadEventSink(set, get, { threadId: activeThreadId, signal: ac.signal, sinceSeq: seqAtSend })
       subscribeThreadEventsWithRecovery(p, activeThreadId, seqAtSend, sink, ac.signal, get)
       armBusyWatchdog(set, get)
+      if (shouldRenameThreadAfterSend) {
+        // Provisional first-message title; the backend LLM titler upgrades it
+        // later (fire-and-forget on the runtime). Awaited here only to land the
+        // title before refreshThreads re-reads the list — never blocks the stream.
+        const renamed = await p.renameThread(activeThreadId, generatedTitle, true).then(() => true).catch(() => {
+          /* keep message delivery successful even if auto-title update fails */
+          return false
+        })
+        if (renamed) {
+          set((s) => ({
+            threads: s.threads.map((thread) =>
+              thread.id === activeThreadId ? { ...thread, title: generatedTitle, titleAuto: true } : thread
+            )
+          }))
+        }
+      }
       await get().refreshThreads()
       return true
     } catch (e) {

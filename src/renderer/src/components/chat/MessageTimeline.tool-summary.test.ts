@@ -515,7 +515,7 @@ describe('MessageTimeline Kun runtime metadata smoke', () => {
     expect(html).not.toContain('read detail should stay tucked away')
   })
 
-  it('renders request_user_input without options as a freeform answer field', () => {
+  it('renders a pending request_user_input as a read-only record pointing to the composer', () => {
     const inputBlock: ChatBlock = {
       kind: 'user_input',
       id: 'ui_freeform',
@@ -541,9 +541,11 @@ describe('MessageTimeline Kun runtime metadata smoke', () => {
     )
 
     expect(html).toContain('你更想去南方还是北方？')
-    expect(html).toContain('<textarea')
-    expect(html).not.toContain('userInputOther')
-    expect(html).not.toContain('其他')
+    // Answering moved to the composer-docked panel; the bubble is now the
+    // record, so it no longer hosts interactive inputs — only a pointer + cancel.
+    expect(html).not.toContain('<textarea')
+    expect(html).toContain('Answer below the input box')
+    expect(html).toContain('Cancel')
   })
 
   it('expands the live work timeline by default while keeping tool details collapsed', () => {

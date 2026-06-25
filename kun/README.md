@@ -187,6 +187,7 @@ Shape:
           "enabled": true,
           "transport": "stdio",
           "command": "npx",
+          "cwd": "/path/to/workspace",
           "args": ["-y", "@modelcontextprotocol/server-github"],
           "env": { "GITHUB_TOKEN": "<github-token>" },
           "trustScope": "workspace",
@@ -453,7 +454,8 @@ stay local to one thread, leave it as a pinned constraint.
   server `enabled` flag, transport-specific fields (`command` for
   `stdio`, `url` for HTTP/SSE), `trustedWorkspaceRoots` for
   workspace-scoped servers, and `/v1/runtime/tools` for redacted
-  `lastError` diagnostics.
+  `lastError` diagnostics. Stdio servers can set `cwd`; if omitted,
+  workspace-scoped servers start in the first trusted workspace root.
 - Web tools are missing: `capabilities.web.enabled` must be true and
   at least one of `fetchEnabled` / `searchEnabled` must be true.
   Built-in fetch handles HTTP(S) pages; search may still be

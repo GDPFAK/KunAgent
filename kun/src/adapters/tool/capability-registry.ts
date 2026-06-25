@@ -116,6 +116,7 @@ export class CapabilityRegistry {
 
   private canUseProvider(provider: ToolProviderPolicy, context?: ToolHostContext): boolean {
     if (!provider.enabled || !provider.available) return false
+    if (context?.blockedProviderIds?.includes(provider.id)) return false
     const allowed = context?.allowedProviderIds
     if (allowed && !allowed.includes(provider.id)) return false
     return true
@@ -125,6 +126,7 @@ export class CapabilityRegistry {
     if (isPlanModeContext(context) && !PLAN_MODE_ALLOWED_TOOL_NAMES.has(toolName)) {
       return false
     }
+    if (context?.blockedToolNames?.includes(toolName)) return false
     const allowed = context?.allowedToolNames
     return !allowed || allowed.includes(toolName)
   }

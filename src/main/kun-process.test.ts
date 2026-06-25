@@ -33,7 +33,7 @@ function createSettings(binaryPath: string): AppSettingsV1 {
     version: 1,
     locale: 'en',
     theme: 'system',
-    uiFontScale: 'small',
+    uiFontScale: 0.82,
     provider: defaultModelProviderSettings(),
     agents: {
       kun: {
@@ -44,6 +44,7 @@ function createSettings(binaryPath: string): AppSettingsV1 {
     },
     workspaceRoot: '/tmp/workspace',
     log: { enabled: false, retentionDays: 7 },
+    checkpointCleanup: { enabled: false, intervalDays: 3 },
     notifications: { turnComplete: true },
     appBehavior: { openAtLogin: false, startMinimized: false, closeToTray: false },
     keyboardShortcuts: defaultKeyboardShortcuts(),
@@ -113,9 +114,17 @@ describe('startKunChild', () => {
     const script = writeScript(
       'ready-child.js',
       [
-        "setTimeout(() => {",
-        "  process.stdout.write('KUN_READY ' + JSON.stringify({ service: 'kun', mode: 'serve', port: 18899 }) + '\\n')",
-        "}, 50)",
+        "const http = require('node:http')",
+        "const port = 18899",
+        "const server = http.createServer((req, res) => {",
+        "  res.setHeader('content-type', 'application/json')",
+        "  res.end(JSON.stringify({ service: 'kun', mode: 'serve', status: 'ok' }))",
+        "})",
+        "server.listen(port, '127.0.0.1', () => {",
+        "  setTimeout(() => {",
+        "    process.stdout.write('KUN_READY ' + JSON.stringify({ service: 'kun', mode: 'serve', port }) + '\\n')",
+        "  }, 50)",
+        "})",
         "setInterval(() => {}, 1_000)"
       ].join('\n')
     )
@@ -128,19 +137,76 @@ describe('startKunChild', () => {
     expect(logText).toContain('ready marker received on port 18899')
   })
 
+  it('does not settle on the ready marker until the /health endpoint responds', async () => {
+    if (!tempRoot) throw new Error('temp root not initialized')
+    const healthSignalPath = join(tempRoot, 'allow-health')
+    const script = writeScript(
+      'marker-without-health-child.js',
+      [
+        "const http = require('node:http')",
+        "const { existsSync } = require('node:fs')",
+        `const healthSignalPath = ${JSON.stringify(healthSignalPath)}`,
+        "const port = 18899",
+        // Emit the ready marker right away but serve no /health yet: the
+        // marker alone must NOT be enough to settle the launch.
+        "process.stdout.write('KUN_READY ' + JSON.stringify({ service: 'kun', mode: 'serve', port }) + '\\n')",
+        'let served = false',
+        'setInterval(() => {',
+        '  if (served || !existsSync(healthSignalPath)) return',
+        '  served = true',
+        "  const server = http.createServer((req, res) => {",
+        "    res.setHeader('content-type', 'application/json')",
+        "    res.end(JSON.stringify({ service: 'kun', mode: 'serve', status: 'ok' }))",
+        "  })",
+        "  server.listen(port, '127.0.0.1')",
+        '}, 10)',
+        'setInterval(() => {}, 1_000)'
+      ].join('\n')
+    )
+    const module = await import('./kun-process')
+    let resolved = false
+    const start = module.startKunChild(createSettings(script)).then(() => {
+      resolved = true
+    })
+
+    // The marker has been emitted but /health is not up yet. The child is
+    // spawned and alive, yet the launch must stay PENDING for the whole
+    // window (the startup timeout is far larger, so it cannot mask this).
+    await new Promise((resolve) => setTimeout(resolve, 300))
+    expect(resolved).toBe(false)
+
+    // Bring /health online; the parallel probe now settles the launch.
+    writeFileSync(healthSignalPath, 'ok', 'utf8')
+    await start
+    expect(resolved).toBe(true)
+    expect(module.isKunChildRunning()).toBe(true)
+
+    await module.stopKunChildAndWait()
+  })
+
   it('shares the startup promise while Kun is spawned but not ready', async () => {
     if (!tempRoot) throw new Error('temp root not initialized')
     const readySignalPath = join(tempRoot, 'allow-ready')
     const script = writeScript(
       'delayed-ready-child.js',
       [
+        "const http = require('node:http')",
         "const { existsSync } = require('node:fs')",
         `const readySignalPath = ${JSON.stringify(readySignalPath)}`,
+        "const port = 18899",
         'let sentReady = false',
+        // Only stand up the /health server once the signal exists so the
+        // parallel health probe cannot settle the launch before then.
         'setInterval(() => {',
         '  if (sentReady || !existsSync(readySignalPath)) return',
         '  sentReady = true',
-        "  process.stdout.write('KUN_READY ' + JSON.stringify({ service: 'kun', mode: 'serve', port: 18899 }) + '\\n')",
+        "  const server = http.createServer((req, res) => {",
+        "    res.setHeader('content-type', 'application/json')",
+        "    res.end(JSON.stringify({ service: 'kun', mode: 'serve', status: 'ok' }))",
+        "  })",
+        "  server.listen(port, '127.0.0.1', () => {",
+        "    process.stdout.write('KUN_READY ' + JSON.stringify({ service: 'kun', mode: 'serve', port }) + '\\n')",
+        "  })",
         '}, 10)',
         'setInterval(() => {}, 1_000)'
       ].join('\n')
@@ -185,6 +251,99 @@ describe('startKunChild', () => {
     const logText = await readKunLog()
     expect(logText).toContain('bind failed on port 18899')
     expect(logText).toContain('exited with code 23')
+  })
+})
+
+describe('resolveKunStartupTimeoutMs', () => {
+  it('gives Windows the larger default and other platforms a smaller one', async () => {
+    const { resolveKunStartupTimeoutMs } = await import('./kun-process')
+    expect(resolveKunStartupTimeoutMs('win32', {})).toBe(90_000)
+    expect(resolveKunStartupTimeoutMs('darwin', {})).toBe(60_000)
+    expect(resolveKunStartupTimeoutMs('linux', {})).toBe(60_000)
+  })
+
+  it('honors a valid KUN_STARTUP_TIMEOUT_MS override on every platform', async () => {
+    const { resolveKunStartupTimeoutMs } = await import('./kun-process')
+    expect(resolveKunStartupTimeoutMs('win32', { KUN_STARTUP_TIMEOUT_MS: '120000' })).toBe(120_000)
+    expect(resolveKunStartupTimeoutMs('linux', { KUN_STARTUP_TIMEOUT_MS: ' 30000 ' })).toBe(30_000)
+  })
+
+  it('clamps an out-of-range override to the 15s–10min bounds', async () => {
+    const { resolveKunStartupTimeoutMs } = await import('./kun-process')
+    expect(resolveKunStartupTimeoutMs('linux', { KUN_STARTUP_TIMEOUT_MS: '1000' })).toBe(15_000)
+    expect(resolveKunStartupTimeoutMs('linux', { KUN_STARTUP_TIMEOUT_MS: '99999999' })).toBe(600_000)
+  })
+
+  it('falls back to the platform default when the override is not a finite number', async () => {
+    const { resolveKunStartupTimeoutMs } = await import('./kun-process')
+    expect(resolveKunStartupTimeoutMs('win32', { KUN_STARTUP_TIMEOUT_MS: 'soon' })).toBe(90_000)
+    expect(resolveKunStartupTimeoutMs('darwin', { KUN_STARTUP_TIMEOUT_MS: '' })).toBe(60_000)
+    expect(resolveKunStartupTimeoutMs('darwin', { KUN_STARTUP_TIMEOUT_MS: '   ' })).toBe(60_000)
+  })
+})
+
+describe('waitForKunStartupSettled', () => {
+  it('resolves immediately when no launch is in flight', async () => {
+    const module = await import('./kun-process')
+    let resolved = false
+    await Promise.race([
+      module.waitForKunStartupSettled().then(() => {
+        resolved = true
+      }),
+      new Promise((resolve) => setTimeout(resolve, 50))
+    ])
+    expect(resolved).toBe(true)
+  })
+
+  it('does not resolve until an in-flight launch settles', async () => {
+    if (!tempRoot) throw new Error('temp root not initialized')
+    const readySignalPath = join(tempRoot, 'allow-ready-settled')
+    const script = writeScript(
+      'settled-delayed-child.js',
+      [
+        "const http = require('node:http')",
+        "const { existsSync } = require('node:fs')",
+        `const readySignalPath = ${JSON.stringify(readySignalPath)}`,
+        "const port = 18899",
+        'let sentReady = false',
+        // Only stand up the /health server once the signal exists so the
+        // parallel health probe cannot settle the launch before then.
+        'setInterval(() => {',
+        '  if (sentReady || !existsSync(readySignalPath)) return',
+        '  sentReady = true',
+        "  const server = http.createServer((req, res) => {",
+        "    res.setHeader('content-type', 'application/json')",
+        "    res.end(JSON.stringify({ service: 'kun', mode: 'serve', status: 'ok' }))",
+        "  })",
+        "  server.listen(port, '127.0.0.1', () => {",
+        "    process.stdout.write('KUN_READY ' + JSON.stringify({ service: 'kun', mode: 'serve', port }) + '\\n')",
+        "  })",
+        '}, 10)',
+        'setInterval(() => {}, 1_000)'
+      ].join('\n')
+    )
+    const module = await import('./kun-process')
+    const settings = createSettings(script)
+    const start = module.startKunChild(settings)
+
+    for (let attempt = 0; attempt < 100 && !module.isKunChildRunning(); attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 10))
+    }
+    expect(module.isKunChildRunning()).toBe(true)
+
+    let settled = false
+    const settledPromise = module.waitForKunStartupSettled().then(() => {
+      settled = true
+    })
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(settled).toBe(false)
+
+    writeFileSync(readySignalPath, 'ready', 'utf8')
+    await start
+    await settledPromise
+    expect(settled).toBe(true)
+
+    await module.stopKunChildAndWait()
   })
 })
 
@@ -384,6 +543,10 @@ describe('syncGuiManagedKunConfig', () => {
     expect(parsed.runtime.toolArgumentRepair).toMatchObject({ maxStringBytes: 524288 })
     expect(parsed.capabilities.attachments).toMatchObject({ enabled: true })
     expect(parsed.capabilities.memory).toMatchObject({ enabled: false })
+    // Subagents have no GUI enable toggle: they default ON so delegate_task + the
+    // built-in profiles are always offered. maxParallel/maxChildRuns must be >=1 or
+    // DelegationRuntime can never run a child. This locks the default against regressions.
+    expect(parsed.capabilities.subagents).toMatchObject({ enabled: true, maxParallel: 3, maxChildRuns: 12 })
     expect(parsed.capabilities.web).toMatchObject({ enabled: true, fetchEnabled: true })
     expect(parsed.capabilities.mcp.search).toMatchObject({ enabled: false, mode: 'auto' })
     expect(parsed.capabilities.imageGen).toEqual({
@@ -683,6 +846,43 @@ describe('syncGuiManagedKunConfig', () => {
     ]))
   })
 
+  it('drops stale Codex plugin cache roots but keeps hand-added manual roots', async () => {
+    if (!tempRoot) throw new Error('temp root not initialized')
+    const configPath = join(tempRoot, 'config.json')
+    // A version directory left behind by a plugin upgrade and a root a user
+    // added by hand to the Kun config file.
+    const staleRoot = join(homedir(), '.codex', 'plugins', 'cache', 'gmail', '0.0.0-stale', 'skills')
+    const manualRoot = join(tempRoot, 'manual', 'skills')
+    writeFileSync(configPath, JSON.stringify({
+      capabilities: { skills: { enabled: true, roots: [staleRoot, manualRoot], legacySkillMd: true } }
+    }), 'utf8')
+    const module = await import('./kun-process')
+
+    await module.syncGuiManagedKunConfig(tempRoot, defaultKunRuntimeSettings())
+
+    const parsed = JSON.parse(readFileSync(configPath, 'utf8')) as any
+    expect(parsed.capabilities.skills.roots).not.toContain(staleRoot)
+    expect(parsed.capabilities.skills.roots).toContain(manualRoot)
+  })
+
+  it('forwards GUI disabledSkillIds into the runtime skills capability', async () => {
+    if (!tempRoot) throw new Error('temp root not initialized')
+    const configPath = join(tempRoot, 'config.json')
+    const module = await import('./kun-process')
+    const settings = createSettings('/tmp/fake-kun-child.js')
+    settings.disabledSkillIds = ['gmail', 'vercel-agent']
+
+    await module.syncGuiManagedKunConfig(tempRoot, defaultKunRuntimeSettings(), {
+      scheduleMcp: {
+        settings,
+        launch: { appPath: '/tmp/deepseek-gui-test-app', execPath: '/tmp/electron', isPackaged: false }
+      }
+    })
+
+    const parsed = JSON.parse(readFileSync(configPath, 'utf8')) as any
+    expect(parsed.capabilities.skills.disabledIds).toEqual(['gmail', 'vercel-agent'])
+  })
+
   it('writes GUI-managed MCP search settings without removing existing servers', async () => {
     if (!tempRoot) throw new Error('temp root not initialized')
     const configPath = join(tempRoot, 'config.json')
@@ -875,6 +1075,7 @@ describe('syncGuiManagedKunConfig', () => {
       servers: {
         'stata-mcp': {
           command: 'uvx',
+          cwd: 'D:\\Workspace\\stata-project',
           args: ['stata-mcp'],
           env: {
             STATA_CLI: 'D:\\stata\\StataMP-64.exe'
@@ -902,6 +1103,7 @@ describe('syncGuiManagedKunConfig', () => {
       enabled: true,
       transport: 'stdio',
       command: 'uvx',
+      cwd: 'D:\\Workspace\\stata-project',
       args: ['stata-mcp'],
       env: {
         STATA_CLI: 'D:\\stata\\StataMP-64.exe'
@@ -1019,5 +1221,45 @@ describe('syncGuiManagedKunConfig', () => {
       searchEnabled: true,
       provider: 'custom-search'
     })
+  })
+})
+
+describe('subagentProfilesForRuntime', () => {
+  it('drops blank optional fields so the runtime config still parses', async () => {
+    const module = await import('./kun-process')
+    // Built-in profiles store an empty `name` (the GUI localizes the label) and
+    // the user picked a model on one of them. The runtime schema marks every
+    // optional string `.min(1)`, so a forwarded empty string used to throw and
+    // strand the runtime at "无法连接到本地运行时".
+    const config = module.subagentProfilesForRuntime({
+      enabled: true,
+      profiles: [
+        {
+          id: 'general',
+          enabled: true,
+          name: '',
+          mode: 'subagent',
+          toolPolicy: 'inherit',
+          model: 'deepseek-v4',
+          description: '   '
+        }
+      ]
+    })
+
+    expect(config.profiles.general).toBeDefined()
+    expect('name' in config.profiles.general).toBe(false)
+    expect('description' in config.profiles.general).toBe(false)
+    expect(config.profiles.general.model).toBe('deepseek-v4')
+  })
+
+  it('keeps a non-empty name', async () => {
+    const module = await import('./kun-process')
+    const config = module.subagentProfilesForRuntime({
+      enabled: true,
+      profiles: [
+        { id: 'custom', enabled: true, name: '我的代理', mode: 'subagent', toolPolicy: 'inherit' }
+      ]
+    })
+    expect(config.profiles.custom.name).toBe('我的代理')
   })
 })

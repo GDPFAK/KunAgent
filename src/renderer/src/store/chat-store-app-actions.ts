@@ -5,6 +5,7 @@ import type { ChatState, ChatStoreGet, ChatStoreSet, InitialSetupMode, PluginHos
 import type { ComposerPlanMode } from './chat-store-helpers'
 import {
   canSwitchComposerModel,
+  conversationHasVisionAttachments,
   composerModelSelectable,
   composerModeForThread,
   persistComposerMode,
@@ -45,6 +46,7 @@ export function createAppActions(options: CreateAppActionsOptions): Pick<
   | 'setError'
   | 'setComposerMode'
   | 'setComposerModel'
+  | 'setComposerAgentId'
   | 'loadComposerModels'
   | 'setRoute'
   | 'openWrite'
@@ -100,7 +102,7 @@ export function createAppActions(options: CreateAppActionsOptions): Pick<
       const lockVisionToTextSwitch =
         state.route === 'chat' &&
         Array.isArray(state.blocks) &&
-        state.blocks.some((block) => block.kind === 'user')
+        conversationHasVisionAttachments(state.blocks)
       if (!canSwitchComposerModel(
         lockVisionToTextSwitch,
         state.composerModelGroups,
@@ -123,6 +125,10 @@ export function createAppActions(options: CreateAppActionsOptions): Pick<
       if (!activeThreadId && trimmed && trimmed.toLowerCase() !== 'auto' && typeof window.kunGui !== 'undefined') {
         void window.kunGui.saveSettingsSilent({ agents: { kun: { model: trimmed } } })
       }
+    },
+
+    setComposerAgentId: (agentId) => {
+      set({ composerAgentId: agentId.trim() })
     },
 
     loadComposerModels: async () => {

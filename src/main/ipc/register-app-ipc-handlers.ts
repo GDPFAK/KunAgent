@@ -46,6 +46,7 @@ import {
   gitCheckpointRestorePayloadSchema,
   gitWorktreeRemoveSchema,
   guiUpdateChannelSchema,
+  localPdfTextTargetPayloadSchema,
   logErrorPayloadSchema,
   notificationPayloadSchema,
   openEditorPathPayloadSchema,
@@ -178,6 +179,7 @@ import {
 } from '../services/computer-use-permissions'
 import { copyWriteDocumentAsRichText, exportWriteDocument } from '../services/write-export-service'
 import { importGithubSkillsToRoot } from '../services/github-skill-import-service'
+import { readLocalPdfText } from '../services/write-pdf-text-service'
 import { saveGuiSkillPackage } from '../services/skill-save-service'
 import { listGuiSkillRoots, listGuiSkills } from '../services/skill-service'
 
@@ -958,7 +960,18 @@ export function registerAppIpcHandlers(options: RegisterAppIpcHandlersOptions): 
     const request = parseIpcPayload('git:checkpoint:restore', gitCheckpointRestorePayloadSchema, payload)
     return restoreGitCheckpoint({
       dataDir: await resolveKunThreadsDataDir(),
-      checkpointId: request.checkpointId
+      checkpointId: request.checkpointId,
+      // Bridge the main-process runtimeRequest into the shape restoreGitCheckpoint
+      // expects ((path, {method, body}) => {ok,status,body}). On a transport-level
+      // failure (runtime not up, connection refused) we return a non-ok result so
+      // the busy guard fails closed instead of throwing past the handler.
+      runtimeRequest: async (path, init) => {
+        try {
+          return await runtimeRequest(path, init?.method, init?.body)
+        } catch (error) {
+          return { ok: false, status: 0, body: error instanceof Error ? error.message : String(error) }
+        }
+      }
     })
   })
   ipcMain.handle(
@@ -1087,6 +1100,22 @@ export function registerAppIpcHandlers(options: RegisterAppIpcHandlersOptions): 
       parseIpcPayload('file:read-workspace-pdf', workspaceFileTargetPayloadSchema, payload)
     )
   )
+  ipcMain.handle('file:read-local-pdf-text', async (_, payload: unknown) => {
+    const result = await readLocalPdfText(
+      parseIpcPayload('file:read-local-pdf-text', localPdfTextTargetPayloadSchema, payload)
+    )
+    if (!result.ok) return result
+    return {
+      ok: true,
+      path: result.path,
+      size: result.size,
+      mtimeMs: result.mtimeMs,
+      pageCount: result.pageCount,
+      text: result.pages.map((page) => page.text).join('\n\n'),
+      hasText: result.hasText,
+      truncated: result.truncated
+    }
+  })
   ipcMain.handle('file:save-as', async (_, payload: unknown) =>
     saveWorkspaceFileAs(payload, getMainWindow)
   )

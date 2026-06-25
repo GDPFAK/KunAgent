@@ -7,6 +7,7 @@ import {
   formatMcpConnectionError,
   isMcpServerTrusted,
   normalizeMcpToolName,
+  resolveMcpServerCwd,
   type McpClientLike
 } from '../src/adapters/tool/mcp-tool-provider.js'
 import { REDACTED_SECRET } from '../src/config/secret-redaction.js'
@@ -136,6 +137,26 @@ describe('MCP tool provider', () => {
     expect(isMcpServerTrusted(server, '/tmp/project')).toBe(true)
     expect(isMcpServerTrusted(server, '/tmp/project/sub')).toBe(true)
     expect(isMcpServerTrusted(server, '/tmp/other')).toBe(false)
+  })
+
+  it('resolves stdio MCP working directories from explicit config or trusted workspace fallback', () => {
+    const base = {
+      enabled: true,
+      transport: 'stdio',
+      command: 'node',
+      args: [],
+      url: undefined,
+      headers: {},
+      env: {},
+      trustScope: 'workspace',
+      trustedWorkspaceRoots: ['/tmp/project'],
+      timeoutMs: 30_000
+    } satisfies McpServerConfig
+
+    expect(resolveMcpServerCwd({ ...base, cwd: '/tmp/explicit' })).toBe('/tmp/explicit')
+    expect(resolveMcpServerCwd(base)).toBe('/tmp/project')
+    expect(resolveMcpServerCwd({ ...base, trustScope: 'user', trustedWorkspaceRoots: [] })).toBeUndefined()
+    expect(resolveMcpServerCwd({ ...base, transport: 'streamable-http', url: 'https://mcp.example.test' })).toBeUndefined()
   })
 
   it('builds registry providers from connected MCP clients and executes tools', async () => {

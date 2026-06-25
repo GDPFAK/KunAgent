@@ -10,6 +10,7 @@ export type ApprovalDecisionRequest = z.infer<typeof ApprovalDecisionRequest>
 export const ApprovalDecisionResponse = z.object({
   approvalId: z.string().min(1),
   decision: z.enum(['allow', 'deny']),
-  status: z.enum(['allowed', 'denied', 'expired'])
+  status: z.enum(['allowed', 'denied', 'expired']),
+  alreadyResolved: z.boolean().optional()
 })
 export type ApprovalDecisionResponse = z.infer<typeof ApprovalDecisionResponse>

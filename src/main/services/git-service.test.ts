@@ -269,3 +269,37 @@ describe('worktree branch checkout — integration with real git', () => {
     expect(afterRemove.worktrees.map((item) => item.path)).not.toContain(result.worktreePath)
   })
 })
+
+describe('getGitBranches — worktree annotations', () => {
+  it('flags a branch checked out in another worktree and points back to the primary checkout', async () => {
+    // Park `main` in a linked worktree so the main repo and the worktree share
+    // a repository but hold different branches — the scenario that produced the
+    // "'develop' is already used by worktree" error.
+    execFileSync('git', ['-C', repoRoot, 'checkout', '-b', 'feature/parked'], { stdio: 'pipe' })
+    const worktreePath = join(sandbox, 'linked', basename(repoRoot))
+    await mkdir(join(worktreePath, '..'), { recursive: true })
+    execFileSync('git', ['-C', repoRoot, 'worktree', 'add', worktreePath, 'main'], { stdio: 'pipe' })
+    const worktreeReal = await realpath(worktreePath)
+
+    // From the main repo: `main` lives in the linked (non-primary) worktree.
+    const fromMain = await getGitBranches(repoRoot)
+    expect(fromMain.ok).toBe(true)
+    if (!fromMain.ok) throw new Error('unreachable')
+    expect(fromMain.primaryRepositoryRoot).toBe(repoRoot)
+    const mainRow = fromMain.branches.find((b) => b.name === 'main')
+    expect(mainRow?.worktreePath).toBe(worktreeReal)
+    expect(mainRow?.worktreePrimary).toBe(false)
+    // The current branch is never flagged as living elsewhere.
+    expect(fromMain.branches.find((b) => b.name === 'feature/parked')?.worktreePath).toBeUndefined()
+
+    // From the linked worktree: `feature/parked` lives in the primary checkout.
+    const fromWorktree = await getGitBranches(worktreeReal)
+    expect(fromWorktree.ok).toBe(true)
+    if (!fromWorktree.ok) throw new Error('unreachable')
+    expect(fromWorktree.primaryRepositoryRoot).toBe(repoRoot)
+    const parkedRow = fromWorktree.branches.find((b) => b.name === 'feature/parked')
+    expect(parkedRow?.worktreePath).toBe(repoRoot)
+    expect(parkedRow?.worktreePrimary).toBe(true)
+    expect(fromWorktree.branches.find((b) => b.name === 'main')?.worktreePath).toBeUndefined()
+  })
+})

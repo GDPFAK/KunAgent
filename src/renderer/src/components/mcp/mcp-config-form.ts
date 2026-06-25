@@ -25,6 +25,8 @@ export type McpFormServer = {
   enabled: boolean
   transport: McpTransport
   command: string
+  /** Working directory for stdio servers. Blank = runtime default/fallback. */
+  cwd: string
   /** One CLI argument per entry; edited as a multiline textarea (one/line). */
   args: string[]
   env: McpKeyValue[]
@@ -118,6 +120,7 @@ function parseServerEntry(name: string, raw: unknown): McpFormServer {
     enabled,
     transport,
     command,
+    cwd: asString(record.cwd).trim(),
     args: asStringArray(record.args),
     env: asKeyValues(record.env),
     url,
@@ -136,6 +139,7 @@ export function createBlankMcpServer(transport: McpTransport = 'stdio'): McpForm
     enabled: true,
     transport,
     command: '',
+    cwd: '',
     args: [],
     env: [],
     url: '',
@@ -200,6 +204,7 @@ export function serializeMcpServer(server: McpFormServer): Record<string, unknow
 
   if (server.transport === 'stdio') {
     if (server.command.trim()) out.command = server.command.trim()
+    if (server.cwd.trim()) out.cwd = server.cwd.trim()
     const args = server.args.map((arg) => arg).filter((arg) => arg.length > 0)
     if (args.length > 0) out.args = args
     const env = keyValuesToRecord(server.env)

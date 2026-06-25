@@ -62,6 +62,56 @@ function screenshotHistory(): TurnItem[] {
   return [toolCall, toolResult]
 }
 
+// Two parallel tool calls in a single assistant turn, each with its own
+// tool_result — the shape that triggered issue #574 (each tool_result must
+// land in the SAME user message under the Anthropic Messages protocol).
+function parallelToolHistory(): TurnItem[] {
+  const base = { turnId: 'u2', threadId: 't1', status: 'completed' as const, createdAt: '2026-01-01T00:00:00.000Z' }
+  const callA: TurnItem = {
+    ...base,
+    id: 'pc1',
+    role: 'assistant',
+    kind: 'tool_call',
+    toolName: 'read_file',
+    callId: 'call_a',
+    toolKind: 'command_execution',
+    arguments: { path: 'a.txt' }
+  }
+  const callB: TurnItem = {
+    ...base,
+    id: 'pc2',
+    role: 'assistant',
+    kind: 'tool_call',
+    toolName: 'read_file',
+    callId: 'call_b',
+    toolKind: 'command_execution',
+    arguments: { path: 'b.txt' }
+  }
+  const resultA: TurnItem = {
+    ...base,
+    id: 'pr1',
+    role: 'tool',
+    kind: 'tool_result',
+    toolName: 'read_file',
+    callId: 'call_a',
+    toolKind: 'command_execution',
+    isError: false,
+    output: { kind: 'text', text: 'contents-a' }
+  }
+  const resultB: TurnItem = {
+    ...base,
+    id: 'pr2',
+    role: 'tool',
+    kind: 'tool_result',
+    toolName: 'read_file',
+    callId: 'call_b',
+    toolKind: 'command_execution',
+    isError: false,
+    output: { kind: 'text', text: 'contents-b' }
+  }
+  return [callA, callB, resultA, resultB]
+}
+
 function request(model: string): ModelRequest {
   return {
     threadId: 't1',
@@ -72,6 +122,13 @@ function request(model: string): ModelRequest {
     history: screenshotHistory(),
     tools: [],
     abortSignal: new AbortController().signal
+  }
+}
+
+function parallelRequest(model: string): ModelRequest {
+  return {
+    ...request(model),
+    history: parallelToolHistory()
   }
 }
 
@@ -159,5 +216,42 @@ describe('CompatModelClient tool-result image forwarding', () => {
     expect(body).not.toContain(SHOT)
     // Metadata (the screen size) still reaches the model as text.
     expect(body).toContain('computer_screenshot')
+  })
+
+  it('merges parallel tool_results into one user message (anthropic messages)', async () => {
+    // Regression for issue #574: parallel tool calls must answer with a
+    // single user message holding both tool_result blocks, not two separate
+    // user messages (which trips Anthropic's tool_result-immediately-after
+    // rule and yields HTTP 400 on compat providers).
+    const calls: CapturedCall[] = []
+    const client = new CompatModelClient({
+      baseUrl: 'https://api.example.com/v1',
+      apiKey: 'sk',
+      model: 'claude-parallel',
+      endpointFormat: 'messages',
+      nonStreaming: true,
+      fetchImpl: fakeFetch(calls),
+      modelCapabilities: caps(false, 'messages')
+    })
+    await drain(client.stream(parallelRequest('claude-parallel')))
+    expect(calls[0].url).toMatch(/\/messages$/)
+    const messages = calls[0].body.messages as Array<{
+      role: string
+      content: Array<{ type: string; tool_use_id?: string }>
+    }>
+    const toolResultUserMessages = messages.filter(
+      (m) =>
+        m.role === 'user' &&
+        Array.isArray(m.content) &&
+        m.content.some((b) => b.type === 'tool_result')
+    )
+    // Exactly ONE user message carries the tool_result blocks.
+    expect(toolResultUserMessages).toHaveLength(1)
+    const merged = toolResultUserMessages[0]!
+    const toolResultIds = merged.content
+      .filter((b) => b.type === 'tool_result')
+      .map((b) => b.tool_use_id)
+      .sort()
+    expect(toolResultIds).toEqual(['call_a', 'call_b'])
   })
 })

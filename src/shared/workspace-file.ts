@@ -121,6 +121,23 @@ export type WorkspacePdfReadResult =
     }
   | { ok: false; message: string }
 
+export type LocalPdfTextTarget = {
+  path: string
+}
+
+export type LocalPdfTextReadResult =
+  | {
+      ok: true
+      path: string
+      size: number
+      mtimeMs: number
+      pageCount: number
+      text: string
+      hasText: boolean
+      truncated: boolean
+    }
+  | { ok: false; message: string }
+
 export type WorkspaceFileResolveResult =
   | {
       ok: true

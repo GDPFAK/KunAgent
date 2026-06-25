@@ -37,6 +37,7 @@ describe('parseMcpConfigText', () => {
             github: {
               transport: 'stdio',
               command: 'npx',
+              cwd: '/workspace/project',
               args: ['-y', 'gh-mcp'],
               env: { TOKEN: 'abc' }
             }
@@ -49,6 +50,7 @@ describe('parseMcpConfigText', () => {
     expect(server.name).toBe('github')
     expect(server.transport).toBe('stdio')
     expect(server.command).toBe('npx')
+    expect(server.cwd).toBe('/workspace/project')
     expect(server.args).toEqual(['-y', 'gh-mcp'])
     expect(server.env).toEqual([{ key: 'TOKEN', value: 'abc' }])
     // No explicit trustScope / roots -> defaults to user.
@@ -174,6 +176,7 @@ describe('serializeMcpConfig', () => {
       ...createBlankMcpServer('stdio'),
       name: 's',
       command: 'run',
+      cwd: '/workspace/project',
       args: ['--flag'],
       env: [{ key: 'K', value: 'V' }],
       // url/headers should be ignored for stdio
@@ -183,6 +186,7 @@ describe('serializeMcpConfig', () => {
     expect(serializeMcpServer(stdio)).toEqual({
       transport: 'stdio',
       command: 'run',
+      cwd: '/workspace/project',
       args: ['--flag'],
       env: { K: 'V' },
       trustScope: 'user'
@@ -195,6 +199,7 @@ describe('serializeMcpConfig', () => {
       headers: [{ key: 'Authorization', value: 'Bearer x' }],
       // command/args/env should be ignored for http
       command: 'ignored',
+      cwd: '/ignored',
       args: ['ignored'],
       env: [{ key: 'IGN', value: 'V' }]
     }

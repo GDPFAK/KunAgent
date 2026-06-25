@@ -138,4 +138,67 @@ describe('CapabilityRegistry', () => {
     )
     expect(visible.map((entry) => entry.name)).toEqual(['vision_tool'])
   })
+
+  it('honors provider deny-lists (blockedProviderIds) at advertise and execute', async () => {
+    let executed = false
+    const tool = LocalToolHost.defineTool({
+      name: 'mcp_github_create_issue',
+      description: 'create issue',
+      inputSchema: { type: 'object' },
+      policy: 'auto',
+      execute: async () => {
+        executed = true
+        return { output: { ok: true } }
+      }
+    })
+    const host = new LocalToolHost({
+      registry: new CapabilityRegistry([
+        { id: 'mcp:github', kind: 'mcp', enabled: true, available: true, tools: [tool] }
+      ])
+    })
+
+    // No deny-list → the MCP tool is advertised.
+    expect((await host.listTools(buildContext())).map((entry) => entry.name)).toEqual(['mcp_github_create_issue'])
+
+    // blockedProviderIds hides the whole server and rejects execution.
+    const blocked = buildContext({ blockedProviderIds: ['mcp:github'] })
+    expect(await host.listTools(blocked)).toEqual([])
+    await expect(
+      host.execute({ callId: 'call_1', toolName: 'mcp_github_create_issue', arguments: {} }, blocked)
+    ).rejects.toThrow(/not advertised/)
+    expect(executed).toBe(false)
+  })
+
+  it('honors tool-name deny-lists (blockedToolNames) while leaving sibling tools advertised', async () => {
+    let executed = false
+    const bash = LocalToolHost.defineTool({
+      name: 'bash',
+      description: 'run',
+      inputSchema: { type: 'object' },
+      policy: 'auto',
+      execute: async () => {
+        executed = true
+        return { output: { ok: true } }
+      }
+    })
+    const read = LocalToolHost.defineTool({
+      name: 'read',
+      description: 'read',
+      inputSchema: { type: 'object' },
+      policy: 'auto',
+      execute: async () => ({ output: { ok: true } })
+    })
+    const host = new LocalToolHost({
+      registry: new CapabilityRegistry([
+        { id: 'builtin', kind: 'built-in', enabled: true, available: true, tools: [bash, read] }
+      ])
+    })
+
+    const blocked = buildContext({ blockedToolNames: ['bash'] })
+    expect((await host.listTools(blocked)).map((entry) => entry.name)).toEqual(['read'])
+    await expect(
+      host.execute({ callId: 'call_1', toolName: 'bash', arguments: {} }, blocked)
+    ).rejects.toThrow(/active tool policy/)
+    expect(executed).toBe(false)
+  })
 })

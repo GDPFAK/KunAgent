@@ -518,7 +518,7 @@ describe('cli', () => {
     expect('defaultStepLimit' in config.subagents).toBe(false)
   })
 
-  it('parses subagent profiles and defaults the tool policy to read-only', () => {
+  it('parses subagent profiles and defaults the tool policy to inherit', () => {
     const config = KunCapabilitiesConfig.parse({
       subagents: {
         enabled: true,
@@ -527,15 +527,19 @@ describe('cli', () => {
         defaultProfile: 'reviewer',
         profiles: {
           reviewer: { model: 'deepseek-v4-pro', promptPreamble: 'Review for bugs.', toolPolicy: 'readOnly' },
-          fixer: { toolPolicy: 'inherit' }
+          fixer: { toolPolicy: 'inherit' },
+          helper: {}
         }
       }
     })
-    expect(config.subagents.defaultToolPolicy).toBe('readOnly')
+    // Default subagent policy follows the main agent (inherit), not read-only.
+    expect(config.subagents.defaultToolPolicy).toBe('inherit')
     expect(config.subagents.defaultProfile).toBe('reviewer')
+    // Explicit per-profile policy still wins over the inherit default.
     expect(config.subagents.profiles.reviewer).toMatchObject({ model: 'deepseek-v4-pro', toolPolicy: 'readOnly' })
-    // Profiles default toolPolicy to readOnly when omitted.
     expect(config.subagents.profiles.fixer.toolPolicy).toBe('inherit')
+    // Profiles default toolPolicy to inherit when omitted.
+    expect(config.subagents.profiles.helper.toolPolicy).toBe('inherit')
   })
 
   it('rejects a defaultProfile that is not defined in profiles', () => {
@@ -561,7 +565,7 @@ describe('cli', () => {
     expect(manifest.subagents).toMatchObject({
       maxParallel: 2,
       maxChildRuns: 6,
-      defaultToolPolicy: 'readOnly',
+      defaultToolPolicy: 'inherit',
       defaultProfile: 'reviewer',
       profiles: [{ name: 'reviewer', model: 'deepseek-v4-pro', toolPolicy: 'readOnly' }]
     })

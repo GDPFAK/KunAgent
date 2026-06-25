@@ -1,7 +1,21 @@
 import type { KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent, ReactElement, RefObject } from 'react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { ChevronDown, ChevronRight, Minimize2 } from 'lucide-react'
+import type { LucideIcon } from 'lucide-react'
+import {
+  Brain,
+  BookOpen,
+  ChevronDown,
+  ChevronRight,
+  FolderOpen,
+  ListTodo,
+  MessageSquareQuote,
+  Minimize2,
+  PencilLine,
+  Search,
+  Terminal,
+  Wrench
+} from 'lucide-react'
 import type { ChatBlock, ToolBlock } from '../../agent/types'
 import { extractUnifiedDiffText } from '../../lib/diff-stats'
 import { useDeferredRender } from '../../hooks/use-deferred-render'
@@ -13,17 +27,56 @@ import { AssistantMarkdown } from './AssistantMarkdown'
 import { MessageBubble } from './message-timeline-bubbles'
 import { blockHasPendingRuntimeWork, splitThink } from './message-timeline-turns'
 import { formatDuration, formatToolTitle } from './message-timeline-tools'
+import { SubagentGroup } from './SubagentCallCard'
 
 export type ProcessSection = {
   id: string
-  kind: 'reasoning' | 'execution' | 'output'
+  kind: 'reasoning' | 'execution' | 'output' | 'subagent'
   blocks: ChatBlock[]
+}
+
+/**
+ * A `delegate_task` tool call (or any block carrying child runtime metadata)
+ * is rendered as a "Kun Crew" subagent card, not a generic tool row.
+ */
+export function isSubagentBlock(block: ChatBlock): boolean {
+  if (block.kind !== 'tool') return false
+  const meta = block.meta
+  if (meta?.child && typeof meta.child === 'object') return true
+  const toolName = typeof meta?.toolName === 'string' ? meta.toolName.trim() : ''
+  return toolName === 'delegate_task'
+}
+
+function subagentParentTurnId(block: ChatBlock): string {
+  if (block.kind !== 'tool') return ''
+  const child = block.meta?.child
+  if (child && typeof child === 'object') {
+    const parent = (child as Record<string, unknown>).parentTurnId
+    if (typeof parent === 'string' && parent.trim()) return parent.trim()
+  }
+  return ''
 }
 
 export function groupProcessSections(blocks: ChatBlock[]): ProcessSection[] {
   const sections: ProcessSection[] = []
 
   for (const block of blocks) {
+    if (isSubagentBlock(block)) {
+      const last = sections[sections.length - 1]
+      // Coalesce sibling delegations of one turn (same parentTurnId) into one
+      // swarm section. Blocks without a parentTurnId only merge with an
+      // adjacent parentTurnId-less subagent run.
+      if (last && last.kind === 'subagent') {
+        const lastParent = subagentParentTurnId(last.blocks[0])
+        const parent = subagentParentTurnId(block)
+        if (lastParent === parent) {
+          last.blocks.push(block)
+          continue
+        }
+      }
+      sections.push({ id: `subagent-${block.id}`, kind: 'subagent', blocks: [block] })
+      continue
+    }
     const kind =
       block.kind === 'reasoning'
         ? 'reasoning'
@@ -154,6 +207,11 @@ export function ProcessSectionRow({
 }): ReactElement {
   const { t } = useTranslation('common')
   const [userExpanded, setUserExpanded] = useState<boolean | null>(null)
+
+  if (section.kind === 'subagent') {
+    return <SubagentGroup blocks={section.blocks} />
+  }
+
   const assistantBlocks =
     section.kind === 'output'
       ? section.blocks.filter(
@@ -165,7 +223,7 @@ export function ProcessSectionRow({
   const errorTone = processSectionErrorTone(section.blocks)
   const hasError = errorTone !== null
   const defaultExpanded =
-    hasError ||
+    (processing && hasError) ||
     sectionHasPendingApproval(section) ||
     (active && section.kind === 'reasoning') ||
     (processing && section.kind === 'execution' && sectionHasRequestUserInput(section))
@@ -176,6 +234,7 @@ export function ProcessSectionRow({
     reasoningDurationMs,
     singleReasoningSection
   })
+  const SectionIcon = processSectionIcon(section)
   const reasoningText = section.kind === 'reasoning' ? getReasoningSectionText(section) : ''
   const canToggleSection = hasDetails && !forceExpanded
   const showActiveError = active && hasError
@@ -226,6 +285,7 @@ export function ProcessSectionRow({
               <span className={`h-2 w-2 rounded-full ${processErrorDotClass(errorTone)}`} />
             </span>
           ) : null}
+          {SectionIcon ? <ProcessGlyph Icon={SectionIcon} /> : null}
           <span className={active && !hasError ? 'ds-shiny-text' : ''}>{title}</span>
           {expanded ? (
             <ChevronDown className="h-3.5 w-3.5 shrink-0 opacity-45" strokeWidth={1.8} />
@@ -244,6 +304,7 @@ export function ProcessSectionRow({
               <span className={`h-2 w-2 rounded-full ${processErrorDotClass(errorTone)}`} />
             </span>
           ) : null}
+          {SectionIcon ? <ProcessGlyph Icon={SectionIcon} /> : null}
           <span className={active && !hasError ? 'ds-shiny-text' : ''}>{title}</span>
         </div>
       )}
@@ -316,13 +377,15 @@ function ProcessStackRows({
         const autoOpenPending = processBlockIsAutoOpenPending(block, processing) || isPendingApproval(block)
         const errorTone = processBlockErrorTone(block)
         const isError = errorTone !== null
-        const defaultOpen = isError
+        // Tool-call errors stay collapsed (red header only); other error blocks still auto-open.
+        const defaultOpen = isError && block.kind !== 'tool'
         const forceOpen = autoOpenPending || autoOpenRequestInput
         const userClosed = closedBlockIds.has(block.id)
         const userOpened = openBlockId === block.id
         const open = canExpand && (forceOpen || userOpened || (defaultOpen && !userClosed))
         const rowActive = processBlockIsActive(block, processing)
         const canToggle = canExpand && !forceOpen
+        const RowIcon = processBlockIcon(block)
         const handleToggle = (): void => {
           if (!canToggle) return
           if (open) {
@@ -369,6 +432,7 @@ function ProcessStackRows({
                   : 'text-ds-faint hover:text-ds-muted'
               } ${canToggle ? 'cursor-pointer hover:bg-ds-hover/45' : 'cursor-default'}`}
             >
+              {RowIcon ? <ProcessGlyph Icon={RowIcon} /> : null}
               <span className={`min-w-0 flex-1 truncate ${rowActive && !isError ? 'ds-shiny-text' : ''}`}>
                 <ProcessSummaryText block={block} summary={summary} />
               </span>
@@ -429,7 +493,8 @@ function ProcessEntryRow({
   const errorTone = processBlockErrorTone(block)
   const isError = errorTone !== null
   const forceOpen = isAutoOpenPending || isAssistantProcessText || isStreamingAssistant
-  const defaultOpen = isError
+  // Tool-call errors stay collapsed (red header only); other error blocks still auto-open.
+  const defaultOpen = isError && block.kind !== 'tool'
   const open =
     canExpand &&
     (forceOpen || (userOpen ?? defaultOpen))
@@ -438,6 +503,7 @@ function ProcessEntryRow({
   const rowActive = isRunningTool || isAutoOpenPending || isStreamingAssistant
   const wrapSummary = (block.kind === 'system' && !canExpand) || isAssistantProcessText
   const canToggle = canExpand && !forceOpen
+  const RowIcon = processBlockIcon(block)
   const handleToggle = (): void => {
     if (!canToggle) return
     setUserOpen(!open)
@@ -471,9 +537,7 @@ function ProcessEntryRow({
             : 'cursor-default'
         }`}
       >
-        {!rowActive && block.kind === 'compaction' ? (
-          <Minimize2 className="mt-1 h-3 w-3 shrink-0 opacity-70" strokeWidth={2} />
-        ) : null}
+        {RowIcon ? <ProcessGlyph Icon={RowIcon} className="mt-1" /> : null}
         <span
           className={`min-w-0 flex-1 ${wrapSummary ? 'whitespace-pre-wrap break-words' : 'truncate'} ${
             rowActive && !isError ? 'ds-shiny-text' : ''
@@ -523,6 +587,16 @@ function ProcessEntryRow({
       ) : null}
     </div>
   )
+}
+
+function ProcessGlyph({
+  Icon,
+  className = 'mt-0.5'
+}: {
+  Icon: LucideIcon
+  className?: string
+}): ReactElement {
+  return <Icon className={`${className} h-3.5 w-3.5 shrink-0 opacity-75`} strokeWidth={1.9} />
 }
 
 function describeProcessSection(
@@ -609,6 +683,74 @@ function summarizeExecutionSection(
 
   if (parts.length > 0) return parts.join(' · ')
   return t('processSteps', { count: blocks.length })
+}
+
+function processSectionIcon(section: ProcessSection): LucideIcon | null {
+  if (section.kind === 'reasoning') return Brain
+  if (section.kind === 'output') return MessageSquareQuote
+
+  const toolIcons = section.blocks
+    .map(processBlockIcon)
+    .filter((icon): icon is LucideIcon => icon !== null)
+  if (toolIcons.length === 0) return null
+  const [first] = toolIcons
+  return toolIcons.every((icon) => icon === first) ? first : Wrench
+}
+
+function processBlockIcon(block: ChatBlock): LucideIcon | null {
+  if (block.kind === 'reasoning') return Brain
+  if (block.kind === 'assistant') return MessageSquareQuote
+  if (block.kind === 'compaction') return Minimize2
+  if (block.kind === 'approval') return Wrench
+  if (block.kind === 'user_input') return MessageSquareQuote
+  if (block.kind !== 'tool') return null
+  return toolBlockIcon(block)
+}
+
+function toolBlockIcon(block: ToolBlock): LucideIcon {
+  const toolName = toolNameForBlock(block)
+  switch (toolName) {
+    case 'bash':
+    case 'shell':
+    case 'terminal':
+    case 'run_command':
+    case 'exec':
+      return Terminal
+    case 'read':
+    case 'read_file':
+      return BookOpen
+    case 'write':
+    case 'write_file':
+    case 'edit':
+    case 'edit_file':
+    case 'apply_patch':
+    case 'create_file':
+      return PencilLine
+    case 'grep':
+    case 'grep_files':
+    case 'search':
+    case 'search_files':
+    case 'find':
+      return Search
+    case 'ls':
+    case 'list':
+    case 'list_dir':
+      return FolderOpen
+    case 'create_plan':
+    case 'update_plan':
+      return ListTodo
+    default:
+      break
+  }
+
+  if (block.toolKind === 'command_execution') return Terminal
+  if (block.toolKind === 'file_change') return PencilLine
+  return Wrench
+}
+
+function toolNameForBlock(block: ToolBlock): string {
+  const rawSummary = block.summary?.trim() ?? ''
+  return (extractToolName(rawSummary) || readMetaString(block.meta, 'toolName') || '').toLowerCase()
 }
 
 function splitVerb(summary: string): { verb: string; rest: string } {
@@ -746,6 +888,10 @@ function builtInToolLabel(
     case 'bash':
     case 'shell':
       return t('toolBuiltinBash')
+    case 'delegate_task':
+      // Routed to SubagentCallCard before the generic row; labeled here as a
+      // defensive fallback so an ungrouped delegate block never reads as raw JSON.
+      return t('toolBuiltinDelegate')
     default:
       return undefined
   }
@@ -808,9 +954,11 @@ function RuntimeMetaBadges({
   const childLabel =
     typeof child?.childLabel === 'string' && child.childLabel.trim()
       ? child.childLabel.trim()
-      : typeof child?.childId === 'string'
-        ? child.childId
-        : ''
+      : typeof child?.childProfile === 'string' && child.childProfile.trim()
+        ? child.childProfile.trim()
+        : typeof child?.childId === 'string'
+          ? child.childId
+          : ''
   if (
     sources.length === 0 &&
     attachmentIds.length === 0 &&
@@ -872,8 +1020,7 @@ export function summarizeToolBlock(
   t: (key: string, opts?: Record<string, unknown>) => string
 ): string {
   const rawSummary = block.summary?.trim() ?? ''
-  const metaToolName = readMetaString(block.meta, 'toolName')
-  const toolName = extractToolName(rawSummary) || metaToolName || ''
+  const toolName = toolNameForBlock(block)
   const label = builtInToolLabel(toolName, t) || humanizeToolName(toolName) || formatToolTitle(block, t)
   const sourceText = [rawSummary, block.detail ?? ''].filter(Boolean).join('\n')
   const filePath = toolFilePath(block)

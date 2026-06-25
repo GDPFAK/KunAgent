@@ -10,6 +10,7 @@ describe('MCP config', () => {
     const server = McpServerConfig.parse({
       transport: 'stdio',
       command: 'node',
+      cwd: '/tmp/project',
       args: ['server.js'],
       env: { API_KEY: 'secret' },
       trustScope: 'workspace',
@@ -18,6 +19,7 @@ describe('MCP config', () => {
 
     expect(server.enabled).toBe(true)
     expect(server.transport).toBe('stdio')
+    expect(server.cwd).toBe('/tmp/project')
     expect(server.timeoutMs).toBe(30_000)
   })
 

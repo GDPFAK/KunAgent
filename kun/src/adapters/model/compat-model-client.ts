@@ -143,7 +143,13 @@ type StreamReadResult =
   | { kind: 'error'; message: string }
 
 const DEFAULT_STREAM_IDLE_TIMEOUT_MS = 45_000
-const DEFAULT_MESSAGES_MAX_TOKENS = 4096
+// Anthropic Messages requires an explicit `max_tokens`. The old 4096 default
+// was far too small for reasoning models: their thinking tokens are drawn from
+// the SAME output budget, so a long think left almost nothing for the tool
+// call, truncating its arguments into invalid JSON. Give thinking models much
+// more headroom; a per-model `maxOutputTokens` capability still overrides both.
+const DEFAULT_MESSAGES_MAX_TOKENS = 8192
+const DEFAULT_MESSAGES_REASONING_MAX_TOKENS = 32_768
 
 /**
  * Multi-provider HTTP model client.
@@ -368,6 +374,23 @@ export class CompatModelClient implements ModelClient {
     return this.config.modelCapabilities?.(model).reasoning
   }
 
+  /** Per-model output-token cap from capability metadata, if declared. */
+  private maxOutputTokensFor(model: string): number | undefined {
+    return this.config.modelCapabilities?.(model).maxOutputTokens
+  }
+
+  /**
+   * Resolves the output-token cap for a request: an explicit request value
+   * wins, then the per-model capability override, then the supplied default.
+   */
+  private resolveMaxTokens(
+    request: ModelRequest,
+    model: string,
+    fallback?: number
+  ): number | undefined {
+    return request.maxTokens ?? this.maxOutputTokensFor(model) ?? fallback
+  }
+
   private async postChatCompletion(
     url: string,
     headers: Record<string, string>,
@@ -480,8 +503,9 @@ export class CompatModelClient implements ModelClient {
       stream,
       messages: splitToolImageMessagesForOpenAi(messages)
     }
-    if (request.maxTokens !== undefined) {
-      body.max_tokens = request.maxTokens
+    const maxTokens = this.resolveMaxTokens(request, model)
+    if (maxTokens !== undefined) {
+      body.max_tokens = maxTokens
     }
     if (request.temperature !== undefined) {
       body.temperature = request.temperature
@@ -536,8 +560,9 @@ export class CompatModelClient implements ModelClient {
       stream,
       input: messagesToResponsesInput(splitToolImageMessagesForOpenAi(messages))
     }
-    if (request.maxTokens !== undefined) {
-      body.max_output_tokens = request.maxTokens
+    const maxTokens = this.resolveMaxTokens(request, model)
+    if (maxTokens !== undefined) {
+      body.max_output_tokens = maxTokens
     }
     if (request.temperature !== undefined) {
       body.temperature = request.temperature
@@ -576,10 +601,24 @@ export class CompatModelClient implements ModelClient {
       this.modelReasoningFor(model)?.requestProtocol === 'anthropic-thinking'
     )
     applyAnthropicCacheControl(converted.messages)
+    // Thinking tokens are billed against the same output budget, so reasoning
+    // models need a much larger default cap or their tool-call arguments get
+    // truncated. A per-model `maxOutputTokens` (or an explicit request value)
+    // still wins over these defaults.
+    const reasoning = this.modelReasoningFor(model)
+    const resolvedEffort =
+      reasoning?.requestProtocol === 'anthropic-thinking'
+        ? resolveReasoningEffort(request.reasoningEffort, reasoning)
+        : undefined
+    const thinkingEnabled = resolvedEffort !== undefined && resolvedEffort !== 'off'
     const body: Record<string, unknown> = {
       model,
       stream,
-      max_tokens: request.maxTokens ?? DEFAULT_MESSAGES_MAX_TOKENS,
+      max_tokens: this.resolveMaxTokens(
+        request,
+        model,
+        thinkingEnabled ? DEFAULT_MESSAGES_REASONING_MAX_TOKENS : DEFAULT_MESSAGES_MAX_TOKENS
+      ),
       messages: converted.messages
     }
     const systemText = request.responseFormat === 'json_object'
@@ -937,6 +976,27 @@ export class CompatModelClient implements ModelClient {
       yield { kind: 'error', message: 'request was aborted' }
       return
     }
+    // Safety net: finalize any tool call whose arguments finished streaming but
+    // was never emitted because the stream ended without a per-call "done"
+    // signal. The chat_completions branch only finalizes on
+    // `finish_reason === 'tool_calls'`, so a provider that ends with 'stop',
+    // 'length', or a bare `[DONE]` while a tool call is still pending would
+    // otherwise DROP the call silently. Truncated arguments surface here as
+    // `{ __raw }` (a tool error the model can react to) instead of vanishing.
+    let flushedPendingToolCall = false
+    for (const [callId, pending] of pendingArguments) {
+      if (!pending.name) continue
+      if (completedToolCalls.has(callId)) continue
+      flushedPendingToolCall = true
+      completedToolCalls.add(callId)
+      yield {
+        kind: 'tool_call_complete',
+        callId,
+        toolName: pending.name,
+        arguments: this.parseToolArguments(pending.arguments || '{}')
+      }
+    }
+    pendingArguments.clear()
     if (usage) yield { kind: 'usage', usage }
     stopReason = ((): ModelStopReason => {
       switch (finishReason) {
@@ -947,7 +1007,9 @@ export class CompatModelClient implements ModelClient {
         case 'error':
           return 'error'
         default:
-          return 'stop'
+          // A recovered tool call means this was really a tool-call turn the
+          // provider mislabeled (e.g. finish_reason 'stop' or bare `[DONE]`).
+          return flushedPendingToolCall ? 'tool_calls' : 'stop'
       }
     })()
     yield { kind: 'completed', stopReason }
@@ -1614,7 +1676,24 @@ function messagesToAnthropic(
           if (image) blocks.push({ type: 'image', source: image })
         }
       }
-      out.push({ role: 'user', content: blocks })
+      // Parallel tool calls arrive as N consecutive `role: 'tool'` messages.
+      // Anthropic requires every tool_use from a single assistant turn to be
+      // answered by tool_result blocks inside ONE user message — emitting N
+      // separate user messages trips "tool_use ids were found without
+      // tool_result blocks immediately after" on compat providers. Real user
+      // turns never carry a tool_result block, so its presence marks the run
+      // we are still folding into.
+      const last = out[out.length - 1]
+      if (
+        last &&
+        last.role === 'user' &&
+        Array.isArray(last.content) &&
+        (last.content as AnthropicContentBlock[]).some((b) => b.type === 'tool_result')
+      ) {
+        last.content.push(...blocks)
+      } else {
+        out.push({ role: 'user', content: blocks })
+      }
       continue
     }
     const content = chatContentToAnthropicContent(message.content)

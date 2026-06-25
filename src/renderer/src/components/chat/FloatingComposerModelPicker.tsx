@@ -169,10 +169,10 @@ export function FloatingComposerModelPicker({
     ? filterComposerModelIds(activeProviderGroup.modelIds, modelFilter)
     : []
   const comboboxWidthClass = stretch
-    ? 'min-w-0 flex-1 max-w-[284px]'
+    ? 'min-w-0 flex-1 max-w-[min(284px,45vw)] overflow-hidden'
     : compact
-      ? 'w-[184px] max-w-[184px] shrink-0'
-      : 'w-[248px] max-w-[260px] shrink-0'
+      ? 'w-[184px] max-w-[184px] shrink-0 overflow-hidden'
+      : 'w-[248px] max-w-[min(260px,42vw)] shrink-0 overflow-hidden'
 
   useEffect(() => {
     if (!reasoningEnabled) return
@@ -489,7 +489,7 @@ export function FloatingComposerModelPicker({
           aria-expanded={menuOpen}
           aria-haspopup="menu"
           aria-label={t('composerModelControls')}
-          className={`flex h-9 min-w-0 flex-1 items-center justify-end gap-1 rounded-full py-2 pl-3 pr-1 text-[13px] font-medium outline-none transition ${
+          className={`flex h-9 min-w-0 flex-1 items-center justify-end gap-1 overflow-hidden rounded-full py-2 pl-3 pr-1 text-[13px] font-medium outline-none transition ${
             canOpenModelControls
               ? 'text-current focus-visible:ring-2 focus-visible:ring-accent/25'
               : 'cursor-not-allowed text-ds-faint'
@@ -499,7 +499,7 @@ export function FloatingComposerModelPicker({
             {modelLabel}
           </span>
           {reasoningEnabled ? (
-            <span className="shrink-0 text-[12px] font-semibold text-ds-faint">
+            <span className="max-w-[72px] shrink-0 truncate text-[12px] font-semibold text-ds-faint" title={currentReasoningLabel}>
               {currentReasoningLabel}
             </span>
           ) : null}
@@ -514,10 +514,10 @@ export function FloatingComposerModelPicker({
 
   return (
     <div
-      className={`ds-composer-model-picker ds-no-drag relative h-9 shrink-0 items-center rounded-full transition ${
+      className={`ds-composer-model-picker ds-no-drag relative h-9 min-w-0 shrink-0 items-center overflow-hidden rounded-full transition ${
         canOpenModelControls ? 'text-ds-muted hover:bg-ds-hover hover:text-ds-ink' : 'text-ds-faint'
       } ${
-        compact ? 'max-w-[220px]' : 'max-w-[260px]'
+        compact ? 'max-w-[220px]' : 'max-w-[min(260px,42vw)]'
       }`}
       ref={(node) => {
         pickerRef.current = node
@@ -527,7 +527,7 @@ export function FloatingComposerModelPicker({
         type="button"
         disabled={!canOpenModelControls}
         onClick={() => setMenuOpen((open) => !open)}
-        className={`flex h-9 max-w-full items-center gap-1.5 rounded-full px-2.5 text-[13.5px] font-semibold transition disabled:cursor-not-allowed ${
+        className={`flex h-9 max-w-full min-w-0 items-center gap-1.5 overflow-hidden rounded-full px-2.5 text-[13.5px] font-semibold transition disabled:cursor-not-allowed ${
           canOpenModelControls ? 'hover:bg-ds-hover' : ''
         }`}
         aria-expanded={menuOpen}
@@ -535,9 +535,9 @@ export function FloatingComposerModelPicker({
         aria-label={t('composerModelControls')}
         title={controlsTitle}
       >
-        <span className="min-w-0 whitespace-nowrap">{modelLabel}</span>
+        <span className="min-w-0 truncate">{modelLabel}</span>
         {reasoningEnabled ? (
-          <span className="shrink-0 text-ds-faint">
+          <span className="max-w-[72px] shrink-0 truncate text-ds-faint" title={t(reasoningLabelKey(currentReasoning))}>
             {t(reasoningLabelKey(currentReasoning))}
           </span>
         ) : null}

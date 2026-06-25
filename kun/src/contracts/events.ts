@@ -78,6 +78,7 @@ const RuntimeEventBase = z.object({
     // the GUI can show prefix reuse, tool fan-out, timing, and cost per
     // subagent without a separate diagnostics fetch.
     childModel: z.string().optional(),
+    childProviderId: z.string().optional(),
     childProfile: z.string().optional(),
     childToolPolicy: SubagentToolPolicy.optional(),
     prefixReused: z.boolean().optional(),
@@ -109,6 +110,7 @@ export type ItemEvent = z.infer<typeof ItemEvent>
 export const ThreadLifecycleEvent = RuntimeEventBase.extend({
   kind: z.enum(['thread_created', 'thread_updated']),
   title: z.string().optional(),
+  titleAuto: z.boolean().optional(),
   status: z.string().optional()
 })
 export type ThreadLifecycleEvent = z.infer<typeof ThreadLifecycleEvent>

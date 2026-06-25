@@ -92,7 +92,7 @@ function settings(): AppSettingsV1 {
     version: 1,
     locale: 'en',
     theme: 'system',
-    uiFontScale: 'small',
+    uiFontScale: 0.82,
     cursorSpotlight: true,
     provider: defaultModelProviderSettings(),
     agents: {
@@ -108,6 +108,7 @@ function settings(): AppSettingsV1 {
     },
     workspaceRoot: '~/.kun/default_workspace',
     log: { enabled: true, retentionDays: 2 },
+    checkpointCleanup: { enabled: false, intervalDays: 3 },
     notifications: { turnComplete: true },
     appBehavior: { openAtLogin: false, startMinimized: false, closeToTray: false },
     keyboardShortcuts: defaultKeyboardShortcuts(),

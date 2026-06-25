@@ -2,9 +2,12 @@ import { type ReactElement, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
   DEFAULT_MODEL_PROVIDER_ID,
+  KUN_TOOL_PERMISSION_MODES,
+  kunToolPermissionModeSettings,
   normalizeAppSettings,
   type AppSettingsPatch,
   type AppSettingsV1,
+  type KunToolPermissionMode,
   type ModelProviderPreset
 } from '@shared/app-settings'
 import {
@@ -27,9 +30,13 @@ import {
   Eye,
   EyeOff,
   ExternalLink,
+  FolderPen,
+  Hand,
   Image as ImageIcon,
+  LockKeyholeOpen,
   MessageCircle,
   Mic,
+  ShieldQuestion,
   Sparkles,
   Sun,
   Moon,
@@ -50,6 +57,59 @@ const themeOptions: { value: ThemePref; icon: typeof Sun; labelKey: string }[] =
   { value: 'dark', icon: Moon, labelKey: 'themeDark' }
 ]
 const DEEPSEEK_USAGE_URL = 'https://platform.deepseek.com/usage'
+
+type PermissionOption = {
+  value: KunToolPermissionMode
+  labelKey: string
+  descriptionKey: string
+  Icon: typeof Hand
+  iconClass: string
+}
+
+const PERMISSION_OPTIONS: PermissionOption[] = KUN_TOOL_PERMISSION_MODES.map((value) => {
+  switch (value) {
+    case 'always-ask':
+      return {
+        value,
+        labelKey: 'toolPermissionAlwaysAsk',
+        descriptionKey: 'toolPermissionAlwaysAskDesc',
+        Icon: Hand,
+        iconClass: 'border-sky-400/30 bg-sky-500/10 text-sky-700 dark:text-sky-200'
+      }
+    case 'read-only':
+      return {
+        value,
+        labelKey: 'toolPermissionReadOnly',
+        descriptionKey: 'toolPermissionReadOnlyDesc',
+        Icon: Eye,
+        iconClass: 'border-emerald-400/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-200'
+      }
+    case 'sensitive-ask':
+      return {
+        value,
+        labelKey: 'toolPermissionSensitiveAsk',
+        descriptionKey: 'toolPermissionSensitiveAskDesc',
+        Icon: ShieldQuestion,
+        iconClass: 'border-amber-400/35 bg-amber-500/10 text-amber-700 dark:text-amber-200'
+      }
+    case 'workspace-write':
+      return {
+        value,
+        labelKey: 'toolPermissionWorkspaceWrite',
+        descriptionKey: 'toolPermissionWorkspaceWriteDesc',
+        Icon: FolderPen,
+        iconClass: 'border-indigo-400/30 bg-indigo-500/10 text-indigo-700 dark:text-indigo-200'
+      }
+    case 'bypass':
+      return {
+        value,
+        labelKey: 'toolPermissionBypass',
+        descriptionKey: 'toolPermissionBypassDesc',
+        Icon: LockKeyholeOpen,
+        iconClass: 'border-orange-400/35 bg-orange-500/10 text-orange-700 dark:text-orange-200'
+      }
+  }
+})
 
 type SetupProviderCard = {
   presetId: string
@@ -141,7 +201,8 @@ export function InitialSetupDialog(): ReactElement {
   const [drafts, setDrafts] = useState<InitialSetupDrafts | null>(null)
   const [selection, setSelection] = useState<InitialSetupSelection>({
     presetId: DEFAULT_MODEL_PROVIDER_ID,
-    mode: 'api'
+    mode: 'api',
+    permissionMode: 'read-only'
   })
   const [showApiKey, setShowApiKey] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -211,12 +272,28 @@ export function InitialSetupDialog(): ReactElement {
 
   const selectCard = (presetId: string): void => {
     setError(null)
-    setSelection((current) => (current.presetId === presetId ? current : { presetId, mode: 'api' }))
+    setSelection((current) => (current.presetId === presetId ? current : { ...current, presetId, mode: 'api' }))
   }
 
   const selectMode = (mode: InitialSetupSelection['mode']): void => {
     setError(null)
     setSelection((current) => ({ ...current, mode }))
+  }
+
+  const selectPermissionMode = (permissionMode: KunToolPermissionMode): void => {
+    setError(null)
+    setSelection((current) => ({ ...current, permissionMode }))
+    const current = formRef.current
+    if (!current) return
+    updateForm({
+      agents: {
+        ...current.agents,
+        kun: {
+          ...current.agents.kun,
+          ...kunToolPermissionModeSettings(permissionMode)
+        }
+      }
+    } as SetupFormPatch)
   }
 
   const cardFilled = (card: SetupProviderCard): boolean => {
@@ -464,6 +541,39 @@ export function InitialSetupDialog(): ReactElement {
               </div>
             </div>
           )}
+
+          <div className="space-y-2.5 sm:space-y-3.5">
+            <label className={labelClass}>
+              {t('firstRunPermissionLabel')}
+            </label>
+            <div className="grid grid-cols-1 gap-2 sm:gap-2.5 min-[520px]:grid-cols-2">
+              {PERMISSION_OPTIONS.map((option) => {
+                const isActive = selection.permissionMode === option.value
+                const Icon = option.Icon
+                return (
+                  <button
+                    key={option.value}
+                    type="button"
+                    onClick={() => selectPermissionMode(option.value)}
+                    className={cardButtonClass(isActive)}
+                  >
+                    <span className="flex min-w-0 items-center gap-2 text-sm font-semibold text-slate-800 dark:text-slate-100">
+                      <span className={`inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border ${option.iconClass}`}>
+                        <Icon className="h-3.5 w-3.5" strokeWidth={1.9} />
+                      </span>
+                      <span className="min-w-0 truncate">{t(option.labelKey)}</span>
+                    </span>
+                    <span className="text-[12px] leading-5 text-slate-500 dark:text-slate-400">
+                      {t(option.descriptionKey)}
+                    </span>
+                  </button>
+                )
+              })}
+            </div>
+            <div className="rounded-xl border border-orange-300/60 bg-orange-50/80 px-4 py-3 text-[12.5px] leading-5 text-orange-800 dark:border-orange-800/60 dark:bg-orange-950/30 dark:text-orange-200">
+              {t('firstRunPermissionFullAccessRisk')}
+            </div>
+          </div>
 
           {regions.length > 0 && (
             <div className="space-y-2.5 sm:space-y-3.5">

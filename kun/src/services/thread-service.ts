@@ -110,7 +110,15 @@ export class ThreadService {
 
   async create(
     request: CreateThreadRequest,
-    options: { id?: string; title?: string; status?: ThreadStatus } = {}
+    options: {
+      id?: string
+      title?: string
+      status?: ThreadStatus
+      /** Relationship to a parent thread; `side` threads are hidden from the default list. */
+      relation?: ThreadRelation
+      /** Parent thread this thread branches from (used by `side`/`fork` relations). */
+      parentThreadId?: string
+    } = {}
   ): Promise<ThreadRecord> {
     // Always advance the id generator so externally-supplied ids
     // don't collide with later allocations from `fork`/etc.
@@ -119,13 +127,18 @@ export class ThreadService {
     const thread = createThreadRecord({
       id,
       title: options.title ?? (request.title?.trim() || 'New chat'),
+      ...(request.titleAuto !== undefined ? { titleAuto: request.titleAuto } : {}),
       workspace: request.workspace,
       model: request.model,
       ...(request.providerId?.trim() ? { providerId: request.providerId.trim() } : {}),
+      ...(request.agentId?.trim() ? { agentId: request.agentId.trim() } : {}),
+      ...(request.systemPrompt?.trim() ? { systemPrompt: request.systemPrompt.trim() } : {}),
       mode: request.mode,
       approvalPolicy: request.approvalPolicy,
       sandboxMode: request.sandboxMode,
       ...(request.costBudgetUsd !== undefined ? { costBudgetUsd: request.costBudgetUsd } : {}),
+      ...(options.relation ? { relation: options.relation } : {}),
+      ...(options.parentThreadId ? { parentThreadId: options.parentThreadId } : {}),
       status: options.status
     })
     await this.threadStore.upsert(thread)
@@ -139,10 +152,13 @@ export class ThreadService {
 
   async update(threadId: string, patch: {
     title?: string
+    titleAuto?: boolean
+    summary?: string
     workspace?: string
     status?: ThreadStatus
     approvalPolicy?: ApprovalPolicy
     sandboxMode?: SandboxMode
+    pinned?: boolean
     costBudgetUsd?: number | null
     costBudgetWarningSent?: boolean
     relation?: ThreadRelation
@@ -171,6 +187,7 @@ export class ThreadService {
       kind: 'thread_updated',
       threadId,
       title: updated.title,
+      ...(updated.titleAuto !== undefined ? { titleAuto: updated.titleAuto } : {}),
       status: updated.status
     })
     return updated

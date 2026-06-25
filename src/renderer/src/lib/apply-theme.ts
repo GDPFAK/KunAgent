@@ -1,11 +1,13 @@
 import {
   DEFAULT_CURSOR_SPOTLIGHT_COLOR,
+  normalizeUiFontScale,
   writeFontStackFor,
+  type UiFontScale,
   type WriteTypographySettingsV1
 } from '@shared/app-settings'
 
 export type ThemePreference = 'system' | 'light' | 'dark'
-export type UiFontScale = 'small' | 'medium' | 'large'
+export type { UiFontScale }
 
 let removeSystemListener: (() => void) | null = null
 
@@ -44,13 +46,7 @@ export function applyTheme(pref: ThemePreference): void {
 
 export function applyUiFontScale(scale: UiFontScale): void {
   const root = document.documentElement
-  const factor =
-    scale === 'small'
-      ? '0.82'
-      : scale === 'large'
-        ? '1'
-        : '0.88'
-  root.style.setProperty('--ds-ui-scale', factor)
+  root.style.setProperty('--ds-ui-scale', String(normalizeUiFontScale(scale)))
 }
 
 export function applyCursorSpotlight(enabled: boolean): void {

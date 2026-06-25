@@ -437,7 +437,7 @@ function WorkflowEditorInner({
   )
 
   return (
-    <div className="ds-no-drag fixed inset-0 z-[60] flex bg-ds-main">
+    <div className="ds-no-drag ds-titlebar-fixed-overlay fixed inset-x-0 bottom-0 top-0 z-[60] flex bg-ds-main">
       {!leftPanelCollapsed ? (
         <aside className={WORKFLOW_EDITOR_SIDEBAR_CLASS}>
           <div className="shrink-0 px-2 pb-2 pt-3">

@@ -6,6 +6,7 @@ import { InMemoryUserInputGate } from '../adapters/in-memory-user-input-gate.js'
 import { buildReadOnlyBuiltinLocalTools } from '../adapters/tool/builtin-tools.js'
 import { LocalToolHost } from '../adapters/tool/local-tool-host.js'
 import { createImmutablePrefix } from '../cache/immutable-prefix.js'
+import { normalizeRoleReasoningEffort } from '../loop/reasoning-effort.js'
 import type { ModelCapabilityMetadata } from '../contracts/capabilities.js'
 import type { TurnItem } from '../contracts/items.js'
 import type { ReviewTarget } from '../contracts/review.js'
@@ -39,6 +40,8 @@ export type ReviewServiceDeps = {
   tokenEconomy?: TokenEconomyConfig
   runtime?: RuntimeTuningConfig
   modelCapabilities?: (model: string) => ModelCapabilityMetadata
+  /** Reasoning depth for the code-review model call. Invalid/missing => 'off'. */
+  reasoningEffort?: string
 }
 
 export class ReviewService {
@@ -194,7 +197,8 @@ export class ReviewService {
       request: {
         prompt: input.prompt,
         model: input.model,
-        mode: 'agent'
+        mode: 'agent',
+        reasoningEffort: normalizeRoleReasoningEffort(this.deps.reasoningEffort)
       }
     })
     const abortChild = (): void => {

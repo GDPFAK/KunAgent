@@ -7,6 +7,7 @@ import { makeAssistantTextItem, makeUserItem } from '../domain/item.js'
 import { createThreadRecord } from '../domain/thread.js'
 import { appendTurnItem, createTurnRecord, finishTurn } from '../domain/turn.js'
 import { ContextCompactor } from '../loop/context-compactor.js'
+import { COMPACTION_SYSTEM_PROMPT } from '../loop/compaction-summary.js'
 import { effectiveHistoryAfterLatestCompaction } from '../loop/compaction-history.js'
 import { InflightTracker } from '../loop/inflight-tracker.js'
 import { SteeringQueue } from '../loop/steering-queue.js'
@@ -124,14 +125,19 @@ describe('TurnService compact', () => {
 
     expect(model.requests).toHaveLength(1)
     expect(model.requests[0].model).toBe('thread-model')
-    expect(model.requests[0].systemPrompt).toBe(prefix.systemPrompt)
-    const summaryRequestItem = model.requests[0].history[0]
-    expect(summaryRequestItem?.kind).toBe('user_message')
-    if (!summaryRequestItem || summaryRequestItem.kind !== 'user_message') {
-      throw new Error('expected compaction summary request to be a user message')
+    // Compaction-mode turn uses the dedicated summarizer system prompt and
+    // feeds the real conversation as messages (not a serialized transcript).
+    expect(model.requests[0].systemPrompt).toBe(COMPACTION_SYSTEM_PROMPT)
+    expect(model.requests[0].prefix).toEqual([])
+    const summaryHistory = model.requests[0].history
+    expect(summaryHistory[0]?.kind === 'user_message' ? summaryHistory[0].text : '')
+      .toContain('Initial task: fix /compact.')
+    const continuationItem = summaryHistory[summaryHistory.length - 1]
+    expect(continuationItem?.kind).toBe('user_message')
+    if (!continuationItem || continuationItem.kind !== 'user_message') {
+      throw new Error('expected compaction continuation message to be a user message')
     }
-    expect(summaryRequestItem.text).toContain('Conversation history to fold:')
-    expect(summaryRequestItem.text).toContain('Initial task: fix /compact.')
+    expect(continuationItem.text).toContain('Provide a detailed summary of our conversation above')
     expect(response.summary).toContain('MODEL SUMMARY kept the durable state.')
     expect(response.pinnedConstraints).toEqual(prefix.pinnedConstraints)
 

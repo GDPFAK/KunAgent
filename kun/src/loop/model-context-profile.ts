@@ -61,6 +61,10 @@ export type ContextCompactionConfig = {
   summaryTimeoutMs?: number
   summaryMaxTokens?: number
   summaryInputMaxBytes?: number
+  /** Optional model override for compaction summary (empty = follow main model). */
+  summaryModel?: string
+  /** Provider id paired with summaryModel. */
+  summaryProviderId?: string
   /**
    * @deprecated Model-specific context windows and compaction thresholds belong
    * in top-level models.profiles. This field is still read for compatibility.

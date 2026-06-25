@@ -15,11 +15,16 @@ export type RuntimeErrorSeverity = 'info' | 'warning' | 'error'
 
 export type AttachmentReference = {
   id: string
+  kind?: 'image' | 'document'
   name?: string
   mimeType?: string
   byteSize?: number
   width?: number
   height?: number
+  pageCount?: number
+  truncated?: boolean
+  textPreview?: string
+  documentText?: string
   previewUrl?: string
 }
 
@@ -48,6 +53,12 @@ export type RuntimeChildMetadata = {
   parentTurnId: string
   childId: string
   childLabel?: string
+  /** Subagent profile id (e.g. `general`, `explore`) resolved by the runtime. */
+  childProfile?: string
+  /** Model override the child ran under, when one was resolved. */
+  childModel?: string
+  /** Tool policy applied to the child run. */
+  childToolPolicy?: 'readOnly' | 'inherit'
   childStatus: 'queued' | 'running' | 'completed' | 'failed' | 'aborted'
   childSeq: number
 }
@@ -95,6 +106,8 @@ export type UserInputAnswer = {
 export type NormalizedThread = {
   id: string
   title: string
+  /** Whether the title is auto/provisional (true) vs user-set/locked (false); absent = legacy. */
+  titleAuto?: boolean
   updatedAt: string
   model: string
   mode: string
@@ -102,8 +115,17 @@ export type NormalizedThread = {
   status?: string
   approvalPolicy?: ApprovalPolicy
   sandboxMode?: SandboxMode
+  /** Optional provider id when this thread is pinned to a non-default provider. */
+  providerId?: string
+  /** Optional subagent profile id this thread is bound to (primary-agent persona). */
+  agentId?: string
+  /** Optional persona systemPrompt snapshot applied to every ModelRequest on this thread. */
+  systemPrompt?: string
   archived?: boolean
+  pinned?: boolean
   preview?: string
+  /** Whole-conversation summary produced by the summarize route; shown as the list subtitle. */
+  summary?: string
   latestTurnId?: string
   latestTurnStatus?: string
   relation?: 'primary' | 'fork' | 'side'
@@ -265,7 +287,7 @@ export type ChatBlock =
       approvalId: string
       summary: string
       toolName?: string
-      status: 'pending' | 'allowed' | 'denied' | 'error'
+      status: 'pending' | 'submitting' | 'allowed' | 'denied' | 'error'
       errorMessage?: string
       meta?: RuntimeDisclosureMetadata
     }
@@ -405,6 +427,8 @@ export type ThreadEventSink = {
   onRuntimeError?(ev: RuntimeErrorEventPayload): void
   onGoal(ev: { threadId: string; goal: ThreadGoal | null; cleared?: boolean; createdAt?: string }): void
   onTodos?(ev: { threadId: string; todos: ThreadTodoList | null; cleared?: boolean; createdAt?: string }): void
+  /** Thread metadata changed out-of-band (e.g. the backend LLM titler upgraded the title). */
+  onThreadUpdated?(ev: { threadId: string; title?: string; titleAuto?: boolean; status?: string }): void
   onTurnComplete(): void
   onError(err: Error, options?: ThreadErrorOptions): void
   /** Optional: cumulative usage update for the thread. */
@@ -423,7 +447,7 @@ export interface AgentProvider {
   }
   connect(): Promise<void>
   listThreads(options?: ThreadListOptions): Promise<NormalizedThread[]>
-  createThread(input: { workspace?: string; title?: string; mode?: string }): Promise<NormalizedThread>
+  createThread(input: { workspace?: string; title?: string; titleAuto?: boolean; mode?: string; agentId?: string; providerId?: string; model?: string; systemPrompt?: string }): Promise<NormalizedThread>
   getThreadDetail(threadId: string): Promise<{
     blocks: ChatBlock[]
     latestSeq: number
@@ -432,6 +456,9 @@ export interface AgentProvider {
     latestUserMessageId?: string
     turnDurationByUserId?: Record<string, number>
     usage?: ThreadUsageSnapshot
+    relation?: 'primary' | 'fork' | 'side'
+    parentThreadId?: string
+    model?: string
     goal?: ThreadGoal | null
     todos?: ThreadTodoList | null
   }>
@@ -496,8 +523,14 @@ export interface AgentProvider {
   getMemoryDiagnostics?(): Promise<CoreMemoryDiagnosticsJson>
   steerUserMessage?(threadId: string, turnId: string, text: string): Promise<void>
   interruptTurn(threadId: string, turnId: string, options?: { discard?: boolean }): Promise<void>
-  renameThread(threadId: string, title: string): Promise<void>
+  /**
+   * Rename a thread. `auto` marks the title as provisional/auto (true, e.g. the
+   * client first-message heuristic — the backend LLM titler may upgrade it) or
+   * user-set/locked (false). Omit to leave the title's auto flag unchanged.
+   */
+  renameThread(threadId: string, title: string, auto?: boolean): Promise<void>
   updateThreadWorkspace?(threadId: string, workspace: string): Promise<void>
+  updateThreadPinned?(threadId: string, pinned: boolean): Promise<void>
   archiveThread?(threadId: string, archived: boolean): Promise<void>
   deleteThread(threadId: string): Promise<void>
   compactThread?(threadId: string, reason?: string): Promise<{ replacedTokens: number } | void>

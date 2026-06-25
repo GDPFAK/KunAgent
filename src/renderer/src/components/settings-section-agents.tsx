@@ -1322,18 +1322,7 @@ export function AgentsSettingsSection({ ctx }: { ctx: Record<string, any> }): Re
                     description={t('kunCompactionSummaryDesc')}
                     wideControl
                     control={
-                      <div className="grid gap-3 sm:grid-cols-4">
-                        <label className="flex min-w-0 flex-col gap-1.5 text-[12px] font-medium text-ds-muted">
-                          {t('kunCompactionSummaryMode')}
-                          <select
-                            className={selectControlClass}
-                            value={contextCompaction.summaryMode}
-                            onChange={(e) => updateContextCompaction({ summaryMode: e.target.value })}
-                          >
-                            <option value="heuristic">{t('kunCompactionSummaryHeuristic')}</option>
-                            <option value="model">{t('kunCompactionSummaryModel')}</option>
-                          </select>
-                        </label>
+                      <div className="grid gap-3 sm:grid-cols-3">
                         <label className="flex min-w-0 flex-col gap-1.5 text-[12px] font-medium text-ds-muted">
                           {t('kunCompactionSummaryTimeout')}
                           <input

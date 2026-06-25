@@ -35,20 +35,31 @@ function settingsWithActiveXiaomiWithoutKey(): AppSettingsV1 {
 describe('initialSetupSelection', () => {
   it('preselects the active provider card when it is a known preset', () => {
     const selection = initialSetupSelection(settingsWithActiveXiaomiWithoutKey())
-    expect(selection).toEqual({ presetId: 'xiaomi', mode: 'api' })
+    expect(selection).toEqual({ presetId: 'xiaomi', mode: 'api', permissionMode: 'bypass' })
   })
 
   it('preselects the token plan mode for token plan profiles', () => {
     const current = settings({ agents: { kun: { providerId: 'minimax-token-plan' } } })
-    expect(initialSetupSelection(current)).toEqual({ presetId: 'minimax', mode: 'token-plan' })
+    expect(initialSetupSelection(current)).toEqual({
+      presetId: 'minimax',
+      mode: 'token-plan',
+      permissionMode: 'bypass'
+    })
   })
 
   it('falls back to deepseek for unknown or empty active providers', () => {
-    expect(initialSetupSelection(settings())).toEqual({ presetId: 'deepseek', mode: 'api' })
+    expect(initialSetupSelection(settings())).toEqual({ presetId: 'deepseek', mode: 'api', permissionMode: 'bypass' })
     expect(initialSetupSelection(settings({ agents: { kun: { providerId: 'custom-provider-2' } } })))
-      .toEqual({ presetId: 'deepseek', mode: 'api' })
+      .toEqual({ presetId: 'deepseek', mode: 'api', permissionMode: 'bypass' })
     expect(initialSetupSelection(settings({ agents: { kun: { providerId: 'litellm' } } })))
-      .toEqual({ presetId: 'deepseek', mode: 'api' })
+      .toEqual({ presetId: 'deepseek', mode: 'api', permissionMode: 'bypass' })
+  })
+
+  it('preselects the saved permission mode', () => {
+    const current = settings({
+      agents: { kun: { approvalPolicy: 'on-request', sandboxMode: 'workspace-write' } }
+    })
+    expect(initialSetupSelection(current).permissionMode).toBe('workspace-write')
   })
 })
 
@@ -83,7 +94,7 @@ describe('initialSetupDrafts', () => {
     for (const id of excludedIds) {
       expect(drafts[id]).toBeUndefined()
       expect(initialSetupSelection(settings({ agents: { kun: { providerId: id } } })))
-        .toEqual({ presetId: 'deepseek', mode: 'api' })
+        .toEqual({ presetId: 'deepseek', mode: 'api', permissionMode: 'bypass' })
     }
   })
 })
@@ -96,6 +107,68 @@ describe('buildInitialSetupSettings', () => {
 
     expect(getKunRuntimeSettings(next).providerId).toBe('deepseek')
     expect(getActiveAgentApiKey(next)).toBe('sk-deepseek-key')
+  })
+
+  it('stores the selected default Agent permission mode', () => {
+    const current = settingsWithActiveXiaomiWithoutKey()
+    const drafts = initialSetupDrafts(current)
+    const next = buildInitialSetupSettings(current, drafts, {
+      presetId: 'deepseek',
+      mode: 'api',
+      permissionMode: 'workspace-write'
+    })
+
+    const runtime = getKunRuntimeSettings(next)
+    expect(runtime.approvalPolicy).toBe('on-request')
+    expect(runtime.sandboxMode).toBe('workspace-write')
+  })
+
+  it('preserves a non-UI permission policy when the selector is untouched', () => {
+    // A persisted policy the 5-mode UI cannot represent: stricter approval gate
+    // plus a sandboxed filesystem. Reopening onboarding seeds the selector from
+    // the lossy fromSettings mapping (-> 'read-only'); when the user does not
+    // move it, the save must leave the strict pair intact rather than rewrite it
+    // to 'on-request'/'danger-full-access'.
+    const current = settings({
+      provider: { apiKey: 'sk-deepseek-key' },
+      agents: {
+        kun: { providerId: 'deepseek', approvalPolicy: 'never', sandboxMode: 'external-sandbox' }
+      }
+    })
+    const seededMode = initialSetupSelection(current).permissionMode
+    expect(seededMode).toBe('read-only')
+
+    const next = buildInitialSetupSettings(current, initialSetupDrafts(current), {
+      presetId: 'deepseek',
+      mode: 'api',
+      permissionMode: seededMode
+    })
+
+    const runtime = getKunRuntimeSettings(next)
+    expect(runtime.approvalPolicy).toBe('never')
+    expect(runtime.sandboxMode).toBe('external-sandbox')
+    expect(runtime.approvalPolicy).not.toBe('on-request')
+    expect(runtime.sandboxMode).not.toBe('danger-full-access')
+  })
+
+  it('writes the permission pair only when the user picks a different mode', () => {
+    // Same strict starting policy, but this time the user explicitly chooses a
+    // representable mode, so the concrete pair for that mode must be written.
+    const current = settings({
+      provider: { apiKey: 'sk-deepseek-key' },
+      agents: {
+        kun: { providerId: 'deepseek', approvalPolicy: 'never', sandboxMode: 'external-sandbox' }
+      }
+    })
+    const next = buildInitialSetupSettings(current, initialSetupDrafts(current), {
+      presetId: 'deepseek',
+      mode: 'api',
+      permissionMode: 'workspace-write'
+    })
+
+    const runtime = getKunRuntimeSettings(next)
+    expect(runtime.approvalPolicy).toBe('on-request')
+    expect(runtime.sandboxMode).toBe('workspace-write')
   })
 
   it('syncs the deepseek draft into the provider profile used by settings', () => {

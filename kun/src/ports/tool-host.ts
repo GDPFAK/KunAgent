@@ -82,6 +82,12 @@ export type ToolHostContext = {
   allowedProviderIds?: readonly string[]
   /** Optional tool-name allow-list. When set, other tools are not advertised or executed. */
   allowedToolNames?: readonly string[]
+  /** Optional provider deny-list. Providers listed here are never advertised or executed (deny-list layered on inherit). */
+  blockedProviderIds?: readonly string[]
+  /** Optional tool-name deny-list. Tools listed here are never advertised or executed (deny-list layered on inherit). */
+  blockedToolNames?: readonly string[]
+  /** Optional skill-id deny-list for this turn: hides skills from the catalog + auto-activation and rejects `load_skill`. */
+  blockedSkillIds?: readonly string[]
   approvalPolicy: ApprovalPolicy
   /** Filesystem/command sandbox selected for this turn. Defaults at execution time for old callers. */
   sandboxMode?: SandboxMode

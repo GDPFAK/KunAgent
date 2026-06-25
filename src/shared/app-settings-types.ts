@@ -23,7 +23,26 @@ export {
 } from '../../kun/src/contracts/policy.js'
 export const KUN_TOOL_PERMISSION_MODES = ['always-ask', 'read-only', 'sensitive-ask', 'workspace-write', 'bypass'] as const
 export type KunToolPermissionMode = (typeof KUN_TOOL_PERMISSION_MODES)[number]
-export type UiFontScale = 'small' | 'medium' | 'large'
+/**
+ * Overall UI text scale factor (applied as `zoom` on the app shell).
+ * Previously a fixed enum ('small' | 'medium' | 'large'); now a free numeric
+ * factor so the user can pick any size. Legacy enum values are migrated on load.
+ */
+export type UiFontScale = number
+export const UI_FONT_SCALE_MIN = 0.7
+export const UI_FONT_SCALE_MAX = 1.4
+export const DEFAULT_UI_FONT_SCALE = 0.82
+/** Maps the retired small/medium/large presets to their old zoom factors. */
+export const LEGACY_UI_FONT_SCALE_FACTORS = { small: 0.82, medium: 0.88, large: 1 } as const
+/** Coerce any stored/legacy value into a valid numeric scale factor. */
+export function normalizeUiFontScale(value: unknown): UiFontScale {
+  if (typeof value === 'string' && value in LEGACY_UI_FONT_SCALE_FACTORS) {
+    return LEGACY_UI_FONT_SCALE_FACTORS[value as keyof typeof LEGACY_UI_FONT_SCALE_FACTORS]
+  }
+  const num = typeof value === 'number' ? value : Number(value)
+  if (!Number.isFinite(num)) return DEFAULT_UI_FONT_SCALE
+  return Math.min(UI_FONT_SCALE_MAX, Math.max(UI_FONT_SCALE_MIN, Math.round(num * 100) / 100))
+}
 export type ScheduleRunMode = 'agent' | 'plan'
 export type ScheduleKind = 'manual' | 'interval' | 'daily' | 'at'
 export type ScheduleTaskStatus = 'idle' | 'queued' | 'running' | 'success' | 'error'
@@ -80,6 +99,12 @@ export const DEFAULT_WRITE_INLINE_LONG_COMPLETION_MIN_ACCEPT_SCORE = 0.36
 export const DEFAULT_WRITE_INLINE_LONG_COMPLETION_MAX_TOKENS = 256
 export const DEFAULT_KUN_PORT = 18899
 export const DEFAULT_LOG_RETENTION_DAYS = 3
+export const CHECKPOINT_CLEANUP_INTERVAL_DAYS = [1, 2, 3, 5, 10] as const
+export type CheckpointCleanupIntervalDays = (typeof CHECKPOINT_CLEANUP_INTERVAL_DAYS)[number]
+export const DEFAULT_CHECKPOINT_CLEANUP_INTERVAL_DAYS: CheckpointCleanupIntervalDays = 3
+// Checkpoint cleanup deletes data, so it is opt-in: disabled until the user
+// explicitly enables it in settings.
+export const DEFAULT_CHECKPOINT_CLEANUP_ENABLED = false
 export const DEFAULT_CURSOR_SPOTLIGHT_COLOR = '#85c1f1'
 export const DEFAULT_WEIXIN_BRIDGE_RPC_URL = 'http://127.0.0.1:18790/api/v1/admin/rpc'
 export const DEFAULT_MODEL_PROVIDER_ID = 'deepseek'
@@ -188,6 +213,45 @@ export type ModelProviderSettingsPatchV1 = Partial<
   providers?: ModelProviderProfilePatchV1[]
 }
 
+export type KunSubagentProfileV1 = {
+  /** Stable key; becomes the Record key in kun SubagentsCapabilityConfig.profiles. */
+  id: string
+  enabled: boolean
+  name: string
+  description?: string
+  /** Hex color for the GUI avatar chip. */
+  color?: string
+  /** 'subagent' = delegate_task only; 'primary' = session persona only; 'all' = both. */
+  mode: 'subagent' | 'primary' | 'all'
+  model?: string
+  providerId?: string
+  /** Appended to the base system prompt (augment, not replace). */
+  systemPrompt?: string
+  /** Prepended to the user prompt body to steer the child without changing the system fingerprint. */
+  promptPreamble?: string
+  /** 'readOnly' restricts child to read/grep/find/ls; 'inherit' passes all tools. */
+  toolPolicy: 'readOnly' | 'inherit'
+  /** Explicit allow-list; overrides toolPolicy when set. */
+  allowedTools?: string[]
+  /** Built-in tool names switched off for this profile (deny-list, layered on inherit). Empty/undefined = inherit all. */
+  blockedTools?: string[]
+  /** MCP server ids switched off for this profile (deny-list; the whole server toolset is hidden). */
+  blockedMcpServers?: string[]
+  /** Skill ids switched off for this profile (deny-list; default inherits every available skill). */
+  blockedSkills?: string[]
+  /** Reasoning depth applied to this profile's child model requests. Default 'off'. */
+  reasoningEffort?: ModelReasoningEffort
+}
+
+export type KunSubagentsSettingsV1 = {
+  enabled: boolean
+  maxParallel?: number
+  maxChildRuns?: number
+  defaultToolPolicy?: 'readOnly' | 'inherit'
+  defaultProfile?: string
+  profiles: KunSubagentProfileV1[]
+}
+
 export type KunRuntimeSettingsV1 = {
   binaryPath: string
   port: number
@@ -237,6 +301,30 @@ export type KunRuntimeSettingsV1 = {
   computerUse: KunComputerUseSettingsV1
   /** First-party design-quality linter applied to frontend output. */
   quality: KunDesignQualitySettingsV1
+  /** GUI-managed subagent profiles written into kun SubagentsCapabilityConfig. */
+  subagents?: KunSubagentsSettingsV1
+  /** Global small-model slot. Title & Summary default to this. Empty = follow main model. */
+  smallModel?: string
+  /** Provider id paired with smallModel for per-provider routing. */
+  smallModelProviderId?: string
+  /** Optional model override for thread title generation. Empty = smallModel || main model. */
+  titleModel?: string
+  /** Provider id paired with titleModel. */
+  titleProviderId?: string
+  /** Optional model override for whole-session summary generation. Empty = smallModel || main model. */
+  summaryModel?: string
+  /** Provider id paired with summaryModel. */
+  summaryProviderId?: string
+  /** Optional model override for the code-review subagent. Empty = smallModel || main model. */
+  codeReviewModel?: string
+  /** Provider id paired with codeReviewModel. */
+  codeReviewProviderId?: string
+  /** Reasoning depth for thread-title generation. Default 'off'. */
+  titleReasoningEffort?: ModelReasoningEffort
+  /** Reasoning depth for whole-session summary generation. Default 'off'. */
+  summaryReasoningEffort?: ModelReasoningEffort
+  /** Reasoning depth for the code-review subagent model call. Default 'off'. */
+  codeReviewReasoningEffort?: ModelReasoningEffort
 }
 
 export function kunToolPermissionModeSettings(
@@ -426,6 +514,10 @@ export type KunContextCompactionSettingsV1 = {
   summaryTimeoutMs: number
   summaryMaxTokens: number
   summaryInputMaxBytes: number
+  /** Optional model override for context compaction (empty = follow default model). */
+  summaryModel?: string
+  /** Provider id paired with summaryModel for per-provider routing. */
+  summaryProviderId?: string
 }
 
 export type KunToolStormSettingsV1 = {
@@ -501,6 +593,11 @@ export type KunSettingsEnvelopePatchV1 = {
 export type LogConfigV1 = {
   enabled: boolean
   retentionDays: number
+}
+
+export type CheckpointCleanupConfigV1 = {
+  enabled: boolean
+  intervalDays: CheckpointCleanupIntervalDays
 }
 
 export type NotificationConfigV1 = {
@@ -1468,8 +1565,8 @@ export const WRITE_FONT_PRESETS: readonly WriteFontPreset[] = [
   'custom'
 ] as const
 
-export const WRITE_EDITOR_FONT_SIZE_MIN = 12
-export const WRITE_EDITOR_FONT_SIZE_MAX = 28
+export const WRITE_EDITOR_FONT_SIZE_MIN = 10
+export const WRITE_EDITOR_FONT_SIZE_MAX = 48
 export const DEFAULT_WRITE_EDITOR_FONT_SIZE_PX = 16
 export const WRITE_EDITOR_LINE_HEIGHT_MIN = 1.4
 export const WRITE_EDITOR_LINE_HEIGHT_MAX = 2.2
@@ -1646,6 +1743,7 @@ export type AppSettingsV1 = {
   agents: KunSettingsEnvelopeV1
   workspaceRoot: string
   log: LogConfigV1
+  checkpointCleanup: CheckpointCleanupConfigV1
   notifications: NotificationConfigV1
   appBehavior: AppBehaviorConfigV1
   keyboardShortcuts: KeyboardShortcutsConfigV1
@@ -1661,11 +1759,12 @@ export type AppSettingsV1 = {
 }
 
 export type AppSettingsPatch = Partial<
-  Omit<AppSettingsV1, 'provider' | 'agents' | 'log' | 'notifications' | 'appBehavior' | 'keyboardShortcuts' | 'write' | 'claw' | 'schedule' | 'workflow' | 'guiUpdate' | 'terminal'>
+  Omit<AppSettingsV1, 'provider' | 'agents' | 'log' | 'checkpointCleanup' | 'notifications' | 'appBehavior' | 'keyboardShortcuts' | 'write' | 'claw' | 'schedule' | 'workflow' | 'guiUpdate' | 'terminal'>
 > & {
   provider?: ModelProviderSettingsPatchV1
   agents?: KunSettingsEnvelopePatchV1
   log?: Partial<LogConfigV1>
+  checkpointCleanup?: Partial<CheckpointCleanupConfigV1>
   notifications?: Partial<NotificationConfigV1>
   appBehavior?: Partial<AppBehaviorConfigV1>
   keyboardShortcuts?: Partial<KeyboardShortcutsConfigV1>

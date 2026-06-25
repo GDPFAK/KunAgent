@@ -1,9 +1,15 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { execFileSync } from 'node:child_process'
-import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, readFile, rm, stat, symlink, utimes, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-import { createGitCheckpoint, restoreGitCheckpoint } from './git-checkpoint-service'
+import { join, normalize } from 'node:path'
+import {
+  cleanupUnusedGitCheckpoints,
+  cleanupUnusedGitCheckpointsIfDue,
+  createGitCheckpoint,
+  restoreGitCheckpoint,
+  testResolvePathWithinRepository
+} from './git-checkpoint-service'
 
 let sandbox = ''
 let repoRoot = ''
@@ -152,5 +158,262 @@ describe('git checkpoint service', () => {
     )
     const refs = execFileSync('git', ['-C', repoRoot, 'show-ref'], { encoding: 'utf-8' })
     expect(refs).not.toContain('refs/kun/checkpoints')
+  })
+
+  it('refuses to restore when a tampered checkpoint smuggles a path-traversal untracked entry', async () => {
+    // Build a legitimate checkpoint, then rewrite its metadata.json so an
+    // untracked entry escapes the repository root (`../escape.txt`). The restore
+    // must reject the traversal rather than copying the file outside the repo.
+    const checkpoint = await createGitCheckpoint({
+      dataDir,
+      workspaceRoot: repoRoot,
+      threadId: 'thr_traversal'
+    })
+    expect(checkpoint.ok).toBe(true)
+    if (!checkpoint.ok) throw new Error(checkpoint.message)
+
+    const checkpointDir = join(dataDir, 'git-checkpoints', checkpoint.checkpointId)
+    const metadataPath = join(checkpointDir, 'metadata.json')
+    const metadata = JSON.parse(await readFile(metadataPath, 'utf-8')) as {
+      untrackedFiles: string[]
+      [key: string]: unknown
+    }
+    metadata.untrackedFiles = ['../escape.txt']
+    await writeFile(metadataPath, JSON.stringify(metadata, null, 2), 'utf-8')
+
+    // Plant a payload at the smuggled source location inside the checkpoint
+    // untracked dir so the existence check would succeed without the guard.
+    const smuggledSource = join(checkpointDir, 'untracked', '..', 'escape.txt')
+    await writeFile(smuggledSource, 'escaped payload\n')
+
+    // The destination the traversal would write to, OUTSIDE the repo.
+    const escapeTarget = join(repoRoot, '..', 'escape.txt')
+
+    const restored = await restoreGitCheckpoint({
+      dataDir,
+      checkpointId: checkpoint.checkpointId
+    })
+    expect(restored.ok).toBe(false)
+    if (restored.ok) throw new Error('expected restore to be refused')
+    expect(restored.reason).toBe('error')
+    expect(restored.message).toMatch(/escapes the repository root/)
+
+    // Nothing must have been written outside the repository.
+    await expect(stat(escapeTarget)).rejects.toThrow()
+  })
+
+  it('refuses to restore when a tampered checkpoint smuggles an absolute untracked path', async () => {
+    const checkpoint = await createGitCheckpoint({
+      dataDir,
+      workspaceRoot: repoRoot,
+      threadId: 'thr_absolute'
+    })
+    expect(checkpoint.ok).toBe(true)
+    if (!checkpoint.ok) throw new Error(checkpoint.message)
+
+    const checkpointDir = join(dataDir, 'git-checkpoints', checkpoint.checkpointId)
+    const metadataPath = join(checkpointDir, 'metadata.json')
+    const metadata = JSON.parse(await readFile(metadataPath, 'utf-8')) as {
+      untrackedFiles: string[]
+      [key: string]: unknown
+    }
+    metadata.untrackedFiles = ['/tmp/escape-absolute.txt']
+    await writeFile(metadataPath, JSON.stringify(metadata, null, 2), 'utf-8')
+
+    const restored = await restoreGitCheckpoint({
+      dataDir,
+      checkpointId: checkpoint.checkpointId
+    })
+    expect(restored.ok).toBe(false)
+    if (restored.ok) throw new Error('expected restore to be refused')
+    expect(restored.reason).toBe('error')
+    expect(restored.message).toMatch(/invalid untracked path|escapes the repository root/)
+  })
+
+  it('resolvePathWithinRepository rejects a path that escapes via an in-repo symlink', async () => {
+    // An in-repo symlink `repo/link -> /outside` makes the relative path
+    // `link/payload.txt` lexically contained (target startsWith repo+sep), but
+    // cp() would follow the link and write OUTSIDE the repo. The helper must
+    // resolve the target's real path (walking up to the existing symlink dir)
+    // and reject the escape. This is the regression for the symlink-anchored
+    // traversal that a lexical-only check misses.
+    const outsideDir = join(sandbox, 'outside')
+    await mkdir(outsideDir, { recursive: true })
+    await symlink(outsideDir, join(repoRoot, 'link'), 'dir')
+
+    await expect(
+      testResolvePathWithinRepository(repoRoot, 'link/payload.txt')
+    ).rejects.toThrow(/escapes the repository root/)
+    // And nothing should have been created outside the repo.
+    await expect(stat(join(outsideDir, 'payload.txt'))).rejects.toThrow()
+  })
+
+  it('resolvePathWithinRepository accepts a legitimate path inside the repo', async () => {
+    const { realpath } = await import('node:fs/promises')
+    await mkdir(join(repoRoot, 'sub'), { recursive: true })
+    // The helper anchors against the realpath'd root (macOS /var -> /private/var),
+    // so compare against the canonical root, not the lexical repoRoot.
+    const repoReal = await realpath(repoRoot)
+    await expect(
+      testResolvePathWithinRepository(repoRoot, 'sub/file.txt')
+    ).resolves.toBe(normalize(join(repoReal, 'sub', 'file.txt')))
+  })
+
+  it('resolvePathWithinRepository rejects traversal, absolute, and null-byte paths', async () => {
+    await expect(testResolvePathWithinRepository(repoRoot, '../escape.txt')).rejects.toThrow()
+    await expect(testResolvePathWithinRepository(repoRoot, '/tmp/escape.txt')).rejects.toThrow()
+    await expect(testResolvePathWithinRepository(repoRoot, 'evil\0.txt')).rejects.toThrow()
+    await expect(testResolvePathWithinRepository(repoRoot, '.')).rejects.toThrow()
+    await expect(testResolvePathWithinRepository(repoRoot, '..')).rejects.toThrow()
+  })
+
+  it('refuses to restore while a thread is running and leaves the working tree untouched', async () => {
+    const checkpoint = await createGitCheckpoint({
+      dataDir,
+      workspaceRoot: repoRoot,
+      threadId: 'thr_busy'
+    })
+    expect(checkpoint.ok).toBe(true)
+    if (!checkpoint.ok) throw new Error(checkpoint.message)
+
+    // Mutate the working tree after the checkpoint so we can assert the restore
+    // did NOT clobber it. If the busy guard fails open, these changes vanish.
+    await writeFile(join(repoRoot, 'tracked.txt'), 'agent editing\n')
+    await writeFile(join(repoRoot, 'post-checkpoint.txt'), 'should survive\n')
+    const headBefore = execFileSync('git', ['-C', repoRoot, 'rev-parse', 'HEAD'], { encoding: 'utf-8' }).trim()
+
+    const runtimeRequest = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      // ThreadSummary exposes `status` (idle|running|archived|deleted), NOT
+      // `state`. A running thread must be reported as status === 'running'.
+      body: JSON.stringify({ threads: [{ id: 'thr_running', status: 'running' }] })
+    }))
+
+    const restored = await restoreGitCheckpoint({
+      dataDir,
+      checkpointId: checkpoint.checkpointId,
+      runtimeRequest
+    })
+
+    expect(restored.ok).toBe(false)
+    if (restored.ok) throw new Error('expected restore to be refused')
+    expect(restored.reason).toBe('error')
+    expect(restored.message).toMatch(/Cannot restore checkpoint while a thread is running/)
+
+    // The busy guard must fire BEFORE any destructive git op, so the runtime
+    // probe is the only call made and the working tree is byte-for-byte intact.
+    expect(runtimeRequest).toHaveBeenCalledTimes(1)
+    expect(await readFile(join(repoRoot, 'tracked.txt'), 'utf-8')).toBe('agent editing\n')
+    expect(await readFile(join(repoRoot, 'post-checkpoint.txt'), 'utf-8')).toBe('should survive\n')
+    expect(execFileSync('git', ['-C', repoRoot, 'rev-parse', 'HEAD'], { encoding: 'utf-8' }).trim()).toBe(headBefore)
+  })
+
+  it('restores when the runtime reports all threads idle (runtimeRequest exercised)', async () => {
+    const checkpoint = await createGitCheckpoint({
+      dataDir,
+      workspaceRoot: repoRoot,
+      threadId: 'thr_idle'
+    })
+    expect(checkpoint.ok).toBe(true)
+    if (!checkpoint.ok) throw new Error(checkpoint.message)
+
+    await writeFile(join(repoRoot, 'tracked.txt'), 'changed after checkpoint\n')
+    await writeFile(join(repoRoot, 'new-after.txt'), 'new\n')
+
+    const runtimeRequest = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      body: JSON.stringify({ threads: [{ id: 'thr_a', status: 'idle' }, { id: 'thr_b', status: 'archived' }] })
+    }))
+
+    const restored = await restoreGitCheckpoint({
+      dataDir,
+      checkpointId: checkpoint.checkpointId,
+      runtimeRequest
+    })
+    expect(restored.ok).toBe(true)
+    if (!restored.ok) throw new Error(restored.message)
+    // The guard ran and let the restore proceed.
+    expect(runtimeRequest).toHaveBeenCalledTimes(1)
+    // Restore rewound the tracked file to its checkpoint content and removed the
+    // post-checkpoint untracked file (git clean -fd).
+    expect(await readFile(join(repoRoot, 'tracked.txt'), 'utf-8')).toBe('base\n')
+    await expect(stat(join(repoRoot, 'new-after.txt'))).rejects.toThrow()
+  })
+
+  it('deletes checkpoint directories that are not referenced by thread data', async () => {
+    const used = 'gcp_used'
+    const unused = 'gcp_unused'
+    await mkdir(join(dataDir, 'git-checkpoints', used), { recursive: true })
+    await mkdir(join(dataDir, 'git-checkpoints', unused), { recursive: true })
+    await mkdir(join(dataDir, 'threads', 'thr_1'), { recursive: true })
+    await writeFile(
+      join(dataDir, 'threads', 'thr_1', 'items.jsonl'),
+      `${JSON.stringify({ id: 'item_1', workspaceCheckpointId: used })}\n`,
+      'utf-8'
+    )
+
+    const result = await cleanupUnusedGitCheckpoints({ dataDir, graceMs: 0 })
+
+    expect(result.scanned).toBe(2)
+    expect(result.kept).toBe(1)
+    expect(result.deleted).toBe(1)
+    expect(result.deletedIds).toEqual([unused])
+    await expect(stat(join(dataDir, 'git-checkpoints', used))).resolves.toBeTruthy()
+    await expect(stat(join(dataDir, 'git-checkpoints', unused))).rejects.toThrow()
+  })
+
+  it('keeps recently created checkpoints (create-vs-flush grace) and deletes old ones', async () => {
+    const fresh = 'gcp_fresh'
+    const stale = 'gcp_stale'
+    await mkdir(join(dataDir, 'git-checkpoints', fresh), { recursive: true })
+    await mkdir(join(dataDir, 'git-checkpoints', stale), { recursive: true })
+    // Backdate the stale checkpoint beyond the grace window; the fresh one keeps
+    // its just-now mtime and must not be deleted (its referencing item may not
+    // be flushed yet).
+    const old = new Date('2020-01-01T00:00:00.000Z')
+    await utimes(join(dataDir, 'git-checkpoints', stale), old, old)
+
+    const result = await cleanupUnusedGitCheckpoints({ dataDir, graceMs: 10 * 60 * 1000 })
+
+    expect(result.deletedIds).toEqual([stale])
+    expect(result.kept).toBe(1)
+    await expect(stat(join(dataDir, 'git-checkpoints', fresh))).resolves.toBeTruthy()
+    await expect(stat(join(dataDir, 'git-checkpoints', stale))).rejects.toThrow()
+  })
+
+  it('records cleanup state and skips runs before the configured interval elapses', async () => {
+    await mkdir(join(dataDir, 'git-checkpoints', 'gcp_first'), { recursive: true })
+
+    const first = await cleanupUnusedGitCheckpointsIfDue({
+      dataDir,
+      intervalDays: 3,
+      graceMs: 0,
+      now: new Date('2026-01-01T00:00:00.000Z')
+    })
+    expect(first.due).toBe(true)
+    if (!first.due) throw new Error('expected cleanup to run')
+    expect(first.result.deletedIds).toEqual(['gcp_first'])
+
+    await mkdir(join(dataDir, 'git-checkpoints', 'gcp_second'), { recursive: true })
+    const skipped = await cleanupUnusedGitCheckpointsIfDue({
+      dataDir,
+      intervalDays: 3,
+      graceMs: 0,
+      now: new Date('2026-01-03T23:59:59.000Z')
+    })
+    expect(skipped.due).toBe(false)
+    await expect(stat(join(dataDir, 'git-checkpoints', 'gcp_second'))).resolves.toBeTruthy()
+
+    const second = await cleanupUnusedGitCheckpointsIfDue({
+      dataDir,
+      intervalDays: 3,
+      graceMs: 0,
+      now: new Date('2026-01-04T00:00:00.000Z')
+    })
+    expect(second.due).toBe(true)
+    if (!second.due) throw new Error('expected cleanup to run after interval')
+    expect(second.result.deletedIds).toEqual(['gcp_second'])
   })
 })

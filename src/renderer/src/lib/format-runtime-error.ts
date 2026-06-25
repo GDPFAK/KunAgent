@@ -43,6 +43,7 @@ function runtimeErrorCode(payload: RuntimeErrorPayload | null, raw: string): str
   const fromError = typeof payload?.error === 'string' ? payload.error.trim() : ''
   if (fromError) return fromError.toLowerCase()
   const lowered = stripIpcPrefix(payloadMessage(payload) || raw).toLowerCase()
+  if (lowered.includes('model request failed:')) return 'model_request_failed'
   if (lowered.includes('fetch failed')) return 'fetch_failed'
   if (lowered.includes('runtime unhealthy')) return 'runtime_unhealthy'
   if (lowered.includes('active turn')) return 'turn_in_progress'
@@ -79,6 +80,10 @@ function detailString(value: unknown): string {
 
 function localizedRuntimeSummary(code: string | null, text: string): string | null {
   const lowered = text.toLowerCase()
+
+  if (code === 'model_request_failed' || lowered.includes('model request failed:')) {
+    return i18n.t('common:runtimeModelRequestFailed')
+  }
 
   if (code === 'fetch_failed' || lowered.includes('fetch failed')) {
     return i18n.t('common:runtimeFetchFailed')

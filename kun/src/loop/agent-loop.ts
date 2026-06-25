@@ -28,7 +28,9 @@ import {
   insertCompactionIntoVisibleHistory,
   placeCompactionsAtTurnEnd
 } from './compaction-history.js'
-import { summarizeCompactionWithModel } from './compaction-summary.js'
+import { resolveCompactionModel, summarizeCompactionWithModel } from './compaction-summary.js'
+import { generateThreadTitle, resolveRoleModel } from './title-generator.js'
+import type { RolesConfig } from '../config/kun-config.js'
 import { InflightTracker } from './inflight-tracker.js'
 import { SteeringQueue } from './steering-queue.js'
 import {
@@ -132,6 +134,37 @@ const GOAL_RESUME_PROMPT = [
  */
 function goalResumeKey(threadId: string, goal: ThreadGoal): string {
   return `${threadId}::${goal.createdAt}::${goal.objective}`
+}
+
+/**
+ * Placeholder titles the GUI assigns to a fresh thread. When a thread still
+ * carries one of these (or an empty title), the title is considered
+ * auto-generatable; a user-set title never matches and is preserved. Mirrors
+ * the renderer's `shouldAutoTitleThread` placeholder set so backend title
+ * generation only fills in genuinely-default titles.
+ */
+const PLACEHOLDER_THREAD_TITLES = new Set(['New Thread', '新会话', 'Untitled', '未命名'])
+const CODEX_PLACEHOLDER_TITLE = /^__codex_[a-z0-9_]+__$/i
+
+function isAutoTitleableThreadTitle(title: string | null | undefined): boolean {
+  const raw = title?.trim() ?? ''
+  if (!raw) return true
+  if (PLACEHOLDER_THREAD_TITLES.has(raw)) return true
+  if (CODEX_PLACEHOLDER_TITLE.test(raw)) return true
+  return false
+}
+
+/**
+ * Whether the backend LLM titler may (re)generate a thread's title.
+ *
+ * - `titleAuto === false` → user renamed it manually; never overwrite.
+ * - `titleAuto === true`  → client set a provisional first-message title; upgrade it.
+ * - absent (legacy)       → only upgrade placeholder titles, never a real one.
+ */
+export function canUpgradeThreadTitle(thread: { title?: string | null; titleAuto?: boolean }): boolean {
+  if (thread.titleAuto === false) return false
+  if (thread.titleAuto === true) return true
+  return isAutoTitleableThreadTitle(thread.title)
 }
 const MAX_TOOL_CATALOG_SNAPSHOTS = 256
 
@@ -580,6 +613,8 @@ export type AgentLoopOptions = {
   memoryStore?: MemoryStore
   tokenEconomy?: TokenEconomyConfig
   contextCompaction?: ContextCompactionConfig
+  /** Internal-LLM role model routing (smallModel slot + title/summary/codeReview overrides). */
+  roles?: RolesConfig
   toolStorm?: ToolStormBreakerOptions & { enabled?: boolean }
   toolArgumentRepair?: {
     maxStringBytes?: number
@@ -599,6 +634,23 @@ export type AgentLoopOptions = {
    * tools — enforced at both the schema (listTools) and execute layers.
    */
   forcedAllowedToolNames?: readonly string[]
+  /**
+   * Provider ids hard-blocked for this loop (e.g. a subagent profile's blocked
+   * MCP servers, as `mcp:<serverId>`). Deny-list layered on top of inherit and
+   * enforced at both the schema and execute layers.
+   */
+  blockedProviderIds?: readonly string[]
+  /**
+   * Tool names hard-blocked for this loop (e.g. a subagent profile's blocked
+   * built-in tools). Deny-list layered on top of inherit; enforced at both layers.
+   */
+  blockedToolNames?: readonly string[]
+  /**
+   * Skill ids hard-blocked for this loop's turns (e.g. a subagent profile's
+   * blockedSkills). Hidden from the catalog + auto-activation and rejected by
+   * `load_skill`, without mutating the shared skill runtime.
+   */
+  blockedSkillIds?: readonly string[]
   /**
    * Lifecycle hooks (UserPromptSubmit, TurnStart, TurnEnd, PreCompact).
    * Tool phases are handled by the tool host; the loop ignores them.
@@ -749,6 +801,11 @@ export class AgentLoop {
       })
       finalStatus = status
       finalError = failure?.error
+      if (status === 'completed') {
+        // Fire-and-forget: generate an LLM title after the FIRST assistant
+        // reply completes, only when the thread still has a default title.
+        void this.maybeGenerateThreadTitle(threadId, turnId, signal).catch(() => {})
+      }
       return status
     } catch (error) {
       const raw = error instanceof Error ? error.message : String(error)
@@ -877,6 +934,68 @@ export class AgentLoop {
 
   private async failTurn(threadId: string, turnId: string, message: string): Promise<void> {
     await this.opts.turns.finishTurn({ threadId, turnId, status: 'failed', error: message })
+  }
+
+  /**
+   * After the FIRST assistant reply completes, generate a concise LLM title for
+   * the thread — but only when the thread still carries a default/placeholder
+   * title (so a user-set or already-generated title is never overwritten) and
+   * only on the first completed turn. Model precedence: titleModel -> smallModel
+   * -> main conversation model. Persists the title to the thread store and emits
+   * a `thread_updated` event so the renderer's list refreshes. Best-effort: any
+   * failure is swallowed by the fire-and-forget caller.
+   */
+  private async maybeGenerateThreadTitle(threadId: string, turnId: string, signal?: AbortSignal): Promise<void> {
+    const thread = await this.opts.threadStore.get(threadId)
+    if (!thread) return
+    // Only on the first completed turn so we don't re-title on every reply.
+    const completedTurns = thread.turns.filter((t) => t.status === 'completed').length
+    if (completedTurns > 1) return
+    if (!canUpgradeThreadTitle(thread)) return
+
+    const items = await this.opts.sessionStore.loadItems(threadId)
+    const userText = items.find((item) => item.kind === 'user_message')?.text ?? ''
+    if (!userText.trim()) return
+    const assistantText = items.find((item) => item.kind === 'assistant_text')?.text
+
+    const resolved = resolveRoleModel({
+      roleModel: this.opts.roles?.titleModel,
+      roleProviderId: this.opts.roles?.titleProviderId,
+      roles: this.opts.roles,
+      mainModel: thread.model || this.opts.model.model,
+      mainProviderId: thread.providerId
+    })
+    if (!resolved) return
+
+    const title = await generateThreadTitle({
+      threadId,
+      turnId,
+      modelClient: this.opts.model,
+      model: resolved.model,
+      ...(resolved.providerId ? { providerId: resolved.providerId } : {}),
+      userText,
+      ...(assistantText ? { assistantText } : {}),
+      ...(this.opts.roles?.titleReasoningEffort
+        ? { reasoningEffort: this.opts.roles.titleReasoningEffort }
+        : {}),
+      ...(signal ? { abortSignal: signal } : {})
+    })
+    if (!title) return
+
+    // Re-check the title is still upgradeable (no user rename raced us).
+    const latest = await this.opts.threadStore.get(threadId)
+    if (!latest || !canUpgradeThreadTitle(latest)) return
+    // Keep titleAuto:true — the LLM title is still auto-generated, so a later
+    // user rename can still lock it, but we won't re-title (gated by turn count).
+    const updated = touchThread({ ...latest, title, titleAuto: true }, this.opts.nowIso())
+    await this.opts.threadStore.upsert(updated)
+    await this.opts.events.record({
+      kind: 'thread_updated',
+      threadId,
+      title: updated.title,
+      titleAuto: true,
+      status: updated.status
+    })
   }
 
   private rememberTurnFailure(turnId: string, failure: TurnFailure): void {
@@ -1192,9 +1311,10 @@ export class AgentLoop {
       workspace: thread?.workspace ?? '',
       modelCapabilities
     })
-    const skillResolution = this.opts.skillRuntime?.resolveTurn({
+    const skillResolution = await this.opts.skillRuntime?.resolveTurn({
       prompt: turn?.prompt ?? '',
-      workspace: thread?.workspace ?? ''
+      workspace: thread?.workspace ?? '',
+      ...(this.opts.blockedSkillIds ? { blockedSkillIds: this.opts.blockedSkillIds } : {})
     }) ?? {
       activeSkillIds: [],
       activations: [],
@@ -1237,6 +1357,9 @@ export class AgentLoop {
       memoryPolicy: { enabled: Boolean(this.opts.memoryStore) },
       delegationPolicy: { enabled: false },
       ...(allowedToolNames ? { allowedToolNames } : {}),
+      ...(this.opts.blockedProviderIds ? { blockedProviderIds: this.opts.blockedProviderIds } : {}),
+      ...(this.opts.blockedToolNames ? { blockedToolNames: this.opts.blockedToolNames } : {}),
+      ...(this.opts.blockedSkillIds ? { blockedSkillIds: this.opts.blockedSkillIds } : {}),
       approvalPolicy,
       sandboxMode,
       abortSignal: signal,
@@ -1340,6 +1463,7 @@ export class AgentLoop {
         tools: effectiveToolSpecs
       }),
       ...memoryInstructions(memories),
+      ...(skillResolution.catalogInstruction ? [skillResolution.catalogInstruction] : []),
       ...skillResolution.instructions,
       ...(userInputDisabled ? [userInputUnavailableInstruction()] : []),
       ...(effectiveToolSpecs.some((tool) => tool.name === 'bash') ? [shellRuntimeInstruction()] : []),
@@ -1355,7 +1479,15 @@ export class AgentLoop {
       turnId,
       model,
       ...(thread?.providerId?.trim() ? { providerId: thread.providerId.trim() } : {}),
-      systemPrompt: this.opts.prefix.systemPrompt,
+      // Thread-level systemPrompt (primary-agent persona snapshot) is
+      // appended to the runtime base — same augment strategy as child agents
+      // (child-agent-executor) — so the agent keeps kun's tool/safety
+      // conventions and skill catalog instead of losing them to the persona.
+      // Empty/whitespace falls back to the immutable prefix verbatim so
+      // unbound threads keep the prompt-cache fingerprint.
+      systemPrompt: thread?.systemPrompt?.trim()
+        ? `${this.opts.prefix.systemPrompt}\n\n${thread.systemPrompt.trim()}`
+        : this.opts.prefix.systemPrompt,
       ...(planTurnActive ? { modeInstruction: PLAN_MODE_INSTRUCTION } : {}),
       ...(contextInstructions.length ? { contextInstructions } : {}),
       prefix: this.opts.prefix.fewShots,
@@ -1766,6 +1898,34 @@ export class AgentLoop {
         this.lastNoToolTextByTurn.set(turnId, textAccumulator.value)
         return 'continue'
       }
+      if (stopReason === 'length') {
+        // The model hit its output-token ceiling and was cut off without a tool
+        // call. Don't report this as a clean completion — surface a warning so
+        // the truncation is visible instead of looking like the model "gave up".
+        const message =
+          'The model reached its maximum output length and the response was truncated. ' +
+          'Raise the model’s max output tokens, or ask it to continue or split the work into smaller steps.'
+        await this.opts.events.record({
+          kind: 'error',
+          threadId,
+          turnId,
+          message,
+          code: 'output_truncated',
+          severity: 'warning'
+        })
+        await this.opts.turns.applyItem(
+          threadId,
+          makeErrorItem({
+            id: this.opts.ids.next('item_error'),
+            turnId,
+            threadId,
+            message,
+            code: 'output_truncated',
+            severity: 'warning'
+          })
+        )
+        return 'stop'
+      }
       return 'stop'
     }
     // Tool calls mean the turn is making progress again; reset the no-tool
@@ -1961,6 +2121,9 @@ export class AgentLoop {
       memoryPolicy: { enabled: Boolean(this.opts.memoryStore) },
       delegationPolicy: { enabled: false },
       ...(input.allowedToolNames ? { allowedToolNames: input.allowedToolNames } : {}),
+      ...(this.opts.blockedProviderIds ? { blockedProviderIds: this.opts.blockedProviderIds } : {}),
+      ...(this.opts.blockedToolNames ? { blockedToolNames: this.opts.blockedToolNames } : {}),
+      ...(this.opts.blockedSkillIds ? { blockedSkillIds: this.opts.blockedSkillIds } : {}),
       approvalPolicy: input.approvalPolicy,
       sandboxMode: input.sandboxMode,
       abortSignal: input.signal,
@@ -2342,10 +2505,15 @@ export class AgentLoop {
       keepRecent: plan.keepRecent
     })
     if (result.replacedTokens > 0 && this.opts.contextCompaction?.summaryMode === 'model') {
+      const compactionModel = resolveCompactionModel({
+        contextCompaction: this.opts.contextCompaction,
+        fallbackModel: model
+      })
       const modelSummary = await summarizeCompactionWithModel({
         threadId,
         turnId,
-        model,
+        model: compactionModel.model,
+        ...(compactionModel.providerId ? { providerId: compactionModel.providerId } : {}),
         modelClient: this.opts.model,
         prefix: this.opts.prefix,
         contextCompaction: this.opts.contextCompaction,
@@ -2358,7 +2526,7 @@ export class AgentLoop {
             kind: 'usage',
             threadId,
             turnId,
-            model,
+            model: compactionModel.model,
             usage
           })
         },

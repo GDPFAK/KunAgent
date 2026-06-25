@@ -180,14 +180,31 @@ export async function getGitBranches(workspaceRoot: string): Promise<GitBranches
       .filter(Boolean)
     const branchSet = new Set(branchLines)
     if (currentBranch && !branchSet.has(currentBranch)) branchSet.add(currentBranch)
-    const branches = [...branchSet].map((name) => ({
-      name,
-      current: currentBranch === name
-    }))
+    const worktreeRows = parseWorktreeListPorcelain(
+      (await runGit(cwd, ['worktree', 'list', '--porcelain'])).stdout
+    )
+    const primaryRepositoryRoot = worktreeRows[0]?.path || repositoryRoot
+    const worktreeByBranch = new Map<string, { path: string; primary: boolean }>()
+    for (const row of worktreeRows) {
+      if (row.branch && !worktreeByBranch.has(row.branch)) {
+        worktreeByBranch.set(row.branch, { path: row.path, primary: row.path === primaryRepositoryRoot })
+      }
+    }
+    const branches = [...branchSet].map((name) => {
+      // A branch checked out in *another* worktree cannot be switched to here.
+      // (The current branch lives in this worktree, so it's never "elsewhere".)
+      const elsewhere = name === currentBranch ? undefined : worktreeByBranch.get(name)
+      const offsite = elsewhere && elsewhere.path !== repositoryRoot ? elsewhere : undefined
+      return {
+        name,
+        current: currentBranch === name,
+        ...(offsite ? { worktreePath: offsite.path, worktreePrimary: offsite.primary } : {})
+      }
+    })
     const dirtyCount = (await runGit(cwd, ['status', '--porcelain=v1'])).stdout
       .split('\n')
       .filter((line) => line.trim().length > 0).length
-    return { ok: true, repositoryRoot, currentBranch, branches, dirtyCount }
+    return { ok: true, repositoryRoot, primaryRepositoryRoot, currentBranch, branches, dirtyCount }
   } catch (error) {
     return gitFailure(error)
   }

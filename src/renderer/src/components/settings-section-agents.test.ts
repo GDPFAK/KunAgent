@@ -47,9 +47,9 @@ const labels: Record<string, string> = {
   modelProviderBaseUrl: 'Provider base URL',
   modelProviderEndpointFormat: 'Endpoint format',
   modelProviderFetchEmpty: 'No models found',
-  modelEndpointChatCompletions: '/v1/chat/completions',
-  modelEndpointResponses: '/v1/responses',
-  modelEndpointMessages: '/v1/messages',
+  modelEndpointChatCompletions: '/v1/chat/completions (openai)',
+  modelEndpointResponses: '/v1/responses (openai)',
+  modelEndpointMessages: '/v1/messages (anthropic)',
   modelEndpointCustomEndpoint: 'Custom full endpoint',
   modelProviderModels: 'Provider models',
   modelProviderImageCapability: 'Image capability',
@@ -484,7 +484,7 @@ describe('AgentsSettingsSection Kun diagnostics smoke', () => {
     expect(providerIdInput).not.toContain('readOnly')
     expect(providerIdInput).not.toContain('readonly')
     expect(html).toContain('Endpoint format')
-    expect(html).toContain('<option value="messages" selected="">/v1/messages</option>')
+    expect(html).toContain('<option value="messages" selected="">/v1/messages (anthropic)</option>')
     expect(html).toContain('<option value="custom_endpoint">Custom full endpoint</option>')
     expect(html).toContain('Enter provider API key')
     expect(html).not.toContain('Inherit API key')

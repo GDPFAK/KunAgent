@@ -23,7 +23,7 @@ import {
   insertCompactionIntoVisibleHistory,
   placeCompactionsAtTurnEnd
 } from '../loop/compaction-history.js'
-import { summarizeCompactionWithModel } from '../loop/compaction-summary.js'
+import { resolveCompactionModel, summarizeCompactionWithModel } from '../loop/compaction-summary.js'
 import type { ContextCompactionConfig } from '../loop/model-context-profile.js'
 import { makeUserItem, makeErrorItem } from '../domain/item.js'
 import { appendTurnItem, createTurnRecord, finishTurn, replaceTurnItem, startTurn as startTurnRecord } from '../domain/turn.js'
@@ -239,15 +239,21 @@ export class TurnService {
         auto: false
       })
       if (this.deps.contextCompaction?.summaryMode === 'model' && this.deps.model) {
-        const model = modelForManualCompaction({
+        const fallbackModel = modelForManualCompaction({
           threadModel: thread.model,
           defaultModel: this.deps.defaultModel,
           clientModel: this.deps.model.model
         })
+        const compactionModel = resolveCompactionModel({
+          contextCompaction: this.deps.contextCompaction,
+          fallbackModel
+        })
+        const model = compactionModel.model
         const modelSummary = await summarizeCompactionWithModel({
           threadId: input.threadId,
           turnId,
           model,
+          ...(compactionModel.providerId ? { providerId: compactionModel.providerId } : {}),
           modelClient: this.deps.model,
           prefix,
           contextCompaction: this.deps.contextCompaction,

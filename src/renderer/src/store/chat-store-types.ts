@@ -149,6 +149,10 @@ export type ChatState = {
   threadSearch: string
   showArchivedThreads: boolean
   activeThreadId: string | null
+  /** Relationship of the active thread (e.g. `side` for a subagent's own session). */
+  activeThreadRelation: 'primary' | 'fork' | 'side' | null
+  /** Parent thread of the active thread, when it is a `side`/`fork` branch. */
+  activeThreadParentId: string | null
   activeThreadGoal: ThreadGoal | null
   activeThreadTodos: ThreadTodoList | null
   blocks: ChatBlock[]
@@ -177,6 +181,11 @@ export type ChatState = {
   composerProviderId: string
   composerPickList: string[]
   composerModelGroups: ModelProviderModelGroup[]
+  /**
+   * Optional subagent profile id selected as the persona for the next new
+   * thread / next-turn override. Empty = use the runtime default.
+   */
+  composerAgentId: string
   disabledSkillIds: string[]
   queuedMessages: QueuedUserMessage[]
   watchTurnCompletion: Record<string, boolean>
@@ -193,6 +202,7 @@ export type ChatState = {
   setError: (message: string | null) => void
   setComposerMode: (mode: 'plan' | 'agent') => void
   setComposerModel: (modelId: string, providerId?: string) => void
+  setComposerAgentId: (agentId: string) => void
   loadComposerModels: () => Promise<void>
   setRoute: (r: AppRoute) => void
   openWrite: () => Promise<void>
@@ -241,6 +251,12 @@ export type ChatState = {
     /** When true, checkout the selected branch into an isolated worktree. */
     useWorktreePool?: boolean
     worktreeBranch?: string
+    /**
+     * Optional subagent profile id to bind the new thread to. When set
+     * and the profile mode is 'primary' or 'all', the agent's
+     * providerId / model / systemPrompt are snapshotted onto the thread.
+     */
+    agentId?: string
   }) => Promise<void>
   selectThread: (id: string) => Promise<void>
   /**
@@ -260,6 +276,7 @@ export type ChatState = {
   interrupt: (options?: { discard?: boolean }) => Promise<void>
   renameActiveThread: (title: string) => Promise<void>
   renameThread: (threadId: string, title: string) => Promise<void>
+  pinThread: (threadId: string, pinned: boolean) => Promise<void>
   archiveThread: (threadId: string, archived: boolean) => Promise<void>
   compactActiveThread: (reason?: string) => Promise<void>
   forkActiveThread: () => Promise<void>

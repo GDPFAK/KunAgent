@@ -203,6 +203,31 @@ export function canSwitchComposerModel(
   return modelSupportsImageInput(nextProfile)
 }
 
+// The vision→text downgrade guard must only engage when the conversation
+// actually carries image content that a text-only model could not consume.
+// Locking on the mere presence of a user message (regardless of attachments)
+// made every text model unselectable whenever a vision model was active — see
+// https://github.com/KunAgent/Kun/issues/579. Document attachments are
+// text-extractable and therefore safe to downgrade with; only image (or
+// unknown-kind, e.g. restored-session) attachments keep the lock engaged.
+export function conversationHasVisionAttachments(blocks: readonly ChatBlock[]): boolean {
+  return blocks.some((block) => {
+    if (block.kind !== 'user') return false
+    const meta = block.meta
+    if (!meta) return false
+    const refsById = new Map((meta.attachments ?? []).map((ref) => [ref.id, ref]))
+    const attachmentIds = new Set([
+      ...(meta.attachmentIds ?? []),
+      ...(meta.attachments ?? []).map((ref) => ref.id)
+    ])
+    for (const id of attachmentIds) {
+      // 'image' or unspecified kind keeps the lock; 'document' is safe to drop.
+      if (refsById.get(id)?.kind !== 'document') return true
+    }
+    return false
+  })
+}
+
 function modelProfileForComposerSelection(
   modelGroups: readonly ModelProviderModelGroup[],
   modelId: string,

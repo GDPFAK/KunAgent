@@ -29,7 +29,7 @@ describe('buildSkillToolProviders', () => {
   }
 
   it('returns no provider when no skills are loaded', async () => {
-    const runtime = await SkillRuntime.create({ enabled: false, roots: [], legacySkillMd: true })
+    const runtime = await SkillRuntime.create({ enabled: false, roots: [], workspaceRoots: [], globalRoots: [], disabledIds: [], legacySkillMd: true })
     expect(buildSkillToolProviders(runtime)).toEqual([])
     expect(buildSkillToolProviders(undefined)).toEqual([])
   })

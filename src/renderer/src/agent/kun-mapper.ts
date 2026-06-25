@@ -48,6 +48,8 @@ export function threadFromCore(thread: CoreThreadSummaryJson): NormalizedThread 
   return {
     id: thread.id,
     title: thread.title?.trim() || thread.id.slice(0, 8),
+    ...(thread.titleAuto !== undefined ? { titleAuto: thread.titleAuto } : {}),
+    ...(thread.summary?.trim() ? { summary: thread.summary.trim() } : {}),
     updatedAt: thread.updatedAt,
     model: thread.model,
     mode: thread.mode,
@@ -56,6 +58,10 @@ export function threadFromCore(thread: CoreThreadSummaryJson): NormalizedThread 
     approvalPolicy: normalizeApprovalPolicy(thread.approvalPolicy),
     sandboxMode: normalizeSandboxMode(thread.sandboxMode),
     archived: thread.status === 'archived',
+    pinned: thread.pinned === true,
+    ...(thread.providerId ? { providerId: thread.providerId } : {}),
+    ...(thread.agentId ? { agentId: thread.agentId } : {}),
+    ...(thread.systemPrompt ? { systemPrompt: thread.systemPrompt } : {}),
     relation: thread.relation,
     parentThreadId: thread.parentThreadId,
     forkedFromThreadId: thread.forkedFromThreadId,
@@ -222,6 +228,9 @@ function normalizeChildMetadata(
     parentTurnId: child.parentTurnId,
     childId: child.childId,
     ...(child.childLabel ? { childLabel: child.childLabel } : {}),
+    ...(child.childProfile ? { childProfile: child.childProfile } : {}),
+    ...(child.childModel ? { childModel: child.childModel } : {}),
+    ...(child.childToolPolicy ? { childToolPolicy: child.childToolPolicy } : {}),
     childStatus: child.childStatus,
     childSeq: child.childSeq
   }
@@ -1221,6 +1230,14 @@ export async function dispatchKunRuntimeEvent(
       return
     case 'usage':
       if (event.usage) sink.onUsage?.(usageFromCore(event.usage))
+      return
+    case 'thread_updated':
+      sink.onThreadUpdated?.({
+        threadId: event.threadId ?? '',
+        ...(event.title !== undefined ? { title: event.title } : {}),
+        ...(event.titleAuto !== undefined ? { titleAuto: event.titleAuto } : {}),
+        ...(event.status !== undefined ? { status: event.status } : {})
+      })
       return
     case 'turn_completed':
     case 'turn_aborted':

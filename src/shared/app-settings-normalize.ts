@@ -1,10 +1,16 @@
 import {
   DEFAULT_GUI_UPDATE_CHANNEL,
+  CHECKPOINT_CLEANUP_INTERVAL_DAYS,
+  DEFAULT_CHECKPOINT_CLEANUP_ENABLED,
+  DEFAULT_CHECKPOINT_CLEANUP_INTERVAL_DAYS,
   DEFAULT_CURSOR_SPOTLIGHT_COLOR,
   DEFAULT_LOG_RETENTION_DAYS,
   normalizeGuiUpdateChannel,
+  normalizeUiFontScale,
   type AppBehaviorConfigV1,
   type AppSettingsV1,
+  type CheckpointCleanupConfigV1,
+  type CheckpointCleanupIntervalDays,
   type ClawSettingsPatchV1,
   type GuiUpdateConfigV1,
   type NotificationConfigV1,
@@ -42,6 +48,7 @@ export function normalizeAppSettings(settings: AppSettingsV1): AppSettingsV1 {
     keyboardShortcuts?: Partial<KeyboardShortcutsConfigV1>
     notifications?: Partial<NotificationConfigV1>
     provider?: Parameters<typeof normalizeModelProviderSettings>[0]
+    checkpointCleanup?: Partial<CheckpointCleanupConfigV1>
     write?: WriteSettingsPatchV1
     claw?: ClawSettingsPatchV1
     schedule?: ScheduleSettingsPatchV1
@@ -70,12 +77,7 @@ export function normalizeAppSettings(settings: AppSettingsV1): AppSettingsV1 {
       maybeSettings.theme === 'light' || maybeSettings.theme === 'dark' || maybeSettings.theme === 'system'
         ? maybeSettings.theme
         : 'system',
-    uiFontScale:
-      maybeSettings.uiFontScale === 'small' ||
-      maybeSettings.uiFontScale === 'medium' ||
-      maybeSettings.uiFontScale === 'large'
-        ? maybeSettings.uiFontScale
-        : 'small',
+    uiFontScale: normalizeUiFontScale(maybeSettings.uiFontScale),
     cursorSpotlight: maybeSettings.cursorSpotlight !== false,
     cursorSpotlightColor: normalizeCursorSpotlightColor(maybeSettings.cursorSpotlightColor),
     provider: providerSettings,
@@ -91,6 +93,7 @@ export function normalizeAppSettings(settings: AppSettingsV1): AppSettingsV1 {
         ? maybeSettings.log.retentionDays
         : DEFAULT_LOG_RETENTION_DAYS
     },
+    checkpointCleanup: normalizeCheckpointCleanupSettings(maybeSettings.checkpointCleanup),
     notifications: {
       turnComplete: maybeSettings.notifications?.turnComplete !== false
     },
@@ -108,6 +111,28 @@ export function normalizeAppSettings(settings: AppSettingsV1): AppSettingsV1 {
     },
     codePromptPrefix: typeof maybeSettings.codePromptPrefix === 'string' ? maybeSettings.codePromptPrefix : '',
     disabledSkillIds: normalizeDisabledSkillIds(maybeSettings.disabledSkillIds)
+  }
+}
+
+export function normalizeCheckpointCleanupIntervalDays(value: unknown): CheckpointCleanupIntervalDays {
+  const parsed = typeof value === 'number' ? value : Number(value)
+  if (!Number.isFinite(parsed)) return DEFAULT_CHECKPOINT_CLEANUP_INTERVAL_DAYS
+  if (parsed <= 1) return 1
+  if (parsed <= 2) return 2
+  if (parsed <= 3) return 3
+  if (parsed <= 5) return 5
+  return 10
+}
+
+export function normalizeCheckpointCleanupSettings(
+  settings?: Partial<CheckpointCleanupConfigV1>
+): CheckpointCleanupConfigV1 {
+  const intervalDays = normalizeCheckpointCleanupIntervalDays(settings?.intervalDays)
+  return {
+    enabled: typeof settings?.enabled === 'boolean' ? settings.enabled : DEFAULT_CHECKPOINT_CLEANUP_ENABLED,
+    intervalDays: CHECKPOINT_CLEANUP_INTERVAL_DAYS.includes(intervalDays)
+      ? intervalDays
+      : DEFAULT_CHECKPOINT_CLEANUP_INTERVAL_DAYS
   }
 }
 

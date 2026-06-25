@@ -3,7 +3,7 @@ import { Code2, PencilLine } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
 type Props = {
-  activeView: 'chat' | 'write' | 'claw' | 'schedule' | 'workflow'
+  activeView: 'chat' | 'write' | 'claw' | 'schedule' | 'workflow' | 'subagents'
   onCodeOpen: () => void
   onWriteOpen: () => void
 }

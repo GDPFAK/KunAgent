@@ -463,13 +463,16 @@ async function createSdkMcpClient(serverId: string, server: McpServerConfig): Pr
 
 function createTransport(server: McpServerConfig): Transport {
   switch (server.transport) {
-    case 'stdio':
+    case 'stdio': {
+      const cwd = resolveMcpServerCwd(server)
       return new StdioClientTransport({
         command: server.command ?? '',
         args: server.args,
         env: buildMcpStdioEnvironment(server.env),
+        ...(cwd ? { cwd } : {}),
         stderr: 'pipe'
       })
+    }
     case 'streamable-http':
       return new StreamableHTTPClientTransport(new URL(server.url ?? ''), {
         requestInit: { headers: server.headers }
@@ -480,6 +483,14 @@ function createTransport(server: McpServerConfig): Transport {
         eventSourceInit: { fetch: fetchWithHeaders(server.headers) }
       })
   }
+}
+
+export function resolveMcpServerCwd(server: McpServerConfig): string | undefined {
+  if (server.transport !== 'stdio') return undefined
+  const configured = server.cwd?.trim()
+  if (configured) return configured
+  if (server.trustScope !== 'workspace') return undefined
+  return server.trustedWorkspaceRoots.map((root) => root.trim()).find(Boolean)
 }
 
 function fetchWithHeaders(headers: Record<string, string>): typeof fetch {

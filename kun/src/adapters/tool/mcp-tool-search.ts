@@ -319,7 +319,16 @@ function createMcpSearchTools(options: McpSearchProviderOptions): LocalTool[] {
 }
 
 function trustedRecords(options: McpSearchProviderOptions, context: ToolHostContext): McpSearchCatalogRecord[] {
-  return options.state.records.filter((record) => options.isServerTrusted(record.server, context.workspace))
+  const blocked = context.blockedProviderIds
+  return options.state.records.filter((record) =>
+    options.isServerTrusted(record.server, context.workspace)
+    // Honor the per-turn provider deny-list (e.g. a subagent's blockedMcpServers).
+    // In search mode the per-server `mcp:<id>` provider is never registered, so
+    // CapabilityRegistry.canUseProvider can't gate it — this is the single
+    // chokepoint shared by mcp_search/mcp_describe/mcp_call, so filtering here
+    // blocks enumeration, schema disclosure, AND execution of a blocked server.
+    && !blocked?.includes(`mcp:${record.serverId}`)
+  )
 }
 
 function resolveTrustedRecord(

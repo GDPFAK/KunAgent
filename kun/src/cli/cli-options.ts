@@ -11,6 +11,7 @@ import {
   DEFAULT_STORAGE_CONFIG,
   ModelConfigSchema,
   QualityConfigSchema,
+  RolesConfigSchema,
   RuntimeTuningConfigSchema,
   ServeProviderConfigSchema,
   StorageConfigSchema,
@@ -59,6 +60,7 @@ export const ServeOptionsSchema = z.object({
   models: ModelConfigSchema.optional(),
   contextCompaction: ContextCompactionConfigSchema.optional(),
   runtime: RuntimeTuningConfigSchema.optional(),
+  roles: RolesConfigSchema.optional(),
   capabilities: KunCapabilitiesConfig.default(DEFAULT_KUN_CAPABILITIES_CONFIG),
   hooks: HooksConfigSchema.optional(),
   quality: QualityConfigSchema.optional()

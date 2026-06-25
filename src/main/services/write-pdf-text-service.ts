@@ -133,33 +133,48 @@ async function extractPdfText(
 export async function readWritePdfText(payload: WorkspaceFileTarget): Promise<WritePdfTextResult> {
   try {
     const targetPath = await resolveOpenTargetPath(payload.path, payload.workspaceRoot)
-    const fileInfo = await stat(targetPath)
-    if (fileInfo.isDirectory()) return { ok: false, message: 'Cannot read text from a directory.' }
-    if (fileInfo.size > MAX_PDF_TEXT_BYTES) {
-      return { ok: false, message: 'This PDF is too large to parse in Write mode.' }
-    }
-    if (extname(targetPath).toLowerCase() !== '.pdf') {
-      return { ok: false, message: 'This file is not a PDF document.' }
-    }
-
-    const cacheKey = `${targetPath}:${fileInfo.size}:${fileInfo.mtimeMs}`
-    const cached = pdfTextCache.get(cacheKey)
-    if (cached) return cached
-
-    const pending = extractPdfText(targetPath, fileInfo.size, fileInfo.mtimeMs).finally(() => {
-      if (pdfTextCache.size > 32) {
-        const oldest = pdfTextCache.keys().next().value
-        if (oldest) pdfTextCache.delete(oldest)
-      }
-    })
-    pdfTextCache.set(cacheKey, pending)
-    return pending
+    return readLocalPdfTextByPath(targetPath, 'This PDF is too large to parse in Write mode.')
   } catch (error) {
     return {
       ok: false,
       message: error instanceof Error ? error.message : String(error)
     }
   }
+}
+
+export async function readLocalPdfText(payload: { path: string }): Promise<WritePdfTextResult> {
+  try {
+    return readLocalPdfTextByPath(payload.path, 'This PDF is too large to attach.')
+  } catch (error) {
+    return {
+      ok: false,
+      message: error instanceof Error ? error.message : String(error)
+    }
+  }
+}
+
+async function readLocalPdfTextByPath(targetPath: string, tooLargeMessage: string): Promise<WritePdfTextResult> {
+  const fileInfo = await stat(targetPath)
+  if (fileInfo.isDirectory()) return { ok: false, message: 'Cannot read text from a directory.' }
+  if (fileInfo.size > MAX_PDF_TEXT_BYTES) {
+    return { ok: false, message: tooLargeMessage }
+  }
+  if (extname(targetPath).toLowerCase() !== '.pdf') {
+    return { ok: false, message: 'This file is not a PDF document.' }
+  }
+
+  const cacheKey = `${targetPath}:${fileInfo.size}:${fileInfo.mtimeMs}`
+  const cached = pdfTextCache.get(cacheKey)
+  if (cached) return cached
+
+  const pending = extractPdfText(targetPath, fileInfo.size, fileInfo.mtimeMs).finally(() => {
+    if (pdfTextCache.size > 32) {
+      const oldest = pdfTextCache.keys().next().value
+      if (oldest) pdfTextCache.delete(oldest)
+    }
+  })
+  pdfTextCache.set(cacheKey, pending)
+  return pending
 }
 
 export function clearWritePdfTextCache(): void {

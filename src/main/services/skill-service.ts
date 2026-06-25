@@ -84,10 +84,17 @@ export async function guiSkillRootsForRuntime(
   const projectCommon = candidates.filter((c) => c.source === 'common' && c.scope === 'project')
   const globalCommon = candidates.filter((c) => c.source === 'common' && c.scope === 'global')
   const extra = candidates.filter((c) => c.source === 'extra')
-  const pluginRoots = (await discoverCodexPluginSkillRoots())
-    .filter((root) => existsSync(root))
-    .filter((root) => !disabled.has(comparablePath(root)))
-    .map((path) => ({ path, scope: 'global' as const }))
+  // Codex plugin caches follow the `global-codex` toggle: disabling the Codex
+  // global root (~/.codex/skills) also stops scanning ~/.codex/plugins/cache/**
+  // (#392). The per-path filter is kept so a hand-added exact plugin path in
+  // `disabledDirs` still works.
+  const codexPluginsDisabled = disabled.has('global-codex')
+  const pluginRoots = codexPluginsDisabled
+    ? []
+    : (await discoverCodexPluginSkillRoots())
+        .filter((root) => existsSync(root))
+        .filter((root) => !disabled.has(comparablePath(root)))
+        .map((path) => ({ path, scope: 'global' as const }))
 
   return uniqueSkillRoots([
     ...projectCommon.map(toGuiSkillRoot),
@@ -97,11 +104,19 @@ export async function guiSkillRootsForRuntime(
   ])
 }
 
+export function guiSkillWorkspaceRootsForRuntime(
+  settings: AppSettingsV1 | undefined,
+  workspaceRootOverride?: string
+): string[] {
+  return collectWorkspaceRoots(settings, workspaceRootOverride)
+}
+
 /**
  * Full list of detected common skill directories + configured extra dirs for
  * the settings UI, including ones the user disabled or that do not exist yet,
- * annotated with skill counts and enabled state. Codex plugin caches are
- * always-on and intentionally excluded from this user-toggleable list.
+ * annotated with skill counts and enabled state. Codex plugin caches are not
+ * listed as a separate row; they follow the `global-codex` toggle (disabling
+ * the Codex global root also stops scanning ~/.codex/plugins/cache/**).
  */
 export async function listGuiSkillRoots(
   settings: AppSettingsV1,
@@ -297,8 +312,24 @@ export function normalizeSkillRootPath(path: string | undefined): string {
 
 async function discoverCodexPluginSkillRoots(): Promise<string[]> {
   const roots: string[] = []
-  await collectSkillRoots(join(homedir(), '.codex', 'plugins', 'cache'), roots, 0, 5)
+  await collectSkillRoots(codexPluginCacheBase(), roots, 0, 5)
   return roots
+}
+
+function codexPluginCacheBase(): string {
+  return join(homedir(), '.codex', 'plugins', 'cache')
+}
+
+/**
+ * Whether a persisted root lives under `~/.codex/plugins/cache/`. The runtime
+ * config builder treats these as GUI-managed (auto-discovered) so stale version
+ * directories left behind by a plugin upgrade are dropped instead of lingering
+ * in `roots` forever and emitting ENOENT validation errors (#392).
+ */
+export function isCodexPluginCacheRoot(path: string): boolean {
+  const comparable = comparablePath(path)
+  const base = comparablePath(codexPluginCacheBase())
+  return comparable === base || comparable.startsWith(`${base}/`)
 }
 
 async function collectSkillRoots(root: string, roots: string[], depth: number, maxDepth: number): Promise<void> {

@@ -1,14 +1,18 @@
 import {
   DEFAULT_MODEL_PROVIDER_ID,
+  KUN_TOOL_PERMISSION_MODES,
   MODEL_PROVIDER_PRESETS,
   applyKunRuntimePatch,
   getKunRuntimeSettings,
   getModelProviderSettings,
+  kunToolPermissionModeFromSettings,
+  kunToolPermissionModeSettings,
   modelProviderPresetProfile,
   modelProviderTokenPlanProfile,
   normalizeAppSettings,
   tokenPlanProviderId,
   type AppSettingsV1,
+  type KunToolPermissionMode,
   type KunRuntimeSettingsPatchV1,
   type ModelProviderPreset,
   type ModelProviderProfileV1
@@ -27,6 +31,7 @@ export type InitialSetupDrafts = Record<string, InitialSetupDraft>
 export type InitialSetupSelection = {
   presetId: string
   mode: InitialSetupAccessMode
+  permissionMode: KunToolPermissionMode
 }
 
 const INITIAL_SETUP_PROVIDER_PRESET_IDS = new Set(['xiaomi', 'minimax'])
@@ -35,7 +40,7 @@ export const INITIAL_SETUP_PROVIDER_PRESETS = MODEL_PROVIDER_PRESETS.filter(
   (preset) => INITIAL_SETUP_PROVIDER_PRESET_IDS.has(preset.id)
 )
 
-export function initialSetupProfileId(selection: InitialSetupSelection): string {
+export function initialSetupProfileId(selection: Pick<InitialSetupSelection, 'presetId' | 'mode'>): string {
   if (selection.presetId === DEFAULT_MODEL_PROVIDER_ID) return DEFAULT_MODEL_PROVIDER_ID
   return selection.mode === 'token-plan' ? tokenPlanProviderId(selection.presetId) : selection.presetId
 }
@@ -66,14 +71,16 @@ export function initialSetupDrafts(settings: AppSettingsV1): InitialSetupDrafts 
 
 /** Card and mode to preselect: the active provider when it is one of ours, DeepSeek otherwise. */
 export function initialSetupSelection(settings: AppSettingsV1): InitialSetupSelection {
-  const activeId = getKunRuntimeSettings(settings).providerId.trim()
+  const runtime = getKunRuntimeSettings(settings)
+  const activeId = runtime.providerId.trim()
+  const permissionMode = kunToolPermissionModeFromSettings(runtime)
   for (const preset of INITIAL_SETUP_PROVIDER_PRESETS) {
-    if (activeId === preset.id) return { presetId: preset.id, mode: 'api' }
+    if (activeId === preset.id) return { presetId: preset.id, mode: 'api', permissionMode }
     if (preset.tokenPlan && activeId === tokenPlanProviderId(preset.id)) {
-      return { presetId: preset.id, mode: 'token-plan' }
+      return { presetId: preset.id, mode: 'token-plan', permissionMode }
     }
   }
-  return { presetId: DEFAULT_MODEL_PROVIDER_ID, mode: 'api' }
+  return { presetId: DEFAULT_MODEL_PROVIDER_ID, mode: 'api', permissionMode }
 }
 
 export type InitialSetupAutoWirePlan = {
@@ -126,7 +133,7 @@ export function initialSetupAutoWirePlan(
 export function buildInitialSetupSettings(
   settings: AppSettingsV1,
   drafts: InitialSetupDrafts,
-  selection: InitialSetupSelection
+  selection: Pick<InitialSetupSelection, 'presetId' | 'mode'> & Partial<Pick<InitialSetupSelection, 'permissionMode'>>
 ): AppSettingsV1 {
   const provider = getModelProviderSettings(settings)
   const profiles = new Map(provider.providers.map((profile) => [profile.id, profile]))
@@ -170,10 +177,23 @@ export function buildInitialSetupSettings(
   )
   const switchingProvider = (runtime.providerId.trim() || DEFAULT_MODEL_PROVIDER_ID) !== selectedId
   const wire = initialSetupAutoWirePlan(settings, drafts)
+  // Only rewrite approvalPolicy/sandboxMode when the user actually moved the
+  // permission selector. The mode<->settings mapping is lossy (only 5 of the
+  // policy/sandbox combos are representable), so emitting the pair when the
+  // selection still matches the persisted policy would silently weaken values
+  // the UI cannot represent — e.g. demote approvalPolicy 'never'/'suggest' or
+  // escalate an 'external-sandbox' sandbox. When unchanged we omit the spread
+  // so applyKunRuntimePatch leaves the existing pair untouched.
+  const currentPermissionMode = kunToolPermissionModeFromSettings(runtime)
+  const selectedPermissionMode = selection.permissionMode && KUN_TOOL_PERMISSION_MODES.includes(selection.permissionMode)
+    ? selection.permissionMode
+    : currentPermissionMode
+  const permissionChanged = selectedPermissionMode !== currentPermissionMode
   const kunPatch: KunRuntimeSettingsPatchV1 = {
     providerId: selectedId,
     apiKey: '',
     baseUrl: '',
+    ...(permissionChanged ? kunToolPermissionModeSettings(selectedPermissionMode) : {}),
     ...(switchingProvider && selectedProfile?.models[0] ? { model: selectedProfile.models[0] } : {}),
     ...(wire.speechProviderId
       ? { speechToText: { enabled: true, providerId: wire.speechProviderId } }

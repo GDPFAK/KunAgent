@@ -1,0 +1,107 @@
+import { describe, expect, it } from 'vitest'
+import { CapabilityRegistry } from '../src/adapters/tool/capability-registry.js'
+import { LocalToolHost } from '../src/adapters/tool/local-tool-host.js'
+import {
+  createMcpSearchProvider,
+  type McpSearchCatalogRecord
+} from '../src/adapters/tool/mcp-tool-search.js'
+import { KunCapabilitiesConfig, McpServerConfig } from '../src/contracts/capabilities.js'
+import type { ToolHostContext } from '../src/ports/tool-host.js'
+
+const SEARCH_CONFIG = KunCapabilitiesConfig.parse({
+  mcp: { enabled: true, search: { enabled: true, mode: 'search' } }
+}).mcp.search
+
+const SERVER = McpServerConfig.parse({ transport: 'stdio', command: 'noop', trustScope: 'user' })
+
+function record(serverId: string, toolName: string, calls: string[]): McpSearchCatalogRecord {
+  return {
+    toolId: `${serverId}/${toolName}`,
+    serverId,
+    server: SERVER,
+    client: {
+      async callTool(input) {
+        calls.push(`${serverId}/${input.name}`)
+        return { ok: true }
+      }
+    },
+    descriptor: { name: toolName, description: `${toolName} on ${serverId}` },
+    normalizedName: `mcp_${serverId}_${toolName}`,
+    policy: 'auto'
+  }
+}
+
+function ctx(overrides: Partial<ToolHostContext> = {}): ToolHostContext {
+  return {
+    threadId: 't',
+    turnId: 'u',
+    workspace: '/ws',
+    approvalPolicy: 'auto',
+    abortSignal: new AbortController().signal,
+    awaitApproval: async () => 'allow',
+    ...overrides
+  }
+}
+
+describe('MCP search provider honors blockedProviderIds', () => {
+  it('hides a blocked server from mcp_search/mcp_describe/mcp_call but leaves others reachable', async () => {
+    const calls: string[] = []
+    const records = [record('github', 'create_issue', calls), record('files', 'read_file', calls)]
+    const host = new LocalToolHost({
+      registry: new CapabilityRegistry([
+        createMcpSearchProvider({
+          config: SEARCH_CONFIG,
+          state: { records },
+          refreshCatalog: async () => records,
+          isServerTrusted: () => true
+        })
+      ])
+    })
+    const blocked = ctx({ blockedProviderIds: ['mcp:github'] })
+
+    // mcp_search must not surface the blocked server's tool, and reports a
+    // reduced searched-tools count.
+    const search = await host.execute(
+      { callId: 'c0', toolName: 'mcp_search', arguments: { query: 'create issue github' } },
+      blocked
+    )
+    expect(search.item.kind).toBe('tool_result')
+    if (search.item.kind === 'tool_result') {
+      const output = search.item.output as { searchedTools: number; results: Array<{ serverId: string }> }
+      expect(output.searchedTools).toBe(1)
+      expect(output.results.every((r) => r.serverId !== 'github')).toBe(true)
+    }
+
+    // mcp_describe (schema disclosure) is refused for the blocked server.
+    const describeBlocked = await host.execute(
+      { callId: 'c1', toolName: 'mcp_describe', arguments: { toolId: 'github/create_issue' } },
+      blocked
+    )
+    expect(describeBlocked.item).toMatchObject({ kind: 'tool_result', isError: true })
+
+    // mcp_call (execution) is refused AND the underlying client is never invoked.
+    const callBlocked = await host.execute(
+      { callId: 'c2', toolName: 'mcp_call', arguments: { toolId: 'github/create_issue', arguments: {} } },
+      blocked
+    )
+    expect(callBlocked.item).toMatchObject({ kind: 'tool_result', isError: true })
+    expect(calls).toEqual([])
+
+    // A non-blocked server still works.
+    const callOk = await host.execute(
+      { callId: 'c3', toolName: 'mcp_call', arguments: { toolId: 'files/read_file', arguments: {} } },
+      blocked
+    )
+    expect(callOk.item).toMatchObject({ kind: 'tool_result', isError: false })
+    expect(calls).toEqual(['files/read_file'])
+
+    // Without a deny-list the blocked server is reachable again (the deny is
+    // per-turn, not baked into the catalog).
+    const callDefault = await host.execute(
+      { callId: 'c4', toolName: 'mcp_call', arguments: { toolId: 'github/create_issue', arguments: {} } },
+      ctx()
+    )
+    expect(callDefault.item).toMatchObject({ kind: 'tool_result', isError: false })
+    expect(calls).toEqual(['files/read_file', 'github/create_issue'])
+  })
+})

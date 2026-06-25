@@ -182,7 +182,7 @@ function settleInterruptedTurn(set: ChatStoreSet, get: ChatStoreGet): void {
 
 export function createMaintenanceActions(
   { set, get, sseAbortRef }: StoreActionContext
-): Pick<ChatState, 'renameActiveThread' | 'renameThread' | 'archiveThread' | 'compactActiveThread' | 'forkActiveThread' | 'forkThreadFromTurn' | 'setActiveThreadGoal' | 'setActiveThreadGoalStatus' | 'clearActiveThreadGoal' | 'setActiveThreadTodoStatus' | 'clearActiveThreadTodos' | 'syncPlanTodosFromMarkdown' | 'resumeSessionIntoThread' | 'deleteThread' | 'rewindAndResend' | 'rollbackWorkspaceToCheckpoint' | 'resolveApproval' | 'resolveUserInput' | 'interrupt'> {
+): Pick<ChatState, 'renameActiveThread' | 'renameThread' | 'pinThread' | 'archiveThread' | 'compactActiveThread' | 'forkActiveThread' | 'forkThreadFromTurn' | 'setActiveThreadGoal' | 'setActiveThreadGoalStatus' | 'clearActiveThreadGoal' | 'setActiveThreadTodoStatus' | 'clearActiveThreadTodos' | 'syncPlanTodosFromMarkdown' | 'resumeSessionIntoThread' | 'deleteThread' | 'rewindAndResend' | 'rollbackWorkspaceToCheckpoint' | 'resolveApproval' | 'resolveUserInput' | 'interrupt'> {
   const forkActiveThreadWithOptions = async (options: { turnId?: string } = {}): Promise<void> => {
     const { activeThreadId, busy, blocks } = get()
     if (!activeThreadId) return
@@ -248,10 +248,42 @@ export function createMaintenanceActions(
     }
     const p = getProvider()
     try {
-      await p.renameThread(targetId, nextTitle)
+      // Manual rename → lock the title so the backend LLM titler won't overwrite it.
+      await p.renameThread(targetId, nextTitle, false)
       set((s) => ({
         threads: s.threads.map((thread) =>
-          thread.id === targetId ? { ...thread, title: nextTitle } : thread
+          thread.id === targetId ? { ...thread, title: nextTitle, titleAuto: false } : thread
+        ),
+        error: null
+      }))
+      await get().refreshThreads()
+    } catch (e) {
+      set({
+        error: formatRuntimeError(e),
+        ...(shouldOpenSettingsForError(e)
+          ? { route: 'settings' as const, settingsSection: 'agents' as const }
+          : {})
+      })
+    }
+  },
+
+  pinThread: async (threadId, pinned) => {
+    const targetId = threadId.trim()
+    if (!targetId) return
+    if (get().runtimeConnection !== 'ready') {
+      set({ error: i18n.t('common:runtimeActionNeedsConnection') })
+      return
+    }
+    const p = getProvider()
+    if (typeof p.updateThreadPinned !== 'function') {
+      set({ error: i18n.t('common:runtimeFeatureUnsupported') })
+      return
+    }
+    try {
+      await p.updateThreadPinned(targetId, pinned)
+      set((s) => ({
+        threads: s.threads.map((thread) =>
+          thread.id === targetId ? { ...thread, pinned } : thread
         ),
         error: null
       }))
@@ -801,6 +833,13 @@ export function createMaintenanceActions(
       set({ error: i18n.t('common:runtimeFeatureUnsupported') })
       return
     }
+    set((s) => ({
+      blocks: s.blocks.map((b) =>
+        b.id === blockId && b.kind === 'approval' && b.status === 'pending'
+          ? { ...b, status: 'submitting' as const, errorMessage: undefined }
+          : b
+      )
+    }))
     try {
       await p.submitApprovalDecision(
         block.approvalId,
@@ -914,7 +953,15 @@ export function createMaintenanceActions(
           : {}),
         blocks: s.blocks.map((b) =>
           b.id === blockId && b.kind === 'user_input'
-            ? { ...b, status: 'error' as const, errorMessage: msg }
+            ? {
+                ...b,
+                status: 'error' as const,
+                errorMessage: msg,
+                // Keep the chosen answers on the record so the read-only bubble
+                // still echoes what the user picked when a submit RPC fails,
+                // mirroring the success / interrupt-fallback paths above.
+                ...(action.kind === 'submit' ? { answers: action.answers } : {})
+              }
             : b
         )
       }))

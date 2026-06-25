@@ -61,6 +61,7 @@ async function serveMain(argv: readonly string[]): Promise<number> {
   installServeCrashHandlers(() => handle)
   const server = await startKunServe(parsed.options)
   handle = server
+  await selfVerifyHealth(server.host, server.port)
   const info = server.runtime.info()
   const startupInfo = {
     service: 'kun',
@@ -110,6 +111,31 @@ async function hideMacosDockIfRunningAsElectron(): Promise<void> {
     // Best-effort: when the electron module is unavailable (pure Node
     // fallback), leave the dock alone. The user still gets host control.
   }
+}
+
+const SELF_VERIFY_TIMEOUT_MS = 5_000
+const SELF_VERIFY_POLL_MS = 100
+
+async function selfVerifyHealth(host: string, port: number): Promise<void> {
+  const url = `http://${host}:${port}/health`
+  const deadline = Date.now() + SELF_VERIFY_TIMEOUT_MS
+  while (Date.now() < deadline) {
+    try {
+      const res = await fetch(url, {
+        signal: AbortSignal.timeout(1_000)
+      })
+      if (res.ok) {
+        const body = (await res.json()) as { status?: string }
+        if (body?.status === 'ok') return
+      }
+    } catch {
+      // retry
+    }
+    await new Promise<void>((r) => setTimeout(r, SELF_VERIFY_POLL_MS))
+  }
+  process.stderr.write(
+    `[kun] warning: self-health-probe on http://${host}:${port}/health did not pass within ${SELF_VERIFY_TIMEOUT_MS}ms — proceeding anyway\n`
+  )
 }
 
 export async function main(argv: readonly string[]): Promise<number> {

@@ -4,6 +4,7 @@ import type { EditorInfo } from '@shared/editor'
 import type { GuiUpdateState } from '@shared/gui-update'
 import {
   ArrowUpCircle,
+  Bot,
   Check,
   ChevronDown,
   Code2,
@@ -30,6 +31,7 @@ export type RightPanelMode =
   | 'file'
   | 'plan'
   | 'sdd-ai'
+  | 'subagents'
   | null
 
 type Props = {
@@ -86,7 +88,8 @@ export function WorkbenchTopBar({
     { mode: 'todo' as const, label: t('rightPanelTodo'), icon: ListTodo },
     ...(planPanelEnabled ? [{ mode: 'plan' as const, label: t('rightPanelPlan'), icon: ClipboardList }] : []),
     { mode: 'changes' as const, label: t('rightPanelChanges'), icon: FileEdit },
-    { mode: 'browser' as const, label: t('rightPanelBrowser'), icon: Globe2 }
+    { mode: 'browser' as const, label: t('rightPanelBrowser'), icon: Globe2 },
+    { mode: 'subagents' as const, label: t('rightPanelSubagents'), icon: Bot }
   ]
   const selectedEditor = useMemo(
     () => editors.find((editor) => editor.id === selectedEditorId) ?? editors[0],

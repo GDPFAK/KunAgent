@@ -36,6 +36,17 @@ describe('format runtime error', () => {
     expect(formatRuntimeError(error)).toBe(i18n.t('common:runtimeFetchFailed'))
   })
 
+  it('classifies upstream model request failures separately from local runtime fetch failures', () => {
+    const error = new Error(JSON.stringify({
+      message: 'model request failed: fetch failed',
+      severity: 'error'
+    }))
+
+    expect(getRuntimeErrorCode(error)).toBe('model_request_failed')
+    expect(formatRuntimeError(error)).toBe(i18n.t('common:runtimeModelRequestFailed'))
+    expect(formatRuntimeError(error)).not.toBe(i18n.t('common:runtimeFetchFailed'))
+  })
+
   it('keeps raw provider messages visible in details even when the summary is the same text', () => {
     const message = `model request failed with status 400: ${JSON.stringify({
       error: {

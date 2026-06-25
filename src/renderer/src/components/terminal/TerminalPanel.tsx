@@ -590,7 +590,7 @@ export function TerminalPanel({ className = '', workspaceRoot, onCollapse, heigh
                         cancelRenameTab()
                       }
                     }}
-                    className="mx-2 min-w-0 flex-1 rounded-md border border-ds-border-muted bg-ds-card px-2 py-1 text-[12px] text-ds-ink outline-none focus:border-ds-accent"
+                    className="mx-2 min-w-0 flex-1 rounded-md border border-ds-border-muted bg-ds-card px-2 py-1 text-[12px] text-ds-ink outline-none focus:border-accent"
                     aria-label={t('terminalRenameTab')}
                   />
                 ) : (

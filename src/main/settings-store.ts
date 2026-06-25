@@ -6,6 +6,8 @@ import {
   applyKunRuntimePatch,
   kunSettingsEnvelope,
   DEFAULT_GUI_UPDATE_CHANNEL,
+  DEFAULT_CHECKPOINT_CLEANUP_ENABLED,
+  DEFAULT_CHECKPOINT_CLEANUP_INTERVAL_DAYS,
   DEFAULT_CURSOR_SPOTLIGHT_COLOR,
   DEFAULT_LOG_RETENTION_DAYS,
   DEFAULT_WRITE_WORKSPACE_ROOT,
@@ -25,7 +27,9 @@ import {
   mergeWriteSettings,
   defaultTerminalSettings,
   mergeTerminalSettings,
+  DEFAULT_UI_FONT_SCALE,
   normalizeAppBehaviorSettings,
+  normalizeCheckpointCleanupSettings,
   normalizeKeyboardShortcuts,
   migrateLegacyAppSettings,
   normalizeAppSettings,
@@ -201,7 +205,7 @@ const defaultSettings = (): AppSettingsV1 => ({
   version: 1,
   locale: 'en',
   theme: 'system',
-  uiFontScale: 'small',
+  uiFontScale: DEFAULT_UI_FONT_SCALE,
   cursorSpotlight: true,
   cursorSpotlightColor: DEFAULT_CURSOR_SPOTLIGHT_COLOR,
   provider: defaultModelProviderSettings(),
@@ -212,6 +216,10 @@ const defaultSettings = (): AppSettingsV1 => ({
   log: {
     enabled: true,
     retentionDays: DEFAULT_LOG_RETENTION_DAYS
+  },
+  checkpointCleanup: {
+    enabled: DEFAULT_CHECKPOINT_CLEANUP_ENABLED,
+    intervalDays: DEFAULT_CHECKPOINT_CLEANUP_INTERVAL_DAYS
   },
   notifications: {
     turnComplete: true
@@ -241,6 +249,10 @@ function buildMergedSettings(parsed: Partial<AppSettingsV1>): AppSettingsV1 {
       mergeKunRuntimeSettings(getKunRuntimeSettings(defaults), migrated.agents?.kun)
     ),
     log: { ...defaults.log, ...migrated.log },
+    checkpointCleanup: normalizeCheckpointCleanupSettings({
+      ...defaults.checkpointCleanup,
+      ...migrated.checkpointCleanup
+    }),
     notifications: { ...defaults.notifications, ...migrated.notifications },
     appBehavior: mergeAppBehaviorSettings(defaults.appBehavior, migrated.appBehavior),
     keyboardShortcuts: normalizeKeyboardShortcuts(migrated.keyboardShortcuts),
@@ -426,6 +438,10 @@ export class JsonSettingsStore {
       ...restPatch,
       provider: mergeModelProviderSettings(cur.provider, providerPatch),
       log: { ...cur.log, ...(partial.log ?? {}) },
+      checkpointCleanup: normalizeCheckpointCleanupSettings({
+        ...cur.checkpointCleanup,
+        ...(partial.checkpointCleanup ?? {})
+      }),
       notifications: { ...cur.notifications, ...(partial.notifications ?? {}) },
       appBehavior: mergeAppBehaviorSettings(cur.appBehavior, partial.appBehavior),
       keyboardShortcuts: normalizeKeyboardShortcuts({

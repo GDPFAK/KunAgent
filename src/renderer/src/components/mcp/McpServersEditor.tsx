@@ -270,6 +270,17 @@ function McpServerCard({
               {commandError ? <FieldError message={commandError} /> : null}
             </label>
             <label className={labelClass}>
+              {t('mcpFormCwd')}
+              <input
+                value={server.cwd}
+                disabled={disabled}
+                placeholder={t('mcpFormCwdPlaceholder')}
+                onChange={(e) => onChange({ cwd: e.target.value })}
+                className={inputClass}
+              />
+              <span className="text-[11px] font-normal text-ds-faint">{t('mcpFormCwdHint')}</span>
+            </label>
+            <label className={labelClass}>
               {t('mcpFormArgs')}
               <textarea
                 value={server.args.join('\n')}

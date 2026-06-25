@@ -41,6 +41,7 @@ import {
   type ModelProviderModelProfilePatchV1,
   type ModelProviderModelProfileV1,
   type ModelProviderReasoningCapabilityV1,
+  type ModelReasoningEffort,
   type ModelProviderSettingsV1,
   type SpeechToTextProtocol,
   type TextToSpeechProtocol,
@@ -432,6 +433,11 @@ export function mergeKunRuntimeSettings(
   })
   const nextModelProfiles = normalizeKunModelProfiles(current.modelProfiles, patch?.modelProfiles)
   const nextPort = normalizeKunLocalPort(patch?.port ?? current.port, DEFAULT_KUN_PORT)
+  // Optional role/small-model slots (agents.kun.*). Patch wins when the key is
+  // present (even as empty string => clear); otherwise inherit current. Empty/
+  // whitespace strings are dropped so the field is omitted entirely.
+  const nextRoleModelSlots = mergeOptionalModelSlot(current, patch)
+  const nextRoleReasoningSlots = mergeOptionalReasoningSlot(current, patch)
   // NOTE: approvalPolicy/sandboxMode are merged through verbatim from the patch.
   // The unified 5-mode UI selector already resolves a mode to its concrete
   // {approvalPolicy, sandboxMode} pair via kunToolPermissionModeSettings before
@@ -440,7 +446,7 @@ export function mergeKunRuntimeSettings(
   // so round-tripping would silently rewrite valid non-UI values — e.g. demote
   // approvalPolicy 'never'/'suggest' to 'on-request', or escalate a 'read-only'/
   // 'external-sandbox' sandbox to 'danger-full-access' — on every settings merge.
-  return {
+  const merged: KunRuntimeSettingsV1 = {
     ...current,
     ...(patch ?? {}),
     port: nextPort,
@@ -458,8 +464,79 @@ export function mergeKunRuntimeSettings(
     modelProfiles: nextModelProfiles,
     memoryEnabled: patch?.memoryEnabled ?? current.memoryEnabled ?? false,
     computerUse: nextComputerUse,
-    quality: nextQuality
+    quality: nextQuality,
+    ...(patch?.subagents !== undefined
+      ? { subagents: patch.subagents }
+      : current.subagents !== undefined
+        ? { subagents: current.subagents }
+        : {})
   }
+  // Optional model slots are authoritative from mergeOptionalModelSlot: strip any
+  // verbatim copies leaked by the spreads above, then re-apply only the non-empty
+  // ones so a cleared (empty-string) patch value removes the field entirely.
+  for (const key of OPTIONAL_MODEL_SLOT_KEYS) delete merged[key]
+  for (const key of OPTIONAL_REASONING_SLOT_KEYS) delete merged[key]
+  return { ...merged, ...nextRoleModelSlots, ...nextRoleReasoningSlots }
+}
+
+const OPTIONAL_MODEL_SLOT_KEYS = [
+  'smallModel',
+  'smallModelProviderId',
+  'titleModel',
+  'titleProviderId',
+  'summaryModel',
+  'summaryProviderId',
+  'codeReviewModel',
+  'codeReviewProviderId'
+] as const
+
+type OptionalModelSlotKey = (typeof OPTIONAL_MODEL_SLOT_KEYS)[number]
+
+function mergeOptionalModelSlot(
+  current: KunRuntimeSettingsV1,
+  patch: KunRuntimeSettingsPatchV1 | undefined
+): Partial<Record<OptionalModelSlotKey, string>> {
+  const out: Partial<Record<OptionalModelSlotKey, string>> = {}
+  for (const key of OPTIONAL_MODEL_SLOT_KEYS) {
+    const source = patch && key in patch ? patch[key] : current[key]
+    const trimmed = typeof source === 'string' ? source.trim() : ''
+    if (trimmed) out[key] = trimmed
+  }
+  return out
+}
+
+// Per-role reasoning-depth slots (agents.kun.*ReasoningEffort). Validated against
+// the ModelReasoningEffort enum; default 'off' is omitted so the field stays absent
+// unless the user opts into a deeper level. Must be stripped + re-applied exactly
+// like the model slots to avoid settings-sync round-trip drift.
+const OPTIONAL_REASONING_SLOT_KEYS = [
+  'titleReasoningEffort',
+  'summaryReasoningEffort',
+  'codeReviewReasoningEffort'
+] as const
+
+type OptionalReasoningSlotKey = (typeof OPTIONAL_REASONING_SLOT_KEYS)[number]
+
+function mergeOptionalReasoningSlot(
+  current: KunRuntimeSettingsV1,
+  patch: KunRuntimeSettingsPatchV1 | undefined
+): Partial<Record<OptionalReasoningSlotKey, ModelReasoningEffort>> {
+  const out: Partial<Record<OptionalReasoningSlotKey, ModelReasoningEffort>> = {}
+  for (const key of OPTIONAL_REASONING_SLOT_KEYS) {
+    const source = patch && key in patch ? patch[key] : current[key]
+    const normalized = normalizeReasoningEffortOrUndefined(source)
+    // Omit 'off' (the default) and undefined so the field stays absent.
+    if (normalized && normalized !== 'off') out[key] = normalized
+  }
+  return out
+}
+
+function normalizeReasoningEffortOrUndefined(
+  value: unknown
+): ModelReasoningEffort | undefined {
+  if (typeof value !== 'string') return undefined
+  const trimmed = value.trim() as ModelReasoningEffort
+  return MODEL_REASONING_EFFORTS.includes(trimmed) ? trimmed : undefined
 }
 
 function normalizeKunImageGenerationSettings(
@@ -695,12 +772,16 @@ function normalizeKunContextCompactionSettings(
   return {
     defaultSoftThreshold,
     defaultHardThreshold: Math.max(defaultSoftThreshold, requestedHardThreshold),
-    summaryMode: input?.summaryMode === 'model' || input?.summaryMode === 'heuristic'
-      ? input.summaryMode
-      : defaults.summaryMode,
+    // Compaction is always model-based now (the heuristic fold survives only as
+    // a silent in-loop fallback when the model call fails). 'heuristic' is no
+    // longer a user-selectable mode, so any stored value coerces to 'model' —
+    // this self-heals stale 'heuristic' configs from the removed UI toggle.
+    summaryMode: 'model',
     summaryTimeoutMs: boundedPositiveInt(input?.summaryTimeoutMs, defaults.summaryTimeoutMs, 120_000),
     summaryMaxTokens: boundedPositiveInt(input?.summaryMaxTokens, defaults.summaryMaxTokens, 16_000),
-    summaryInputMaxBytes: boundedPositiveInt(input?.summaryInputMaxBytes, defaults.summaryInputMaxBytes, 8 * 1024 * 1024)
+    summaryInputMaxBytes: boundedPositiveInt(input?.summaryInputMaxBytes, defaults.summaryInputMaxBytes, 8 * 1024 * 1024),
+    ...(typeof input?.summaryModel === 'string' && input.summaryModel.trim() ? { summaryModel: input.summaryModel.trim() } : {}),
+    ...(typeof input?.summaryProviderId === 'string' && input.summaryProviderId.trim() ? { summaryProviderId: input.summaryProviderId.trim() } : {})
   }
 }
 
