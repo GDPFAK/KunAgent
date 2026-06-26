@@ -43,7 +43,7 @@
   "designDefaultDocTitle": "My design",
   "designDeleteDocument": "Delete design",
   "designRenameDocument": "Rename design",
-  "designDocEmpty": "No canvases in this design yet.",
+  "designDocEmpty": "No screens in this design yet. Describe what you want and the agent will create them on the canvas.",
   "designNewCanvas": "New design canvas",
   "designDraftsSection": "Design drafts",
   "designDraftsEmpty": "No HTML design drafts yet.",

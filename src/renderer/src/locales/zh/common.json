@@ -43,7 +43,7 @@
   "designDefaultDocTitle": "我的设计",
   "designDeleteDocument": "删除设计稿",
   "designRenameDocument": "重命名设计稿",
-  "designDocEmpty": "这个设计稿里还没有画布。",
+  "designDocEmpty": "这个设计稿里还没有 screen。描述需求后，agent 会在画布上创建。",
   "designNewCanvas": "新建设计画布",
   "designDraftsSection": "设计稿",
   "designDraftsEmpty": "还没有 HTML 设计稿。",

@@ -36,8 +36,6 @@ type Props = {
   onCodeOpen: () => void
   onWriteOpen: () => void
   onDesignOpen: () => void
-  /** Create a new SVG design canvas artifact. */
-  onNewCanvas: () => void
   onOpenSettings: (section?: SettingsRouteSection) => void
   onToggleTheme: () => void
 }
@@ -237,16 +235,17 @@ export function DesignSidebar({
     </ul>
   )
 
-  // 画布 (artifacts) of the active 设计稿: canvases/boards first, then HTML drafts.
+  // The board canvas is an implementation surface, so keep the tree focused on
+  // user-created drafts while exposing board layers below.
   const renderActiveDocBody = (): ReactElement => {
-    const items = [...grouped.canvas, ...grouped.html]
+    const items = grouped.html
     return (
       <div className="ml-3 mt-0.5 space-y-1 border-l border-[var(--ds-sidebar-row-ring)] pl-2">
         {items.length > 0 ? (
           renderArtifactRows(items)
-        ) : (
+        ) : activeArtifact?.kind !== 'canvas' ? (
           <div className="px-2.5 py-1.5 text-[12px] leading-5 text-ds-faint">{t('designDocEmpty')}</div>
-        )}
+        ) : null}
         {activeArtifact?.kind === 'canvas' ? (
           <section>
             <SidebarSectionHeader label={t('canvasLayersTitle')} />

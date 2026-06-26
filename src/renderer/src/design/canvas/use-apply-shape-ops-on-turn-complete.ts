@@ -8,13 +8,13 @@ import { isHtmlFrame } from './canvas-types'
 import { useDesignAssistantStore } from '../design-assistant-store'
 
 /**
- * Apply any ```shapeops``` blocks the chat agent emitted once a turn fully
- * completes. The `currentTurnId` non-null→null edge is the unambiguous
+ * Apply any `design_canvas` / legacy ```shapeops``` blocks the chat agent
+ * emitted once a turn fully completes. The `currentTurnId` non-null→null edge is the unambiguous
  * completion signal (set once per turn), so it sidesteps `busy` flicker.
  *
  * Used in both design mode (DesignCanvas canvas branch) and code mode
  * (CodeCanvasPanel) — wherever a CanvasViewport is rendered alongside a chat
- * thread that may emit shapeops.
+ * thread that may emit canvas operations.
  */
 export function useApplyShapeOpsOnTurnComplete(
   enabled: boolean,

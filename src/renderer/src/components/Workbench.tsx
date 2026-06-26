@@ -77,13 +77,11 @@ import { buildImplementDesignPrompt } from '../design/design-implement-prompt'
 import { createDesignArtifactId, type DesignArtifact } from '../design/design-types'
 import { formatDesignSystemMarkdown, hashDesignSystem } from '../design/design-context'
 import { canImplementDesignArtifact } from '../design/design-artifact-actions'
-import { createEmptyDocument, isHtmlFrame, type CanvasShape } from '../design/canvas/canvas-types'
+import { isHtmlFrame, type CanvasShape } from '../design/canvas/canvas-types'
 import {
-  createScreenFrameArtifact,
   ensureDesignBoardArtifact,
   findDesignBoardArtifact
 } from '../design/design-board'
-import { serializeCanvasDocument } from '../design/canvas/canvas-persistence'
 import { useCanvasShapeStore } from '../design/canvas/canvas-shape-store'
 import { useCanvasSelectionStore } from '../design/canvas/canvas-selection-store'
 import { snapshotCanvas } from '../design/canvas/canvas-snapshot'
@@ -1828,16 +1826,9 @@ export function Workbench(): ReactElement {
         target = 'canvas'
         canvasSnapshot = snapshotCanvas(canvasDoc, canvasSelectionIds)
       } else {
-        target = 'screen'
-        const screen = createScreenFrameArtifact({
-          boardArtifactId: boardArtifact.id,
-          brief: promptText
-        })
-        artifactRelativePath = screen.relativePath
-        htmlArtifactId = screen.artifactId
-        designNotesPath = screen.designMdPath
-        selectedFrame = screen.shape
-        useDesignWorkspaceStore.getState().setDesignIntentMode('modify')
+        target = 'canvas'
+        canvasSnapshot = snapshotCanvas(canvasDoc, new Set())
+        useDesignWorkspaceStore.getState().setDesignIntentMode('generate')
       }
       useDesignWorkspaceStore.getState().setActiveArtifact(boardArtifact.id)
 
@@ -2884,41 +2875,6 @@ export function Workbench(): ReactElement {
     openDesign()
   }
 
-  const createDesignCanvas = (): void => {
-    const designStore = useDesignWorkspaceStore.getState()
-    const designWorkspaceRoot = designStore.workspaceRoot || workspaceRoot
-    if (!designWorkspaceRoot) {
-      setError(t('workspaceRequiredToCreateThread'))
-      return
-    }
-    designStore.setWorkspaceRoot(designWorkspaceRoot)
-    const docId = designStore.ensureActiveDocument()
-    const artifactId = createDesignArtifactId()
-    const createdAt = new Date().toISOString()
-    const relativePath = `.kun-design/${docId}/${artifactId}/canvas.json`
-    void (async () => {
-      try {
-        await window.kunGui.writeWorkspaceFile({
-          path: relativePath,
-          workspaceRoot: designWorkspaceRoot,
-          content: serializeCanvasDocument(createEmptyDocument())
-        })
-      } catch {
-        // non-fatal
-      }
-      useDesignWorkspaceStore.getState().upsertArtifact({
-        id: artifactId,
-        kind: 'canvas',
-        title: t('designCanvasTitle'),
-        relativePath,
-        createdAt,
-        updatedAt: createdAt,
-        versions: [{ id: `${artifactId}-v1`, relativePath, createdAt, summary: '' }]
-      })
-    })()
-  }
-
-
   // Design → code spine: hand an approved design to the coding agent. Publishes
   // the shared design system to the workspace, then dispatches an implement turn
   // into a fresh code thread and records provenance for drift tracking.
@@ -3354,7 +3310,6 @@ export function Workbench(): ReactElement {
                 onCodeOpen={openCodeMode}
                 onWriteOpen={openWriteMode}
                 onDesignOpen={openDesignMode}
-                onNewCanvas={createDesignCanvas}
                 onOpenSettings={(section) => openSettings(section)}
                 onToggleTheme={toggleTheme}
               />

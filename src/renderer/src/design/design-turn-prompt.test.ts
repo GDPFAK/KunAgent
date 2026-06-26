@@ -170,7 +170,7 @@ describe('design turn prompt', () => {
     const canvasSnapshot = snapshotCanvas(doc, new Set([img.id]))
 
     // The user's real phrasing: ambiguous "把我的设计改成task" with the screenshot
-    // selected. It must edit the image, not emit add-screen and build HTML.
+    // selected. It must edit the image, not create a new screen and build HTML.
     const prompt = buildDesignTurnPrompt({
       target: 'canvas',
       mode: 'text',
@@ -180,17 +180,25 @@ describe('design turn prompt', () => {
       canvasSnapshot
     })
 
-    // The intent-triage lanes are hoisted ABOVE the add-screen vocabulary so the
-    // model commits to the image-edit lane before add-screen can pre-empt it.
+    // The intent-triage lanes are hoisted ABOVE the add_screen vocabulary so the
+    // model commits to the image-edit lane before screen creation can pre-empt it.
     const lanesAt = prompt.indexOf('FIRST classify the request')
-    const addScreenAt = prompt.indexOf('"op": "add-screen"')
+    const addScreenAt = prompt.indexOf('"action": "add_screen"')
     expect(lanesAt).toBeGreaterThanOrEqual(0)
     expect(addScreenAt).toBeGreaterThan(lanesAt)
 
     expect(prompt).toContain('EDIT AN EXISTING IMAGE')
-    expect(prompt).toContain('MUST NOT use `add-screen`')
+    expect(prompt).toContain('MUST NOT use `add_screen` / `add-screen`')
     expect(prompt).toContain('把这张图改成…')
-    expect(prompt).toContain('do NOT `add-screen` — edit that image instead')
+    expect(prompt).toContain('do NOT `add_screen` / `add-screen` — edit that image instead')
+  })
+
+  it('canvas turn prompt frames screen creation as a design_canvas tool call', () => {
+    const prompt = buildCodeCanvasTurnPrompt({ workspaceRoot: '/ws' })
+    expect(prompt).toContain('calling the `design_canvas` tool')
+    expect(prompt).toContain('Do not ask the user to manually create a canvas first')
+    expect(prompt).toContain('{ "action": "add_screen"')
+    expect(prompt).toContain('```design_canvas')
   })
 
   it('canvas turn prompt keeps empty holder rule intact (no imageUrl leaked, reference rule still gated)', () => {

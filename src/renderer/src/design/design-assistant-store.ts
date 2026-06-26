@@ -36,7 +36,7 @@ type DesignAssistantState = {
     opts?: { model?: string; reasoningEffort?: string }
   ) => Promise<void>
   appendBlock: (block: DesignMessageBlock) => void
-  /** Parse an assistant message for ```shapeops``` JSON blocks and execute them. */
+  /** Parse an assistant message for design_canvas / legacy shapeops blocks and execute them. */
   applyAiShapeOps: (text: string) => { affectedIds: string[]; errors: OpError[] }
   /** Glow + camera-focus the shapes an AI turn just touched. Safe to call from any apply path. */
   markAiAffected: (ids: string[]) => void

@@ -41,8 +41,8 @@ export function DesignCanvas({
     void ensureDesignBoardArtifact(workspaceRoot)
   }, [workspaceRoot, artifacts.length])
 
-  // Register the factory that add-screen ShapeOps and the Screen tool use to
-  // create a linked HTML artifact (returns the new artifact id synchronously).
+  // Register the factory that design_canvas/add-screen calls and the Screen
+  // tool use to create a linked HTML artifact (returns the new artifact id synchronously).
   useEffect(() => {
     if (!boardArtifact) return
     setScreenArtifactFactory((name: string) => {
