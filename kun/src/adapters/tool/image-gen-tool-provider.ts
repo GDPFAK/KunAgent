@@ -189,7 +189,8 @@ export function buildImageGenToolProviders(
         ? 'Optionally pass reference_image_paths (image files inside the workspace) to guide the result (image-to-image).'
         : '',
       `The generated image is saved under ${GENERATED_IMAGE_DIR}/ in the workspace and returned as an inline attachment preview.`,
-      'Generates exactly one image per call; call again for variations.'
+      'Generates exactly one image per call; call again for variations.',
+      'If you can see images, the generated result is shown back to you — inspect it and call again to refine if it does not match what was asked.'
     ].filter(Boolean).join(' '),
     inputSchema: {
       type: 'object',

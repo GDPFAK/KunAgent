@@ -1,5 +1,5 @@
 import { isAbsolute, join, relative, resolve } from 'node:path'
-import { mkdir, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { randomBytes } from 'node:crypto'
 import type { ModelClient, ModelRequest, ModelToolSpec } from '../ports/model-client.js'
 import type { AgentSdkRuntime } from '../runtime/agent-sdk/agent-sdk-runtime.js'
@@ -62,6 +62,7 @@ import type { ThreadGoal, ThreadTodoList } from '../contracts/threads.js'
 import { modelCapabilitiesForModel, type ContextCompactionConfig } from './model-context-profile.js'
 import type { SkillRuntime } from '../skills/skill-runtime.js'
 import type { AttachmentContent, AttachmentStore } from '../attachments/attachment-store.js'
+import { detectImage } from '../attachments/attachment-store.js'
 import type { ModelInputAttachment, ModelTextAttachmentFallback } from '../ports/model-client.js'
 import type { MemoryStore } from '../memory/memory-store.js'
 import {
@@ -76,7 +77,12 @@ import {
   type TokenEconomyConfig
 } from './token-economy.js'
 import { applyRequestHistoryHygiene } from './request-history-hygiene.js'
-import { capToolResultImages } from './tool-result-image.js'
+import {
+  capToolResultImages,
+  rehydrateGeneratedImagesForForward,
+  MAX_FORWARDED_GENERATED_IMAGES,
+  type ToolResultImage
+} from './tool-result-image.js'
 import { estimateModelRequestInputTokens, estimateRequestOverheadTokens } from './model-request-estimator.js'
 import {
   recentAutoRouterContext,
@@ -1457,6 +1463,15 @@ export class AgentLoop {
     await this.recordPipelineStage(threadId, turnId, 'input_compressed', {
       historyItems: history.length
     })
+    // Forward the just-generated image(s) back to a vision-capable model so it can
+    // self-review and regenerate if the result is off. Bytes come from the
+    // already-persisted attachment/file; the persisted tool output keeps NO base64
+    // (only this transient request copy carries it).
+    const forwardHistory = await rehydrateGeneratedImagesForForward(
+      history,
+      (output) => this.resolveGeneratedImageForForward(output, threadId, thread?.workspace),
+      MAX_FORWARDED_GENERATED_IMAGES
+    )
     const runtimeContextInstruction = shouldInjectInitialRuntimeContext({
       stepIndex,
       turnId,
@@ -1512,7 +1527,7 @@ export class AgentLoop {
       ...(planTurnActive ? { modeInstruction: PLAN_MODE_INSTRUCTION } : {}),
       ...(contextInstructions.length ? { contextInstructions } : {}),
       prefix: this.opts.prefix.fewShots,
-      history: capToolResultImages(history, MAX_FORWARDED_TOOL_IMAGES),
+      history: capToolResultImages(forwardHistory, MAX_FORWARDED_TOOL_IMAGES),
       ...(attachments.imageAttachments.length ? { attachments: attachments.imageAttachments } : {}),
       ...(attachments.textFallbacks.length ? { attachmentTextFallbacks: attachments.textFallbacks } : {}),
       tools: effectiveToolSpecs,
@@ -2949,6 +2964,61 @@ export class AgentLoop {
       ))
     }
     return { imageAttachments, textFallbacks }
+  }
+
+  /**
+   * Resolve the bytes of a generate_image result for transient model forwarding:
+   * prefer the attachment the tool already created (authorized for this thread),
+   * fall back to reading the saved file. Returns null (no image forwarded) on any
+   * miss so a scope/auth error degrades gracefully rather than throwing.
+   */
+  private async resolveGeneratedImageForForward(
+    output: Record<string, unknown>,
+    threadId: string,
+    workspace: string | undefined
+  ): Promise<ToolResultImage | null> {
+    const fromBytes = (data: Buffer, fallbackMime?: string): ToolResultImage => {
+      const detected = detectImage(data)
+      return {
+        mimeType: detected?.mimeType ?? fallbackMime ?? 'image/png',
+        dataBase64: data.toString('base64'),
+        ...(detected?.width !== undefined ? { width: detected.width } : {}),
+        ...(detected?.height !== undefined ? { height: detected.height } : {})
+      }
+    }
+    const attachments = Array.isArray(output.attachments) ? output.attachments : []
+    const firstAttachment = attachments[0]
+    const attachmentId =
+      firstAttachment && typeof firstAttachment === 'object' &&
+      typeof (firstAttachment as { id?: unknown }).id === 'string'
+        ? (firstAttachment as { id: string }).id
+        : ''
+    if (attachmentId && this.opts.attachmentStore) {
+      try {
+        const content = await this.opts.attachmentStore.resolveContent(attachmentId, {
+          threadId,
+          ...(workspace ? { workspace } : {})
+        })
+        return fromBytes(content.data, content.mimeType)
+      } catch {
+        // fall through to reading the file on disk
+      }
+    }
+    const files = Array.isArray(output.files) ? output.files : []
+    const firstFile = files[0]
+    const absolutePath =
+      firstFile && typeof firstFile === 'object' &&
+      typeof (firstFile as { absolutePath?: unknown }).absolutePath === 'string'
+        ? (firstFile as { absolutePath: string }).absolutePath
+        : ''
+    if (absolutePath) {
+      try {
+        return fromBytes(await readFile(absolutePath))
+      } catch {
+        // no-op
+      }
+    }
+    return null
   }
 
   private async retrieveMemories(input: {
