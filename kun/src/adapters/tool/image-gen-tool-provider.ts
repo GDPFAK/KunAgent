@@ -138,6 +138,19 @@ function parseRatio(aspectRatio: string | undefined): { w: number; h: number } |
   return { w, h }
 }
 
+/**
+ * Whether the configured image protocol performs a GENUINE image-to-image edit
+ * (real `/images/edits`). Allowlist on purpose: a new protocol defaults to "no
+ * edit" until its edit path is verified. MiniMax's reference feature is
+ * `subject_reference` = character/identity preservation, NOT a general edit, so
+ * routing canvas "edit this image" requests through it silently produces a fresh
+ * (wrong) generation — better to fail loudly and have the agent retry without
+ * references. `undefined` = the default factory path (OpenAI-compat /images/edits).
+ */
+export function protocolSupportsImageEdit(protocol: string | undefined): boolean {
+  return protocol === undefined || protocol === 'openai-images'
+}
+
 export function buildImageGenToolProviders(
   config: KunCapabilitiesConfig['imageGen'] | undefined,
   options: ImageGenToolProviderOptions = {}
@@ -163,27 +176,37 @@ export function buildImageGenToolProviders(
 
   const client = options.client ?? createImageGenClient(config)
   const model = config.model!
+  // Only advertise (and accept) image-to-image when the active protocol can truly
+  // edit; otherwise the param is dropped so the model never tries a reference edit
+  // the provider would silently mishandle.
+  const supportsEdit = protocolSupportsImageEdit(config.protocol)
 
   const tool = LocalToolHost.defineTool({
     name: 'generate_image',
     description: [
       'Generate an image from a text prompt using the configured image provider.',
-      'Optionally pass reference_image_paths (image files inside the workspace) to guide the result (image-to-image).',
+      supportsEdit
+        ? 'Optionally pass reference_image_paths (image files inside the workspace) to guide the result (image-to-image).'
+        : '',
       `The generated image is saved under ${GENERATED_IMAGE_DIR}/ in the workspace and returned as an inline attachment preview.`,
       'Generates exactly one image per call; call again for variations.'
-    ].join(' '),
+    ].filter(Boolean).join(' '),
     inputSchema: {
       type: 'object',
       properties: {
         prompt: { type: 'string', description: 'Detailed description of the image to generate' },
         aspect_ratio: { type: 'string', enum: [...ASPECT_RATIOS] },
         image_size: { type: 'string', enum: Object.keys(SIZE_TIERS), description: 'Resolution tier, defaults to 1K' },
-        reference_image_paths: {
-          type: 'array',
-          items: { type: 'string' },
-          maxItems: config.maxReferenceImages,
-          description: 'Workspace-relative paths of reference images for image-to-image guidance'
-        }
+        ...(supportsEdit
+          ? {
+              reference_image_paths: {
+                type: 'array',
+                items: { type: 'string' },
+                maxItems: config.maxReferenceImages,
+                description: 'Workspace-relative paths of reference images for image-to-image guidance'
+              }
+            }
+          : {})
       },
       required: ['prompt'],
       additionalProperties: false
@@ -206,6 +229,16 @@ export function buildImageGenToolProviders(
       if ('error' in references) return references.error
 
       const endpoint = references.images.length > 0 ? 'edits' : 'generations'
+      // Fail loudly BEFORE any network call when the active provider can't truly
+      // edit (e.g. MiniMax, whose subject_reference is identity preservation, not
+      // a general edit) — a silently-wrong fresh generation is worse than an error
+      // the agent recovers from by retrying without references.
+      if (endpoint === 'edits' && !supportsEdit) {
+        return toolError(
+          'edits_unsupported',
+          'the active image provider does not support editing an existing image (its reference feature is subject/identity guidance, not a faithful edit); retry generate_image WITHOUT reference_image_paths'
+        )
+      }
       let image: GeneratedImage
       try {
         const request = {
