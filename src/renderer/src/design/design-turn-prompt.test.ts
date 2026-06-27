@@ -246,6 +246,31 @@ describe('design turn prompt', () => {
     expect(prompt).not.toContain('IMPORTANT PRIOR')
   })
 
+  it('lists multiple selected shapes explicitly in the canvas prompt', () => {
+    const doc = createEmptyDocument()
+    const root = doc.objects[doc.rootId]
+    const a = createDefaultShape('rect', 0, 0)
+    a.name = 'Card A'
+    const b = createDefaultShape('text', 0, 0)
+    b.name = 'Label B'
+    doc.objects[a.id] = { ...a, parentId: doc.rootId }
+    doc.objects[b.id] = { ...b, parentId: doc.rootId }
+    doc.objects[doc.rootId] = { ...root, children: [a.id, b.id] }
+    const canvasSnapshot = snapshotCanvas(doc, new Set([a.id, b.id]))
+
+    const prompt = buildDesignTurnPrompt({
+      target: 'canvas',
+      mode: 'text',
+      text: 'align these',
+      artifactRelativePath: '.kun-design/board/canvas.json',
+      workspaceRoot: '/ws',
+      canvasSnapshot
+    })
+    expect(prompt).toContain('2 shapes selected')
+    expect(prompt).toContain('Card A')
+    expect(prompt).toContain('Label B')
+  })
+
   it('renders previous canvas-op errors so the agent can self-correct', () => {
     const prompt = buildDesignTurnPrompt({
       target: 'canvas',

@@ -345,6 +345,23 @@ function deriveSelectedImageEditHint(
   return null
 }
 
+/**
+ * When the user has selected MULTIPLE shapes, call them out explicitly so
+ * "align/group/restyle these" has a referent — otherwise the model must scan the
+ * snapshot JSON for `selected:true` flags. (One selected shape is already covered
+ * by the edit-image prior and the snapshot flag.)
+ */
+function formatSelectedShapesLines(snapshot: CanvasSnapshot | undefined): string[] {
+  if (!snapshot) return []
+  const selected = snapshot.shapes.filter((s) => s.selected)
+  if (selected.length < 2) return []
+  return [
+    `The user has ${selected.length} shapes selected — treat "these" / "them" / "选中的" as exactly these:`,
+    ...selected.slice(0, 12).map((s) => `- ${s.name} [${s.type}] id ${s.id}`),
+    ''
+  ]
+}
+
 function formatPreviousOpErrorLines(errors: OpError[] | undefined): string[] {
   if (!errors || errors.length === 0) return []
   const rows = errors
@@ -368,12 +385,14 @@ function buildCanvasTurnPrompt(options: DesignTurnOptions): string {
         ''
       ]
     : []
+  const selectionLines = formatSelectedShapesLines(snapshot)
   const lines = [
     'Kun is asking you to operate the design canvas by calling the `design_canvas` tool.',
     `Workspace: ${options.workspaceRoot}`,
     '',
     ...errorLines,
     ...editHintLines,
+    ...selectionLines,
     'How to respond:',
     '- Reply with a short plain-text plan (1-3 sentences) describing what you will do.',
     '- Then emit one or more ` ```design_canvas ` fenced JSON tool-call blocks. Do not ask the user to manually create a canvas first.',
