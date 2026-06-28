@@ -41,3 +41,27 @@ export function isBackgroundShellNoticeSource(
 ): messageSource is 'background_shell' {
   return messageSource === 'background_shell'
 }
+
+export type ClientUserMessageSource = 'background_shell'
+
+/** Client-only hint derived from persisted user_message text, not from server metadata. */
+export function inferClientUserMessageSource(text: string): ClientUserMessageSource | undefined {
+  return parseBackgroundShellCompletionNotice(text) ? 'background_shell' : undefined
+}
+
+export function applyClientUserMessageSourceMeta(
+  meta: Record<string, unknown>,
+  text: string
+): void {
+  const messageSource = inferClientUserMessageSource(text)
+  if (messageSource) meta.messageSource = messageSource
+  else delete meta.messageSource
+}
+
+export function isBackgroundShellNoticeUserMessage(input: {
+  text: string
+  meta?: Record<string, unknown> | null
+}): boolean {
+  if (isBackgroundShellNoticeSource(input.meta?.messageSource)) return true
+  return inferClientUserMessageSource(input.text) === 'background_shell'
+}

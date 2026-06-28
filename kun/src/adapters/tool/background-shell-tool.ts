@@ -70,7 +70,6 @@ export function createBackgroundShellTool(options: BackgroundShellToolOptions = 
                 ...(session.finishedAt ? { finished_at: session.finishedAt } : {}),
                 exit_code: session.exitCode,
                 output: session.output,
-                output_preview: session.output,
                 ...(session.outputTruncated ? { output_truncated: true } : {}),
                 ...(session.outputFilePath ? { output_file: session.outputFilePath } : {}),
                 detached: session.detached

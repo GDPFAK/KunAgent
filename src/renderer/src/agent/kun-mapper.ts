@@ -21,6 +21,7 @@ import type {
   UserInputQuestion
 } from './types'
 import { redactSecrets, redactSecretText } from '@shared/secret-redaction'
+import { applyClientUserMessageSourceMeta } from '@shared/background-shell-notice'
 import type {
   CoreChildRuntimeMetadataJson,
   CoreRuntimeEventJson,
@@ -296,9 +297,7 @@ function applyRuntimeDisclosureMeta(
   if (displayText && displayText !== item.text?.trim()) {
     meta.displayText = displayText
   }
-  if (item.messageSource === 'background_shell') {
-    meta.messageSource = 'background_shell'
-  }
+  applyClientUserMessageSourceMeta(meta, item.text ?? '')
   if (attachmentIds) meta.attachmentIds = attachmentIds
   if (fileReferences) meta.fileReferences = fileReferences
   if (activeSkillIds) meta.activeSkillIds = activeSkillIds
@@ -525,8 +524,13 @@ function toolBlockFromItem(item: CoreTurnItemJson, child?: CoreChildRuntimeMetad
   const generatedFiles = extractToolGeneratedFiles(item)
   if (generatedFiles) meta.generatedFiles = generatedFiles
   const presentation = inferToolPresentation(item)
+  const payload = payloadFor(item)
   if (presentation.command) meta.command = presentation.command
-  if (presentation.toolKind === 'command_execution') applyCommandResultMeta(meta, item)
+  if (presentation.toolKind === 'command_execution' || item.toolName === 'background_shell') {
+    applyCommandResultMeta(meta, item)
+  }
+  const action = readStructuredString(payload, 'action')
+  if (action) meta.action = action
   if (isPlan) {
     const plan = extractPlanMetadata(item)
     if (plan) meta.plan = plan

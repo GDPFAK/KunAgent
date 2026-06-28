@@ -3,7 +3,7 @@ import { memo, useEffect, useMemo, useRef, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { useTranslation } from 'react-i18next'
-import { ArrowDown, Check, ChevronDown, ChevronRight, Copy, Download, File, FileEdit, GitFork, ImageIcon, Loader2, MessageSquareQuote, PencilLine, RotateCcw, SquareTerminal, Terminal, Video, Wrench } from 'lucide-react'
+import { ArrowDown, Check, ChevronDown, ChevronRight, Copy, Download, File, FileEdit, GitFork, ImageIcon, Loader2, MessageSquareQuote, PencilLine, RotateCcw, Terminal, Video, Wrench } from 'lucide-react'
 import type { AttachmentReference, ChatBlock, GeneratedFileReference, RuntimeDisclosureMetadata, ToolBlock, UserFileReference, UserInputAnswer } from '../../agent/types'
 import { extractUnifiedDiffText } from '../../lib/diff-stats'
 import { useChatStore } from '../../store/chat-store'
@@ -17,7 +17,7 @@ import { DiffView } from '../DiffView'
 import { AssistantMarkdown } from './AssistantMarkdown'
 import { ImagePreviewLightbox } from './ImagePreviewLightbox'
 import { ModelMetaTag, WritePromptMetaDisclosure } from './message-timeline-cards'
-import { readNumber, formatDuration, formatToolTitle } from './message-timeline-tools'
+import { readNumber, formatDuration, formatToolTitle, summarizeBackgroundShellToolBlock } from './message-timeline-tools'
 import { answersByQuestionId, shouldShowQuestionHeader } from './user-input-panel-logic'
 
 const COPY_FEEDBACK_RESET_MS = 1600
@@ -37,33 +37,49 @@ function BackgroundShellNoticeBubble({
     t('backgroundShellNotice.title', { defaultValue: 'Background shell completed' })
   const outputPreview = parsed?.outputPreview ?? ''
   const canExpandOutput = outputPreview.length > 180
+  const exitCodeTone =
+    parsed && parsed.exitCode === 0
+      ? 'border-emerald-500/25 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300'
+      : 'border-orange-400/30 bg-orange-500/10 text-orange-800 dark:text-orange-200'
 
   return (
-    <div className={nested ? 'min-w-0' : 'ds-user-message'}>
-      <div className="rounded-[18px] border border-ds-border bg-ds-subtle/80 px-3.5 py-3 text-ds-muted shadow-sm">
-        <div className="flex items-start gap-2.5">
-          <SquareTerminal className="mt-0.5 h-4 w-4 shrink-0 text-accent" strokeWidth={1.8} />
-          <div className="min-w-0 flex-1">
+    <div className={nested ? 'min-w-0' : 'flex w-full justify-start'}>
+      <div className="w-full max-w-[min(640px,calc(100vw-3rem))] rounded-[18px] border border-accent/25 bg-[linear-gradient(180deg,rgba(79,124,255,0.06),rgba(79,124,255,0.1))] px-3.5 py-3 text-ds-muted shadow-sm">
+        <div className="mb-2 flex flex-wrap items-center gap-2">
+          <span className="rounded-full border border-accent/25 bg-accent/10 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-accent">
+            {t('backgroundShellNotice.kindLabel', { defaultValue: 'Background callback' })}
+          </span>
+          {parsed ? (
+            <>
+              <span
+                className="inline-flex items-center gap-1 rounded-full border border-ds-border/80 bg-ds-card/70 px-2 py-0.5 font-mono text-[11px] text-ds-ink"
+                title={parsed.sessionId}
+              >
+                <span className="font-sans font-medium text-ds-muted">
+                  {t('backgroundShellNotice.sessionId', { defaultValue: 'Session' })}
+                </span>
+                <span>{parsed.sessionId}</span>
+              </span>
+              <span
+                className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 font-mono text-[11px] ${exitCodeTone}`}
+              >
+                <span className="font-sans font-medium opacity-80">
+                  {t('backgroundShellNotice.exitCode', { defaultValue: 'Exit code' })}
+                </span>
+                <span>{parsed.exitCode}</span>
+              </span>
+            </>
+          ) : null}
+        </div>
+        <div className="min-w-0">
             <p className="text-[13px] font-medium text-ds-ink">{title}</p>
             {parsed ? (
               <dl className="mt-2 space-y-1.5 text-[12.5px] leading-5">
                 <div className="flex flex-wrap gap-x-2">
                   <dt className="font-medium text-ds-muted">
-                    {t('backgroundShellNotice.sessionId', { defaultValue: 'Session' })}
-                  </dt>
-                  <dd className="font-mono text-ds-ink">{parsed.sessionId}</dd>
-                </div>
-                <div className="flex flex-wrap gap-x-2">
-                  <dt className="font-medium text-ds-muted">
                     {t('backgroundShellNotice.command', { defaultValue: 'Command' })}
                   </dt>
                   <dd className="min-w-0 break-all font-mono text-ds-ink">{parsed.command}</dd>
-                </div>
-                <div className="flex flex-wrap gap-x-2">
-                  <dt className="font-medium text-ds-muted">
-                    {t('backgroundShellNotice.exitCode', { defaultValue: 'Exit code' })}
-                  </dt>
-                  <dd className="font-mono text-ds-ink">{parsed.exitCode}</dd>
                 </div>
               </dl>
             ) : null}
@@ -102,7 +118,6 @@ function BackgroundShellNoticeBubble({
                 {t('backgroundShellNotice.outputFile', { defaultValue: 'Full output file' })}: {parsed.outputFile}
               </p>
             ) : null}
-          </div>
         </div>
       </div>
     </div>
@@ -939,16 +954,18 @@ function metaSources(meta: Record<string, unknown> | undefined): Array<{ title?:
 function RuntimeMetaChips({
   meta,
   align = 'left',
-  hideAttachments = false
+  hideAttachments = false,
+  hideTurnDisclosure = false
 }: {
   meta?: Record<string, unknown>
   align?: 'left' | 'right'
   hideAttachments?: boolean
+  hideTurnDisclosure?: boolean
 }): ReactElement | null {
   const { t } = useTranslation('common')
-  const attachmentIds = metaStringArray(meta, 'attachmentIds')
-  const activeSkillIds = metaStringArray(meta, 'activeSkillIds')
-  const injectedMemoryIds = metaStringArray(meta, 'injectedMemoryIds')
+  const attachmentIds = hideTurnDisclosure || hideAttachments ? [] : metaStringArray(meta, 'attachmentIds')
+  const activeSkillIds = hideTurnDisclosure ? [] : metaStringArray(meta, 'activeSkillIds')
+  const injectedMemoryIds = hideTurnDisclosure ? [] : metaStringArray(meta, 'injectedMemoryIds')
   const sources = metaSources(meta)
   const child = meta?.child && typeof meta.child === 'object' ? meta.child as Record<string, unknown> : null
   const childLabel =
@@ -1527,13 +1544,21 @@ function ToolEntry({ block, nested = false }: { block: ToolBlock; nested?: boole
         ? 'border-amber-300/80 bg-amber-500/10 text-amber-950 dark:border-amber-800/50 dark:bg-amber-950/30 dark:text-amber-100'
         : 'border-ds-border bg-ds-subtle text-ds-ink'
 
+  const toolName = typeof block.meta?.toolName === 'string' ? block.meta.toolName.trim() : ''
+  const displaySummary =
+    toolName === 'background_shell'
+      ? summarizeBackgroundShellToolBlock(block, t)
+      : block.summary
+
   const Icon = block.toolKind === 'file_change' ? FileEdit : block.toolKind === 'command_execution' ? Terminal : Wrench
   const kindLabel =
-    block.toolKind === 'file_change'
-      ? t('toolKindFile')
-      : block.toolKind === 'command_execution'
-        ? t('toolKindCommand')
-        : t('toolKindTool')
+    toolName === 'background_shell'
+      ? t('toolBuiltinBackgroundShell', { defaultValue: 'Background shell' })
+      : block.toolKind === 'file_change'
+        ? t('toolKindFile')
+        : block.toolKind === 'command_execution'
+          ? t('toolKindCommand')
+          : t('toolKindTool')
 
   const exitCode = readNumber(block.meta, 'exit_code')
   const durationMs = readNumber(block.meta, 'duration_ms')
@@ -1593,9 +1618,9 @@ function ToolEntry({ block, nested = false }: { block: ToolBlock; nested?: boole
             {block.filePath ? (
               <span className="font-mono text-[12px] opacity-90">{block.filePath} — </span>
             ) : null}
-            <span>{block.summary}</span>
+            <span>{displaySummary}</span>
           </div>
-          <RuntimeMetaChips meta={block.meta} />
+          <RuntimeMetaChips meta={block.meta} hideTurnDisclosure />
         </div>
         {canExpand ? (
           effectiveOpen ? (

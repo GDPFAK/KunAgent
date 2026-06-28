@@ -51,7 +51,7 @@ type BackgroundShellOverlayProps = {
 }
 
 export function BackgroundShellOverlay({
-  runtimeReady = false
+  runtimeReady = true
 }: BackgroundShellOverlayProps): ReactElement | null {
   const { t } = useTranslation('chat')
   const [open, setOpen] = useState(false)
@@ -90,7 +90,7 @@ export function BackgroundShellOverlay({
   }
 
   return (
-    <div className="pointer-events-none absolute bottom-[calc(100%+0.75rem)] right-0 z-30 flex max-w-[min(100vw-1rem,28rem)] flex-col items-end gap-2">
+    <div className="pointer-events-none flex w-full max-w-[min(100vw-2rem,28rem)] flex-col items-center gap-2">
       {open ? (
         <div className="pointer-events-auto w-full overflow-hidden rounded-2xl border border-ds-border-muted bg-ds-card/95 shadow-xl backdrop-blur-md">
           <div className="flex items-center justify-between border-b border-ds-border-muted px-3 py-2">

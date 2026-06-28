@@ -1,5 +1,5 @@
 import type { ChatBlock } from '../../agent/types'
-import { isBackgroundShellNoticeSource } from '@shared/background-shell-notice'
+import { isBackgroundShellNoticeUserMessage } from '@shared/background-shell-notice'
 
 export type Turn = {
   user?: Extract<ChatBlock, { kind: 'user' }>
@@ -7,7 +7,7 @@ export type Turn = {
 }
 
 export function isBackgroundShellNoticeBlock(block: ChatBlock): boolean {
-  return block.kind === 'user' && isBackgroundShellNoticeSource(block.meta?.messageSource)
+  return block.kind === 'user' && isBackgroundShellNoticeUserMessage(block)
 }
 
 export function groupTurns(blocks: ChatBlock[]): Turn[] {

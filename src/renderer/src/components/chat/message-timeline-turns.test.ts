@@ -33,8 +33,8 @@ describe('message timeline turns', () => {
     const notice: ChatBlock = {
       kind: 'user',
       id: 'notice_1',
-      text: '<background_shell_completed><session_id>abcd1234</session_id></background_shell_completed>',
-      meta: { messageSource: 'background_shell', displayText: 'Background shell abcd1234 completed' }
+      text: '<background_shell_completed><session_id>abcd1234</session_id><command>npm run build</command><exit_code>0</exit_code><output_preview>ok</output_preview><hint>read output</hint></background_shell_completed>',
+      meta: { displayText: 'Background shell abcd1234 completed', messageSource: 'background_shell' }
     }
     const blocks: ChatBlock[] = [
       { kind: 'user', id: 'user_1', text: 'Run build in background' },
@@ -48,5 +48,24 @@ describe('message timeline turns', () => {
     expect(turns).toHaveLength(1)
     expect(turns[0]?.user?.id).toBe('user_1')
     expect(turns[0]?.blocks.map((block) => block.id)).toEqual(['assistant_1', 'notice_1', 'assistant_2'])
+  })
+
+  it('detects background shell notices from client-inferred xml text', () => {
+    const notice: ChatBlock = {
+      kind: 'user',
+      id: 'notice_2',
+      text: '<background_shell_completed><session_id>abcd1234</session_id><command>npm run build</command><exit_code>0</exit_code><output_preview>ok</output_preview><hint>read output</hint></background_shell_completed>'
+    }
+    const blocks: ChatBlock[] = [
+      { kind: 'user', id: 'user_1', text: 'Run build in background' },
+      notice
+    ]
+
+    const turns = groupTurns(blocks)
+
+    expect(turns).toHaveLength(1)
+    expect(turns[0]?.user?.text).toBe('Run build in background')
+    expect(turns[0]?.blocks).toHaveLength(1)
+    expect(turns[0]?.blocks[0]?.id).toBe('notice_2')
   })
 })

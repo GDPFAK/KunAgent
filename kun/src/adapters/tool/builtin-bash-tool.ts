@@ -56,8 +56,8 @@ type BashPayload = {
   shell: string
   exit_code: number | null
   output: string
-  full_output_path: string | null
-  truncation: null | {
+  full_output_path?: string | null
+  truncation?: null | {
     total_lines: number
     output_lines: number
     total_bytes: number
@@ -74,8 +74,6 @@ type BashPayload = {
   stop_sent?: boolean
   error?: string
   output_file?: string
-  output_truncated?: boolean
-  output_total_chars?: number
 }
 
 const bashSessions = new Map<string, BashSession>()
@@ -341,20 +339,7 @@ async function backgroundSessionPayload(
     shell: session.shell,
     exit_code: session.exitCode,
     output: fields.output,
-    full_output_path: fields.output_file || null,
-    truncation: fields.output_truncated
-      ? {
-          total_lines: 0,
-          output_lines: 0,
-          total_bytes: fields.output_total_chars,
-          output_bytes: Buffer.byteLength(fields.output, 'utf8'),
-          truncated_by: 'bytes',
-          last_line_partial: false
-        }
-      : null,
     output_file: fields.output_file,
-    output_truncated: fields.output_truncated,
-    output_total_chars: fields.output_total_chars,
     session_id: session.id,
     status: session.status,
     started_at: session.startedAt,

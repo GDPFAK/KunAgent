@@ -12,6 +12,7 @@ import {
   MessageSquareQuote,
   Minimize2,
   PencilLine,
+  BellRing,
   Search,
   Terminal,
   Wrench
@@ -26,7 +27,12 @@ import { DiffView } from '../DiffView'
 import { AssistantMarkdown } from './AssistantMarkdown'
 import { MessageBubble } from './message-timeline-bubbles'
 import { blockHasPendingRuntimeWork, isBackgroundShellNoticeBlock, splitThink } from './message-timeline-turns'
-import { formatDuration, formatToolTitle } from './message-timeline-tools'
+import {
+  formatDuration,
+  formatToolTitle,
+  isBackgroundShellCommandBlock,
+  summarizeBackgroundShellToolBlock
+} from './message-timeline-tools'
 import { SubagentGroup } from './SubagentCallCard'
 
 export type ProcessSection = {
@@ -641,6 +647,7 @@ function summarizeExecutionSection(
 ): string {
   let fileCount = 0
   let commandCount = 0
+  let backgroundCommandCount = 0
   let toolCount = 0
   let approvalCount = 0
 
@@ -653,7 +660,11 @@ function summarizeExecutionSection(
     if (block.toolKind === 'file_change') {
       fileCount += 1
     } else if (block.toolKind === 'command_execution') {
-      commandCount += 1
+      if (isBackgroundShellCommandBlock(block)) {
+        backgroundCommandCount += 1
+      } else {
+        commandCount += 1
+      }
     } else {
       toolCount += 1
     }
@@ -663,6 +674,13 @@ function summarizeExecutionSection(
   if (fileCount > 0) {
     parts.push(
       fileCount === 1 ? t('groupEditedFile') : t('groupEditedFiles', { count: fileCount })
+    )
+  }
+  if (backgroundCommandCount > 0) {
+    parts.push(
+      backgroundCommandCount === 1
+        ? t('groupRanBackgroundCommand')
+        : t('groupRanBackgroundCommands', { count: backgroundCommandCount })
     )
   }
   if (commandCount > 0) {
@@ -703,6 +721,7 @@ function processBlockIcon(block: ChatBlock): LucideIcon | null {
   if (block.kind === 'compaction') return Minimize2
   if (block.kind === 'approval') return Wrench
   if (block.kind === 'user_input') return MessageSquareQuote
+  if (isBackgroundShellNoticeBlock(block)) return BellRing
   if (block.kind !== 'tool') return null
   return toolBlockIcon(block)
 }
@@ -889,6 +908,8 @@ function builtInToolLabel(
     case 'bash':
     case 'shell':
       return t('toolBuiltinBash')
+    case 'background_shell':
+      return t('toolBuiltinBackgroundShell', { defaultValue: 'Background shell' })
     case 'delegate_task':
       // Routed to SubagentCallCard before the generic row; labeled here as a
       // defensive fallback so an ungrouped delegate block never reads as raw JSON.
@@ -947,10 +968,11 @@ function RuntimeMetaBadges({
 }): ReactElement | null {
   const meta = block.kind === 'tool' || block.kind === 'approval' || block.kind === 'user' ? block.meta : undefined
   if (!meta) return null
+  const showTurnDisclosure = block.kind !== 'tool'
   const sources = readMetaSources(meta)
-  const attachmentIds = readMetaStringArray(meta, 'attachmentIds')
-  const activeSkillIds = readMetaStringArray(meta, 'activeSkillIds')
-  const injectedMemoryIds = readMetaStringArray(meta, 'injectedMemoryIds')
+  const attachmentIds = showTurnDisclosure ? readMetaStringArray(meta, 'attachmentIds') : []
+  const activeSkillIds = showTurnDisclosure ? readMetaStringArray(meta, 'activeSkillIds') : []
+  const injectedMemoryIds = showTurnDisclosure ? readMetaStringArray(meta, 'injectedMemoryIds') : []
   const child = meta.child && typeof meta.child === 'object' ? meta.child as Record<string, unknown> : null
   const childLabel =
     typeof child?.childLabel === 'string' && child.childLabel.trim()
@@ -1031,6 +1053,10 @@ export function summarizeToolBlock(
     readMetaString(block.meta, 'pattern')
   const command = readMetaString(block.meta, 'command')
 
+  if (toolName === 'background_shell') {
+    return summarizeBackgroundShellToolBlock(block, t)
+  }
+
   if ((toolName === 'read_file' || toolName === 'read') && filePath) {
     return `${label} ${filePath}`
   }
@@ -1044,7 +1070,10 @@ export function summarizeToolBlock(
     return `${label} ${filePath}`
   }
   if (command && block.toolKind === 'command_execution') {
-    return `${formatToolTitle(block, t)} ${summarizeProcessText(command, 72)}`
+    const action = isBackgroundShellCommandBlock(block)
+      ? t('toolActionBackgroundCommand')
+      : formatToolTitle(block, t)
+    return `${action} ${summarizeProcessText(command, 72)}`
   }
   if (filePath) {
     return `${label} ${filePath}`
@@ -1192,7 +1221,7 @@ function describeProcessBlock(
   if (block.kind === 'tool') {
     return summarizeToolBlock(block, t)
   }
-  if (isBackgroundShellNoticeBlock(block)) {
+  if (block.kind === 'user' && isBackgroundShellNoticeBlock(block)) {
     return block.meta?.displayText?.trim() || t('backgroundShellNotice.title', { defaultValue: 'Background shell completed' })
   }
   if (block.kind === 'compaction') {

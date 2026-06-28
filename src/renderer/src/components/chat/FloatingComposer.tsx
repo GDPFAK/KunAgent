@@ -95,6 +95,7 @@ import {
 } from './FloatingComposerModelPicker'
 import { FloatingComposerAgentPicker } from './FloatingComposerAgentPicker'
 import { FloatingComposerUserInputPanel } from './FloatingComposerUserInputPanel'
+import { BackgroundShellOverlay } from './BackgroundShellOverlay'
 import { useComposerUserInput, type PendingUserInputBlock } from './use-composer-user-input'
 import { selectLivePendingUserInput } from './user-input-panel-logic'
 import {
@@ -1616,8 +1617,9 @@ export function FloatingComposer({
       />
 
       <div className="relative">
-        {showGoalFloater && activeThreadGoal && !pendingUserInputBlock ? (
-          <div className="pointer-events-none absolute inset-x-3 bottom-full z-20 mb-2 flex justify-center">
+        <div className="pointer-events-none absolute inset-x-0 bottom-full z-30 mb-2 flex flex-col items-center gap-2">
+          {runtimeReady ? <BackgroundShellOverlay /> : null}
+          {showGoalFloater && activeThreadGoal && !pendingUserInputBlock ? (
             <div className="pointer-events-auto flex min-h-11 w-full max-w-[46rem] items-center gap-2 rounded-full border border-ds-border bg-white px-3 py-1.5 text-ds-muted shadow-[0_12px_34px_rgba(20,47,95,0.10)] backdrop-blur-xl dark:bg-ds-card">
               <Target className="h-3.5 w-3.5 shrink-0 text-ds-faint" strokeWidth={1.9} />
               <div className="flex min-w-0 flex-1 items-center gap-1.5 text-[13px] leading-5">
@@ -1672,8 +1674,8 @@ export function FloatingComposer({
                 </button>
               </div>
             </div>
-          </div>
-        ) : null}
+          ) : null}
+        </div>
 
         {composerMenuOpen && slashQuery == null ? (
           <div

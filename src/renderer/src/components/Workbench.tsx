@@ -49,7 +49,6 @@ import {
   type ComposerExecutionSettings,
   type ComposerFileReference
 } from './chat/FloatingComposer'
-import { BackgroundShellOverlay } from './chat/BackgroundShellOverlay'
 import { ChatFileTreePanel, type ChatFileTreeReference } from './chat/ChatFileTreePanel'
 import {
   composerReasoningEffortRequestValue,
@@ -2766,7 +2765,6 @@ export function Workbench(): ReactElement {
               {!focusModeEnabled ? <KunCelebrationLayer active={busy} suppressed={Boolean(error)} /> : null}
             </div>
             <div className="ds-no-drag relative flex shrink-0 justify-center px-2 pb-3 pt-0 sm:px-4 md:px-6 lg:px-8">
-              <BackgroundShellOverlay runtimeReady={runtimeConnection === 'ready'} />
               {activeThreadRelation === 'side' && activeThreadParentId ? (
               <SubagentReturnBar
                 parentTitle={

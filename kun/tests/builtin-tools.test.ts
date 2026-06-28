@@ -766,9 +766,11 @@ describe('Kun built-in tools', () => {
       action: 'read',
       session_id: String(payload.session_id)
     })
-    expect(read.output_truncated).toBe(true)
     expect(String(read.output)).toContain('[background shell output truncated')
     expect(read.output_file).toBe(outputFile)
+    expect(read.full_output_path).toBeUndefined()
+    expect(read.truncation).toBeUndefined()
+    expect(read.output_truncated).toBeUndefined()
   })
 
   it('hides finished background shell sessions from list unless include_finished=true', async () => {
