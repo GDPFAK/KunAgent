@@ -45,6 +45,7 @@ import type { AttachmentReference, ChatBlock, ReviewTarget } from '../../agent/t
 import { useChatStore } from '../../store/chat-store'
 import { normalizeWorkspaceRoot } from '../../lib/workspace-path'
 import {
+  composerFileReferenceFromPath,
   filterWorkspaceFileMentionSuggestions,
   formatComposerFileMentionToken,
   getFileMentionAtCursor,
@@ -182,6 +183,7 @@ type Props = {
   onPasteClipboardImage?: (options?: { silentNoImage?: boolean }) => void | Promise<void>
   onRemoveAttachment?: (id: string) => void
   onAddFileReference?: (reference: ComposerFileReference) => void
+  onPickFileReferences?: () => void
   onOpenFileReferencePicker?: () => void
   onRemoveFileReference?: (relativePath: string) => void
   onSend: () => void
@@ -496,6 +498,7 @@ export function FloatingComposer({
   onPasteClipboardImage,
   onRemoveAttachment,
   onAddFileReference,
+  onPickFileReferences,
   onOpenFileReferencePicker,
   onRemoveFileReference,
   onSend,
@@ -618,6 +621,7 @@ export function FloatingComposer({
   )
   const canPickAttachment = canCompose && attachmentUploadEnabled && !attachmentUploadBusy
   const canPickFileReference = canCompose && fileReferenceEnabled && Boolean(effectiveWorkspaceRoot) && Boolean(onOpenFileReferencePicker)
+  const canPickLocalFileReference = canCompose && fileReferenceEnabled && Boolean(onPickFileReferences)
   const showIntentToolbar = !compact && route === 'chat'
   const showComposerMenuButton = showIntentToolbar
   const canTogglePlanMode = canCompose && Boolean(onPlanCommand)
@@ -626,7 +630,7 @@ export function FloatingComposer({
   const canRunReview = canCompose && route !== 'claw' && Boolean(onReviewCommand)
   const canToggleWorktreeMode = canCompose && route !== 'claw' && Boolean(onToggleWorktreeMode)
   const canOpenComposerMenu = showComposerMenuButton
-    && (canPickFileReference || canTogglePlanMode || canCreateNewThread || canOpenGoalPanel || canRunReview || canToggleWorktreeMode)
+    && (canPickFileReference || canPickLocalFileReference || canTogglePlanMode || canCreateNewThread || canOpenGoalPanel || canRunReview || canToggleWorktreeMode)
   const showToolbarStartControls = showComposerMenuButton
   const showExecutionSettingsPicker = showIntentToolbar
     && Boolean(executionSettings)
@@ -1281,6 +1285,13 @@ export function FloatingComposer({
     draft.focusComposer()
   }
 
+  const handleLocalFileReferenceMenuClick = (): void => {
+    if (!canPickLocalFileReference) return
+    setComposerMenuOpen(false)
+    onPickFileReferences?.()
+    draft.focusComposer()
+  }
+
   const handlePlanToolbarClick = (): void => {
     if (!canTogglePlanMode) return
     setComposerMenuOpen(false)
@@ -1561,36 +1572,15 @@ export function FloatingComposer({
     event.dataTransfer.dropEffect = 'copy'
   }
 
-  const insertTextAtComposerCursor = (text: string): void => {
-    if (!text) return
-    const textarea = draft.textareaRef.current
-    const currentValue = input
-    const selectionStart = textarea?.selectionStart ?? composerCursor ?? currentValue.length
-    const selectionEnd = textarea?.selectionEnd ?? selectionStart
-    const before = currentValue.slice(0, selectionStart)
-    const after = currentValue.slice(selectionEnd)
-    const leadingPad = before.length > 0 && !/\s$/.test(before) ? ' ' : ''
-    const trailingPad = after.length > 0 && !/^\s/.test(after) ? ' ' : ''
-    const insertion = `${leadingPad}${text}${trailingPad}`
-    const nextInput = `${before}${insertion}${after}`
-    const nextCursor = before.length + insertion.length - trailingPad.length
-    setInput(nextInput)
-    window.requestAnimationFrame(() => {
-      const el = draft.textareaRef.current
-      if (!el) return
-      el.focus()
-      el.setSelectionRange(nextCursor, nextCursor)
-      setComposerCursor(nextCursor)
-    })
-  }
-
   const handleComposerDrop = (event: ReactDragEvent<HTMLDivElement>): void => {
     const imageFiles = canPickAttachment ? imageFilesFromTransfer(event.dataTransfer) : []
     const rawFiles = Array.from(event.dataTransfer.files ?? [])
     const isImageLike = (file: File): boolean =>
       isImageMimeType(file.type) || Boolean(imageMimeTypeFromFileName(file.name))
     const pdfFiles = canPickAttachment ? rawFiles.filter(isPdfFile) : []
-    const pathFiles = rawFiles.filter((file) => !isImageLike(file) && !isPdfFile(file))
+    const pathFiles = canPickLocalFileReference && onAddFileReference
+      ? rawFiles.filter((file) => !isImageLike(file) && !isPdfFile(file))
+      : []
     if (imageFiles.length === 0 && pdfFiles.length === 0 && pathFiles.length === 0) return
     event.preventDefault()
     if ((imageFiles.length > 0 || pdfFiles.length > 0) && onPickAttachments) {
@@ -1606,7 +1596,9 @@ export function FloatingComposer({
           // ignore files we cannot resolve a filesystem path for
         }
       }
-      if (paths.length > 0) insertTextAtComposerCursor(paths.join(' '))
+      for (const path of paths) {
+        onAddFileReference?.(composerFileReferenceFromPath(path, effectiveWorkspaceRoot))
+      }
     }
     draft.focusComposer()
   }
@@ -1691,12 +1683,23 @@ export function FloatingComposer({
             {fileReferenceEnabled ? (
               <button
                 type="button"
+                disabled={!canPickLocalFileReference}
+                onClick={handleLocalFileReferenceMenuClick}
+                className="ds-no-drag flex h-8 w-full items-center gap-2 px-3 text-left transition hover:bg-ds-hover hover:text-ds-ink disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:bg-transparent disabled:hover:text-ds-muted"
+              >
+                <FileText className="h-3.5 w-3.5 shrink-0" strokeWidth={1.9} />
+                <span className="min-w-0 flex-1 truncate">{t('composerAddLocalFiles')}</span>
+              </button>
+            ) : null}
+            {fileReferenceEnabled ? (
+              <button
+                type="button"
                 disabled={!canPickFileReference}
                 onClick={handleFileReferenceMenuClick}
                 className="ds-no-drag flex h-8 w-full items-center gap-2 px-3 text-left transition hover:bg-ds-hover hover:text-ds-ink disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:bg-transparent disabled:hover:text-ds-muted"
               >
                 <Paperclip className="h-3.5 w-3.5 shrink-0" strokeWidth={1.9} />
-                <span className="min-w-0 flex-1 truncate">{t('composerAddFilesAndFolders')}</span>
+                <span className="min-w-0 flex-1 truncate">{t('composerBrowseWorkspaceFiles')}</span>
               </button>
             ) : null}
             {attachmentUploadEnabled ? (

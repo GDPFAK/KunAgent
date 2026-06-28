@@ -782,6 +782,27 @@ export function registerAppIpcHandlers(options: RegisterAppIpcHandlersOptions): 
     }
   })
 
+  ipcMain.handle('file:pick-local-files', async (_, defaultPath: unknown) => {
+    const normalizedDefaultPath = parseIpcPayload(
+      'file:pick-local-files',
+      z.object({ defaultPath: defaultPathSchema }).strict(),
+      { defaultPath }
+    ).defaultPath
+    const options: Electron.OpenDialogOptions = {
+      title: 'Add files to conversation',
+      defaultPath: normalizedDefaultPath,
+      properties: ['openFile', 'multiSelections', 'dontAddToRecent']
+    }
+    const mainWindow = getMainWindow()
+    const result = mainWindow
+      ? await dialog.showOpenDialog(mainWindow, options)
+      : await dialog.showOpenDialog(options)
+    return {
+      canceled: result.canceled,
+      paths: result.canceled ? [] : result.filePaths
+    }
+  })
+
   // 在对话工作目录根下创建一个 YYYYMMDD-HHmmss 时间戳子目录作为新对话的工作目录。
   ipcMain.handle(
     'conversation:create-workspace',

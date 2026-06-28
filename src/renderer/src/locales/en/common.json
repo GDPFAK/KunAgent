@@ -1012,6 +1012,8 @@
   "composerWorkspaceHint": "Choose a working directory before starting or continuing a thread.",
   "composerAddImage": "Attach image",
   "composerAddFilesAndFolders": "Files and folders",
+  "composerAddLocalFiles": "Add files",
+  "composerBrowseWorkspaceFiles": "Browse workspace",
   "composerVoiceStart": "Voice input",
   "composerVoiceStop": "Stop recording",
   "composerVoiceSend": "Stop and send",

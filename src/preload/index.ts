@@ -58,6 +58,8 @@ const api = {
     ipcRenderer.invoke('claw:im-install:telegram-token', { botToken, allowedChatIds }),
   pickWorkspaceDirectory: (defaultPath) =>
     ipcRenderer.invoke('workspace:pick-directory', defaultPath),
+  pickLocalFiles: (defaultPath) =>
+    ipcRenderer.invoke('file:pick-local-files', defaultPath),
   createConversationWorkspace: (root) =>
     ipcRenderer.invoke('conversation:create-workspace', { root }),
   confirmDialog: (options) =>
