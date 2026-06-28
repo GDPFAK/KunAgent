@@ -6,7 +6,7 @@ import {
   KUN_BACKGROUND_SHELLS_PATH,
   kunBackgroundShellStopPath
 } from '@shared/kun-endpoints'
-import { rendererRuntimeClient } from '../agent/runtime-client'
+import { rendererRuntimeClient } from '../../agent/runtime-client'
 
 type BackgroundShellSession = {
   id: string
