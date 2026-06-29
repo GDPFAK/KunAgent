@@ -550,7 +550,7 @@ export function GeneralSettingsSection({ ctx }: { ctx: Record<string, any> }): R
                   control={
                     <div className="flex w-full min-w-0 flex-col items-start gap-2">
                       {logPath ? (
-                        <code className="block w-full max-w-full break-all rounded-xl bg-ds-main/70 px-3 py-2 font-mono text-[12px] text-ds-muted shadow-sm">
+                        <code className="block w-full max-w-full break-all rounded-xl border border-ds-border-muted bg-ds-main/60 px-3 py-2 font-mono text-[12px] text-ds-ink">
                           {compactHomePath(logPath)}
                         </code>
                       ) : (
