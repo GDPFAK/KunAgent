@@ -34,11 +34,13 @@ function createSettings(patch: Partial<AppSettingsV1['schedule']['internal']> = 
     locale: 'en',
     theme: 'system',
     uiFontScale: 0.82,
+    chatContentMaxWidthPx: 896,
     provider: defaultModelProviderSettings(),
     agents: {
       kun: defaultKunRuntimeSettings()
     },
     workspaceRoot: '/tmp/workspace',
+    conversationWorkspaceRoot: '~/Documents/Kun',
     log: {
       enabled: true,
       retentionDays: 2

@@ -89,7 +89,16 @@ export type ReadClassification = {
 
 export const COMPACT_RESOURCE_FILE_NAMES = new Set(['AGENTS.md', 'AGENTS.MD', 'CLAUDE.md', 'CLAUDE.MD'])
 
-export type BuiltinToolName = 'read' | 'bash' | 'edit' | 'write' | 'grep' | 'find' | 'ls' | 'lsp'
+export type BuiltinToolName =
+  | 'read'
+  | 'bash'
+  | 'edit'
+  | 'write'
+  | 'grep'
+  | 'find'
+  | 'ls'
+  | 'lsp'
+  | 'verify_changes'
 export const allBuiltinToolNames: Set<BuiltinToolName> = new Set([
   'read',
   'bash',
@@ -98,7 +107,8 @@ export const allBuiltinToolNames: Set<BuiltinToolName> = new Set([
   'grep',
   'find',
   'ls',
-  'lsp'
+  'lsp',
+  'verify_changes'
 ])
 export type ToolName = BuiltinToolName
 export const allToolNames: Set<ToolName> = allBuiltinToolNames
@@ -110,9 +120,36 @@ export type ReadLocalToolOptions = {
   operations?: ReadLocalToolOperations
 }
 
+export type BackgroundShellRecordInput = {
+  id: string
+  threadId: string
+  turnId: string
+  command: string
+  cwd: string
+  shell: string
+  status: 'running' | 'completed' | 'stopped' | 'failed'
+  startedAt: string
+  finishedAt?: string
+  exitCode: number | null
+  output: string
+  outputTruncated?: boolean
+  outputFilePath?: string
+  error?: string
+  detached: boolean
+}
+
+export type BackgroundShellHooks = {
+  onSessionStarted?: (record: BackgroundShellRecordInput) => void | Promise<void>
+  onSessionUpdated?: (record: BackgroundShellRecordInput) => void | Promise<void>
+  onSessionSettled?: (record: BackgroundShellRecordInput) => void | Promise<void>
+  isDetachedSession?: (sessionId: string) => boolean
+}
+
 export type BashLocalToolOptions = {
   defaultTimeoutSeconds?: number
   operations?: BashLocalToolOperations
+  backgroundShell?: BackgroundShellHooks
+  backgroundShellDataDir?: string
 }
 
 export type WriteLocalToolOptions = {

@@ -16,10 +16,12 @@ import i18n from '../i18n'
 import { describeRuntimeError, formatRuntimeError, getRuntimeErrorCode } from '../lib/format-runtime-error'
 import { isClawWorkspacePath, isInternalTemporaryWorkspace, normalizeWorkspaceRoot } from '../lib/workspace-path'
 import type { ClawImChannelV1 } from '@shared/app-settings'
+import { isBackgroundShellNoticeUserMessage } from '@shared/background-shell-notice'
 import type { ChatState } from './chat-store-types'
 import { isClawThread } from './chat-store-helpers'
 import {
   collectAssistantTextForTurn,
+  isOptimisticUserBlockId,
   reconcileOptimisticUserBlock,
   settlePendingRuntimeWorkAfterInterrupt,
   threadSnapshotLooksRunning,
@@ -634,31 +636,45 @@ export function buildThreadEventSink(
         const flushed = flushLiveBlocks(s)
         const baseBlocks = flushed.blocks ?? s.blocks
         const optimisticCurrentUserId = s.currentTurnUserId
-        const reconciledBlocks =
+        const isBackgroundShellNotice = isBackgroundShellNoticeUserMessage({
+          text: ev.text,
+          meta: ev.meta
+        })
+        const canReconcileOptimisticUser =
+          !isBackgroundShellNotice &&
           optimisticCurrentUserId &&
           optimisticCurrentUserId !== ev.itemId &&
+          isOptimisticUserBlockId(optimisticCurrentUserId) &&
           baseBlocks.some((block) => block.kind === 'user' && block.id === optimisticCurrentUserId)
-            ? reconcileOptimisticUserBlock(
-                baseBlocks,
-                optimisticCurrentUserId,
-                ev.itemId,
-                ev.text,
-                ev.modelLabel
-              )
-            : baseBlocks
+        const reconciledBlocks = canReconcileOptimisticUser
+          ? reconcileOptimisticUserBlock(
+              baseBlocks,
+              optimisticCurrentUserId,
+              ev.itemId,
+              ev.text,
+              ev.modelLabel
+            )
+          : baseBlocks
         const nextBlocks = upsertUserBlock(reconciledBlocks, ev)
         const startedAt = runtimeEventStartedAt(ev.createdAt)
         armBusyWatchdog(set, get)
+        const nextCurrentTurnUserId = isBackgroundShellNotice
+          ? optimisticCurrentUserId
+          : canReconcileOptimisticUser || !optimisticCurrentUserId
+            ? ev.itemId
+            : optimisticCurrentUserId
         return {
           ...flushed,
           blocks: nextBlocks,
           busy: true,
           currentTurnId: ev.turnId ?? s.currentTurnId,
-          currentTurnUserId: ev.itemId,
-          turnStartedAtByUserId: {
-            ...s.turnStartedAtByUserId,
-            [ev.itemId]: s.turnStartedAtByUserId[ev.itemId] ?? startedAt
-          },
+          currentTurnUserId: nextCurrentTurnUserId,
+          turnStartedAtByUserId: isBackgroundShellNotice
+            ? s.turnStartedAtByUserId
+            : {
+                ...s.turnStartedAtByUserId,
+                [ev.itemId]: s.turnStartedAtByUserId[ev.itemId] ?? startedAt
+              },
           error: clearRuntimeStreamRecoveringError(s.error)
         }
       }),
@@ -923,8 +939,21 @@ export function buildThreadEventSink(
       resetBusyRecoveryAttempts()
       clearBusyWatchdog()
       set((s) => {
-        if (s.blocks.some((b) => b.kind === 'user_input' && b.requestId === req.requestId)) {
-          return {}
+        const existing = s.blocks.find(
+          (b) => b.kind === 'user_input' && b.requestId === req.requestId
+        )
+        if (existing) {
+          // Already have the block (e.g. rehydrated from history): make sure it
+          // is flagged live so it stays answerable, rather than no-op'ing and
+          // leaving a stale-looking read-only record (#606).
+          if (existing.kind === 'user_input' && existing.live === true) return {}
+          return {
+            blocks: s.blocks.map((b) =>
+              b.kind === 'user_input' && b.requestId === req.requestId
+                ? { ...b, live: true, status: 'pending' as const }
+                : b
+            )
+          }
         }
         const flushed = flushLiveBlocks(s)
         const baseBlocks = flushed.blocks ?? s.blocks
@@ -938,7 +967,10 @@ export function buildThreadEventSink(
               createdAt: new Date().toISOString(),
               requestId: req.requestId,
               questions: req.questions,
-              status: 'pending' as const
+              status: 'pending' as const,
+              // Marks this as a request the live runtime is actively awaiting.
+              // Only live blocks are actionable; rehydrated history is not.
+              live: true
             }
           ],
           error: clearRuntimeStreamRecoveringError(s.error)

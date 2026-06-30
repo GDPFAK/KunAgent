@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { ToolHostContext } from '../../ports/tool-host.js'
 import { resolveWorkspacePath } from './builtin-tool-utils.js'
+import { resolveBackgroundShellOutputPaths } from '../../services/background-shell-output.js'
 
 function context(workspace: string): ToolHostContext {
   return {
@@ -72,5 +73,66 @@ describe('resolveWorkspacePath symlink escape', () => {
     const resolved = await resolveWorkspacePath('real.txt', context(workspace))
     expect(resolved.absolutePath).toBe(join(workspace, 'real.txt'))
     expect(resolved.relativePath).toBe('real.txt')
+  })
+})
+
+describe('resolveWorkspacePath sandbox mode', () => {
+  let base: string
+  let workspace: string
+  let outside: string
+
+  beforeEach(async () => {
+    base = await mkdtemp(join(tmpdir(), 'kun-sandbox-'))
+    workspace = join(base, 'ws')
+    outside = join(base, 'outside')
+    await mkdir(workspace, { recursive: true })
+    await mkdir(outside, { recursive: true })
+  })
+
+  afterEach(async () => {
+    await rm(base, { recursive: true, force: true })
+  })
+
+  function fullAccessContext(ws: string): ToolHostContext {
+    return { ...context(ws), sandboxMode: 'danger-full-access' }
+  }
+
+  it('allows an absolute path outside the workspace under danger-full-access', async () => {
+    const target = join(outside, 'sys.txt')
+    await writeFile(target, 'x')
+    const resolved = await resolveWorkspacePath(target, fullAccessContext(workspace))
+    expect(resolved.absolutePath).toBe(target)
+  })
+
+  it('allows traversing out of the workspace via .. under danger-full-access', async () => {
+    const resolved = await resolveWorkspacePath('../outside/sys.txt', fullAccessContext(workspace))
+    expect(resolved.absolutePath).toBe(join(outside, 'sys.txt'))
+  })
+
+  it('still blocks escapes under workspace-write (default boundary stays enforced)', async () => {
+    await expect(
+      resolveWorkspacePath(join(outside, 'sys.txt'), context(workspace))
+    ).rejects.toThrow(/escapes the workspace root/)
+  })
+
+  it('allows background shell output files outside the workspace in read-only sandbox', async () => {
+    const runtimeDataDir = join(base, 'runtime-data')
+    const { outputFilePath } = resolveBackgroundShellOutputPaths(runtimeDataDir, 'thr_1', 'abcd1234')
+    await mkdir(join(runtimeDataDir, 'threads', 'thr_1', 'background-shells'), { recursive: true })
+    await writeFile(outputFilePath, 'full log')
+    const resolved = await resolveWorkspacePath(outputFilePath, {
+      ...context(workspace),
+      sandboxMode: 'read-only',
+      runtimeDataDir,
+      threadId: 'thr_1'
+    })
+    expect(resolved.absolutePath).toBe(outputFilePath)
+  })
+
+  it('does not require the workspace root to exist under danger-full-access', async () => {
+    const missingWs = join(base, 'does-not-exist')
+    const target = join(outside, 'sys.txt')
+    const resolved = await resolveWorkspacePath(target, fullAccessContext(missingWs))
+    expect(resolved.absolutePath).toBe(target)
   })
 })

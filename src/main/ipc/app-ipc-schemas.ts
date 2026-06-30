@@ -26,7 +26,9 @@ import {
   KUN_THREAD_TEMPLATE,
   KUN_USER_INPUT_TEMPLATE,
   KUN_USAGE_TEMPLATE,
-  KUN_DEBUG_LLM_ROUNDS_TEMPLATE
+  KUN_DEBUG_LLM_ROUNDS_TEMPLATE,
+  KUN_BACKGROUND_SHELLS_TEMPLATE,
+  KUN_BACKGROUND_SHELL_TEMPLATE
 } from '../../shared/kun-endpoints'
 import {
   IMAGE_GENERATION_PROTOCOLS,
@@ -46,7 +48,7 @@ import {
 } from '../../shared/app-settings'
 import { DESKTOP_COMMANDS } from '../../shared/kun-gui-api'
 import { GUI_UPDATE_CHANNELS } from '../../shared/gui-update'
-import { WINDOW_CLOSE_ACTIONS, UI_FONT_SCALE_MIN, UI_FONT_SCALE_MAX } from '../../shared/app-settings'
+import { WINDOW_CLOSE_ACTIONS, CHAT_CONTENT_MAX_WIDTH_MIN, CHAT_CONTENT_MAX_WIDTH_MAX, UI_FONT_SCALE_MIN, UI_FONT_SCALE_MAX } from '../../shared/app-settings'
 import { KEYBOARD_SHORTCUT_COMMANDS } from '../../shared/keyboard-shortcuts'
 import { WRITE_EXPORT_FORMATS } from '../../shared/write-export'
 import { WRITE_INFOGRAPHIC_MAX_TEXT_CHARS } from '../../shared/write-infographic'
@@ -173,7 +175,10 @@ const ENDPOINTS: readonly EndpointTemplate[] = [
   compileEndpoint(KUN_USER_INPUT_TEMPLATE, ['POST']),
   compileEndpoint(KUN_SESSION_RESUME_TEMPLATE, ['POST']),
   compileEndpoint(KUN_USAGE_TEMPLATE, ['GET']),
-  compileEndpoint(KUN_DEBUG_LLM_ROUNDS_TEMPLATE, ['GET'])
+  compileEndpoint(KUN_DEBUG_LLM_ROUNDS_TEMPLATE, ['GET']),
+  compileEndpoint(KUN_BACKGROUND_SHELLS_TEMPLATE, ['GET']),
+  compileEndpoint(KUN_BACKGROUND_SHELL_TEMPLATE, ['GET']),
+  compileEndpoint(`${KUN_BACKGROUND_SHELL_TEMPLATE}/stop`, ['POST'])
 ]
 
 function isAllowedRuntimeRequest(value: { path: string; method?: string }): boolean {
@@ -211,6 +216,7 @@ const uiFontScaleSchema = z.union([
   z.number().min(UI_FONT_SCALE_MIN).max(UI_FONT_SCALE_MAX),
   z.enum(['small', 'medium', 'large'])
 ])
+const chatContentMaxWidthSchema = z.number().min(CHAT_CONTENT_MAX_WIDTH_MIN).max(CHAT_CONTENT_MAX_WIDTH_MAX)
 const hexColorSchema = z.string().trim().regex(/^#[0-9a-fA-F]{6}$/)
 const approvalPolicySchema = z.enum(['always', 'on-request', 'untrusted', 'never', 'auto', 'suggest'])
 const sandboxModeSchema = z.enum(['read-only', 'workspace-write', 'danger-full-access', 'external-sandbox'])
@@ -260,6 +266,7 @@ const modelReasoningRequestProtocolSchema = z.enum(MODEL_REASONING_REQUEST_PROTO
 const modelProfilePatchSchema = z.object({
   aliases: z.array(modelIdSchema).max(50).optional(),
   contextWindowTokens: z.number().int().positive().max(10_000_000).optional(),
+  maxOutputTokens: z.number().int().positive().max(1_000_000).optional(),
   inputModalities: z.array(modelProviderInputModalitySchema).max(8).optional(),
   outputModalities: z.array(modelProviderInputModalitySchema).max(8).optional(),
   supportsToolCalling: z.boolean().optional(),
@@ -285,6 +292,7 @@ const modelProviderPatchSchema = z.object({
     apiKey: z.string().max(MAX_BODY_BYTES).optional(),
     baseUrl: z.string().trim().max(MAX_URL_LENGTH).optional(),
     endpointFormat: modelEndpointFormatSchema.optional(),
+    kind: z.enum(['http', 'agent-sdk']).optional(),
     // Some third-party aggregators (litellm, oneapi, …) advertise 500+ chat
     // models in a single /v1/models response. The previous 200/50 caps caused
     // settings:set to silently fail with no toast (#397). Raised to leave
@@ -1345,6 +1353,7 @@ const settingsPatchObjectSchema = z.object({
   locale: localeSchema.optional(),
   theme: themeSchema.optional(),
   uiFontScale: uiFontScaleSchema.optional(),
+  chatContentMaxWidthPx: chatContentMaxWidthSchema.optional(),
   cursorSpotlight: z.boolean().optional(),
   cursorSpotlightColor: hexColorSchema.optional(),
   provider: modelProviderPatchSchema.optional(),
@@ -1352,6 +1361,7 @@ const settingsPatchObjectSchema = z.object({
     kun: kunRuntimePatchSchema.optional()
   }).strict().optional(),
   workspaceRoot: defaultPathSchema,
+  conversationWorkspaceRoot: defaultPathSchema,
   log: logPatchSchema.optional(),
   checkpointCleanup: checkpointCleanupPatchSchema.optional(),
   notifications: notificationsPatchSchema.optional(),

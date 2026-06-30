@@ -7,38 +7,13 @@ import {
   splitKunCliCommand
 } from './agent-cli.js'
 import { startKunServe, type KunServeHandle } from '../server/runtime-factory.js'
+import {
+  resolveEventLoopStallThresholdMs,
+  startEventLoopMonitor
+} from '../server/event-loop-monitor.js'
+import { installServeCrashHandlers } from './serve-crash-handlers.js'
 
 export const KUN_READY_PREFIX = 'KUN_READY '
-
-/**
- * Serve mode runs unattended under the GUI. An uncaught error must not
- * leave a half-dead process: report it on stderr (the GUI captures the
- * tail), attempt a bounded graceful close, then exit non-zero so the
- * GUI supervisor can restart us.
- */
-function installServeCrashHandlers(getHandle: () => KunServeHandle | null): void {
-  let crashing = false
-  const crash = (kind: string, error: unknown): void => {
-    if (crashing) return
-    crashing = true
-    const detail = error instanceof Error ? (error.stack ?? error.message) : String(error)
-    process.stderr.write(`kun serve: ${kind}: ${detail}\n`)
-    const finish = (): void => process.exit(ServeExitCode.runtime)
-    const handle = getHandle()
-    if (!handle) {
-      finish()
-      return
-    }
-    const deadline = setTimeout(finish, 3000)
-    deadline.unref()
-    void handle
-      .close()
-      .catch(() => undefined)
-      .finally(finish)
-  }
-  process.on('uncaughtException', (error) => crash('uncaughtException', error))
-  process.on('unhandledRejection', (reason) => crash('unhandledRejection', reason))
-}
 
 /**
  * Serve-mode command. Kept separate from the dispatcher so GUI startup
@@ -80,8 +55,14 @@ async function serveMain(argv: readonly string[]): Promise<number> {
   }
   process.stdout.write(`${KUN_READY_PREFIX}${JSON.stringify(startupInfo)}\n`)
   process.stdout.write(JSON.stringify(startupInfo, null, 2) + '\n')
+  // Watch for event-loop stalls so a hang that starves /health (and trips the
+  // GUI watchdog) is attributable to CPU starvation vs a hard deadlock (#621).
+  const loopMonitor = startEventLoopMonitor({
+    stallThresholdMs: resolveEventLoopStallThresholdMs(process.env)
+  })
   await new Promise<void>((resolve) => {
     const stop = () => {
+      loopMonitor.stop()
       void server.close().finally(resolve)
     }
     process.once('SIGTERM', stop)

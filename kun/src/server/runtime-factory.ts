@@ -12,6 +12,7 @@ import { HybridSessionStore, HybridThreadStore } from '../adapters/hybrid/index.
 import { CompatModelClient } from '../adapters/model/compat-model-client.js'
 import { MultiProviderModelClient } from '../adapters/model/multi-provider-model-client.js'
 import { CapabilityRegistry } from '../adapters/tool/capability-registry.js'
+import { createAgentSdkRuntime } from '../runtime/agent-sdk/agent-sdk-runtime-factory.js'
 import { buildGoalLocalTools } from '../adapters/tool/goal-tools.js'
 import { buildTodoLocalTools } from '../adapters/tool/todo-tools.js'
 import { LocalToolHost, buildDefaultLocalTools } from '../adapters/tool/local-tool-host.js'
@@ -77,6 +78,10 @@ import { resolveConfiguredHooks, type HooksConfig } from '../hooks/hook-config.j
 import { FileMemoryStore } from '../memory/memory-store.js'
 import { DelegationRuntime, FileDelegationStore } from '../delegation/delegation-runtime.js'
 import { createChildAgentExecutor } from '../delegation/child-agent-executor.js'
+import { BackgroundShellRuntime } from '../services/background-shell-runtime.js'
+import { stopBashSessionById, createBashLocalTool } from '../adapters/tool/builtin-bash-tool.js'
+import { createBackgroundShellTool } from '../adapters/tool/background-shell-tool.js'
+import type { LocalTool } from '../adapters/tool/local-tool-host.js'
 
 export type KunServeRuntimeOptions = {
   host: string
@@ -187,13 +192,20 @@ export async function createKunServeRuntime(
   // back to the default client when the id is absent or unknown, so behavior
   // is unchanged for single-provider deployments.
   const providerClients = new Map<string, CompatModelClient>()
+  // Providers whose kind is 'agent-sdk' don't get an HTTP client — their turns
+  // are delegated to the embedded Claude Agent SDK (subscription) instead.
+  const agentSdkProviderIds = new Set<string>()
   for (const [providerId, provider] of Object.entries(options.providers ?? {})) {
     const trimmedId = providerId.trim()
     if (!trimmedId) continue
+    if ((provider.kind ?? 'http') === 'agent-sdk') {
+      agentSdkProviderIds.add(trimmedId)
+      continue
+    }
     providerClients.set(
       trimmedId,
       new CompatModelClient({
-        baseUrl: provider.baseUrl,
+        baseUrl: provider.baseUrl ?? options.baseUrl ?? '',
         apiKey: provider.apiKey,
         modelProxyUrl: provider.modelProxyUrl ?? options.modelProxyUrl,
         endpointFormat: provider.endpointFormat ?? options.endpointFormat ?? DEFAULT_MODEL_ENDPOINT_FORMAT,
@@ -229,6 +241,28 @@ export async function createKunServeRuntime(
     ids,
     nowIso
   })
+  const backgroundShellRuntime = new BackgroundShellRuntime({
+    events,
+    threadStore,
+    turns: turnService,
+    nowIso
+  })
+  backgroundShellRuntime.bindStopHandler(stopBashSessionById)
+  const backgroundShellTool = createBackgroundShellTool({
+    listBackgroundSessions: (threadId) => backgroundShellRuntime.listSessions(threadId)
+  })
+  const withBackgroundShellTools = (tools: LocalTool[]): LocalTool[] => {
+    const mapped = tools.map((tool) =>
+      tool.name === 'bash'
+        ? createBashLocalTool({
+            backgroundShell: backgroundShellRuntime.bashHooks(),
+            backgroundShellDataDir: options.dataDir
+          })
+        : tool
+    )
+    const withoutBackgroundShell = mapped.filter((tool) => tool.name !== 'background_shell')
+    return [...withoutBackgroundShell, backgroundShellTool]
+  }
   const reviewService = new ReviewService({
     threadStore,
     turns: turnService,
@@ -273,7 +307,7 @@ export async function createKunServeRuntime(
       kind: 'built-in' as const,
       enabled: true,
       available: true,
-      tools: buildDefaultLocalTools()
+      tools: withBackgroundShellTools(buildDefaultLocalTools())
     },
     ...mcpProviders.providers,
     ...webProviders.providers,
@@ -429,6 +463,38 @@ export async function createKunServeRuntime(
       // ignore duplicate/colliding registration
     }
   })
+  // Subscription engine: only constructed when at least one provider is the
+  // 'agent-sdk' kind. Owns the delegated turn for those providers' threads.
+  // The runtime's own default provider can itself be agent-sdk (the Claude
+  // subscription set as the main model). kun-process signals that via env so we
+  // route default-provider turns to the SDK too, not just per-provider ones.
+  const defaultIsAgentSdk = process.env.KUN_RUNTIME_PROVIDER_KIND === 'agent-sdk'
+  const sdkRuntime =
+    agentSdkProviderIds.size > 0 || defaultIsAgentSdk
+      ? createAgentSdkRuntime({
+          registry,
+          turns: turnService,
+          sessionStore,
+          threadStore,
+          events,
+          ids,
+          prefix,
+          providerConfigs: options.providers ?? {},
+          agentSdkProviderIds,
+          defaultApprovalPolicy: options.approvalPolicy,
+          defaultModel: options.model,
+          defaultIsAgentSdk,
+          defaultToken: options.apiKey,
+          skillRuntime,
+          userInputGate,
+          nowIso,
+          ...(attachmentStore ? { attachmentStore } : {}),
+          ...(memoryStore ? { memoryStore } : {}),
+          ...(process.env.KUN_CLAUDE_BINARY
+            ? { pathToClaudeCodeExecutable: process.env.KUN_CLAUDE_BINARY }
+            : {})
+        })
+      : undefined
   const loop = new AgentLoop({
     threadStore,
     sessionStore,
@@ -436,6 +502,7 @@ export async function createKunServeRuntime(
     userInputGate,
     model: modelClient,
     toolHost,
+    ...(sdkRuntime ? { sdkRuntime } : {}),
     usage: usageService,
     events,
     turns: turnService,
@@ -455,6 +522,7 @@ export async function createKunServeRuntime(
     ...(resolvedHooks.length ? { hooks: resolvedHooks } : {}),
     ...(attachmentStore ? { attachmentStore } : {}),
     ...(memoryStore ? { memoryStore } : {}),
+    runtimeDataDir: options.dataDir,
     onPlanWritten: async ({ threadId, planId, relativePath, markdown }) => {
       await threadService.syncTodosFromPlan(threadId, {
         planId,
@@ -463,6 +531,9 @@ export async function createKunServeRuntime(
         preserveCompleted: true
       })
     }
+  })
+  backgroundShellRuntime.bindAgentLoop({
+    runTurn: (threadId, turnId) => loop.runTurn(threadId, turnId)
   })
   const startedAt = options.startedAt ?? nowIso()
   return {
@@ -481,6 +552,7 @@ export async function createKunServeRuntime(
     ...(attachmentStore ? { attachmentStore } : {}),
     ...(memoryStore ? { memoryStore } : {}),
     ...(delegationRuntime ? { delegationRuntime } : {}),
+    backgroundShellRuntime,
     modelClient,
     defaultModel: options.model,
     ...(options.roles ? { roles: options.roles } : {}),
@@ -498,21 +570,32 @@ export async function createKunServeRuntime(
     insecure: options.insecure,
     allocateSeq,
     nowIso,
-    info: () => ({
-      host: options.host,
-      port: options.port,
-      configPath: options.configPath,
-      dataDir: options.dataDir,
-      model: options.model,
-      endpointFormat: options.endpointFormat ?? DEFAULT_MODEL_ENDPOINT_FORMAT,
-      approvalPolicy: options.approvalPolicy,
-      sandboxMode: options.sandboxMode,
-      tokenEconomyMode: options.tokenEconomyMode,
-      insecure: options.insecure,
-      startedAt,
-      pid: process.pid,
-      capabilities
-    }),
+    info: () => {
+      const memory = process.memoryUsage()
+      const peakRssBytes = Math.max(memory.rss, process.resourceUsage().maxRSS * 1024)
+      return {
+        host: options.host,
+        port: options.port,
+        configPath: options.configPath,
+        dataDir: options.dataDir,
+        model: options.model,
+        endpointFormat: options.endpointFormat ?? DEFAULT_MODEL_ENDPOINT_FORMAT,
+        approvalPolicy: options.approvalPolicy,
+        sandboxMode: options.sandboxMode,
+        tokenEconomyMode: options.tokenEconomyMode,
+        insecure: options.insecure,
+        startedAt,
+        pid: process.pid,
+        memoryUsage: {
+          rssBytes: memory.rss,
+          peakRssBytes,
+          heapUsedBytes: memory.heapUsed,
+          heapTotalBytes: memory.heapTotal,
+          externalBytes: memory.external
+        },
+        capabilities
+      }
+    },
     toolDiagnostics: async () => ({
       providers: registry.diagnostics(),
       mcpServers: mcpProviders.diagnostics,
@@ -639,6 +722,18 @@ export async function startKunServe(
     })
     .catch((error) => {
       console.warn('[kun] orphaned turn reconciliation failed:', error)
+    })
+  // Settle subagent (child-run) records left 'queued'/'running' by the previous
+  // process, so a restart doesn't leave them stuck in-flight forever (#621).
+  void runtime.delegationRuntime
+    ?.reconcileOrphanedChildRuns()
+    .then((count) => {
+      if (count > 0) {
+        console.warn(`[kun] marked ${count} orphaned subagent run(s) as failed after restart`)
+      }
+    })
+    .catch((error) => {
+      console.warn('[kun] orphaned child-run reconciliation failed:', error)
     })
   return {
     ...server,

@@ -15,7 +15,10 @@ const labels: Record<string, string> = {
   toolBuiltinGrep: 'Search',
   toolBuiltinFind: 'Find',
   toolBuiltinLs: 'List',
-  toolBuiltinBash: 'Bash'
+  toolBuiltinBash: 'Bash',
+  toolBuiltinBackgroundShell: 'Background shell',
+  toolActionBackgroundShellRead: 'Read background shell',
+  toolActionBackgroundShellList: 'List background shells'
 }
 
 const t = (key: string) => labels[key] ?? (key === 'toolActionCommand' ? 'Ran command' : key)
@@ -119,6 +122,34 @@ describe('MessageTimeline tool summaries', () => {
         t
       )
     ).toBe('Ran command npm test')
+  })
+
+  it('summarizes background_shell with action, session id, and command', () => {
+    expect(
+      summarizeToolBlock(
+        toolBlock({
+          summary: 'background_shell',
+          meta: {
+            toolName: 'background_shell',
+            action: 'read',
+            session_id: '2mcorxhe',
+            command: 'sleep 15 && echo "Hello from background!"'
+          },
+          detail: JSON.stringify(
+            {
+              action: 'read',
+              session_id: '2mcorxhe',
+              command: 'sleep 15 && echo "Hello from background!"',
+              exit_code: 0,
+              status: 'completed'
+            },
+            null,
+            2
+          )
+        }),
+        t
+      )
+    ).toBe('Read background shell 2mcorxhe sleep 15 && echo "Hello from background!"')
   })
 })
 
@@ -248,7 +279,7 @@ describe('MessageTimeline Kun runtime metadata smoke', () => {
     expect(html).not.toContain('Feishu / Lark inbound message')
   })
 
-  it('renders attachment, Skill, memory, web source, and child-agent chips in bubbles', () => {
+  it('renders tool-specific metadata chips in tool bubbles', () => {
     const block: ToolBlock = toolBlock({
       summary: 'web_search: docs',
       meta: {
@@ -270,9 +301,9 @@ describe('MessageTimeline Kun runtime metadata smoke', () => {
 
     const html = renderToStaticMarkup(createElement(MessageBubble, { block }))
 
-    expect(html).toContain('Attachments 1')
-    expect(html).toContain('Skills 1')
-    expect(html).toContain('Memories 1')
+    expect(html).not.toContain('Attachments 1')
+    expect(html).not.toContain('Skills 1')
+    expect(html).not.toContain('Memories 1')
     expect(html).toContain('Child agent')
     expect(html).toContain('research')
     expect(html).toContain('Sources 1')
@@ -296,7 +327,7 @@ describe('MessageTimeline Kun runtime metadata smoke', () => {
     expect(html).not.toContain('bg-red-500/10')
   })
 
-  it('renders the same runtime metadata on process timeline rows', () => {
+  it('renders tool-specific runtime metadata on process timeline rows', () => {
     const block: ChatBlock = toolBlock({
       summary: 'delegate: research',
       meta: {
@@ -325,9 +356,9 @@ describe('MessageTimeline Kun runtime metadata smoke', () => {
       })
     )
 
-    expect(html).toContain('Attachments 1')
-    expect(html).toContain('Skills 1')
-    expect(html).toContain('Memories 1')
+    expect(html).not.toContain('Attachments 1')
+    expect(html).not.toContain('Skills 1')
+    expect(html).not.toContain('Memories 1')
     expect(html).toContain('Child agent')
     expect(html).toContain('research')
     expect(html).toContain('Sources 1')
@@ -521,6 +552,8 @@ describe('MessageTimeline Kun runtime metadata smoke', () => {
       id: 'ui_freeform',
       requestId: 'input_freeform',
       status: 'pending',
+      // The live runtime is actively awaiting this request.
+      live: true,
       questions: [
         {
           header: 'Input',
@@ -546,6 +579,42 @@ describe('MessageTimeline Kun runtime metadata smoke', () => {
     expect(html).not.toContain('<textarea')
     expect(html).toContain('Answer below the input box')
     expect(html).toContain('Cancel')
+  })
+
+  it('renders a stale pending request_user_input from history as a non-actionable record (issue #606)', () => {
+    // A request rehydrated from a finished thread keeps `status: 'pending'` but
+    // is not `live`, so it must not offer Cancel (which would hit a dead gate).
+    const inputBlock: ChatBlock = {
+      kind: 'user_input',
+      id: 'ui_stale',
+      requestId: 'input_stale',
+      status: 'pending',
+      questions: [
+        {
+          header: 'Input',
+          id: 'direction',
+          question: '你更想去南方还是北方？',
+          options: []
+        }
+      ]
+    }
+
+    const html = renderToStaticMarkup(
+      createElement(ProcessSectionRow, {
+        section: { id: 'execution-input', kind: 'execution', blocks: [inputBlock] },
+        processing: true,
+        singleReasoningSection: false,
+        viewportRef: { current: null }
+      })
+    )
+
+    // The record still shows what was asked…
+    expect(html).toContain('你更想去南方还是北方？')
+    // …but offers no live affordances (the "answer below" hint and the Cancel
+    // button share one `pending` branch), so it can't fire a dead resolve.
+    expect(html).not.toContain('Answer below the input box')
+    // It reads as an ended record rather than an active prompt.
+    expect(html).toContain('Cancelled')
   })
 
   it('expands the live work timeline by default while keeping tool details collapsed', () => {

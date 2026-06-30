@@ -26,6 +26,7 @@ import {
   normalizeWorkflowSettings,
   normalizeWriteSettings,
   normalizeTerminalSettings,
+  normalizeChatContentMaxWidth,
   normalizeUiFontScale,
   type AppSettingsPatch,
   type AppSettingsV1
@@ -98,16 +99,20 @@ export function coerceRendererSettings(settings: AppSettingsV1): AppSettingsV1 {
       ? raw.theme
       : 'system'
   const uiFontScale = normalizeUiFontScale(raw.uiFontScale)
+  const chatContentMaxWidthPx = normalizeChatContentMaxWidth(raw.chatContentMaxWidthPx)
   return {
     version: 1,
     locale: raw.locale === 'zh' ? 'zh' : 'en',
     theme,
     uiFontScale,
+    chatContentMaxWidthPx,
     cursorSpotlight: raw.cursorSpotlight !== false,
     cursorSpotlightColor: normalizeCursorSpotlightColor(raw.cursorSpotlightColor),
     provider: normalizeModelProviderSettings(raw.provider),
     agents: kunSettingsEnvelope(mergeKunRuntimeSettings(defaultKunRuntimeSettings(), getKunRuntimeSettings(settings))),
     workspaceRoot: typeof raw.workspaceRoot === 'string' ? raw.workspaceRoot : DEFAULT_WORKSPACE_ROOT,
+    conversationWorkspaceRoot:
+      typeof raw.conversationWorkspaceRoot === 'string' ? raw.conversationWorkspaceRoot : '',
     log: {
       enabled: raw.log?.enabled !== false,
       retentionDays: typeof raw.log?.retentionDays === 'number'

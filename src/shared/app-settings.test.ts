@@ -32,6 +32,7 @@ import {
   isKunRuntimeInsecure,
   migrateLegacyAppSettings,
   normalizeAppSettings,
+  normalizeChatContentMaxWidth,
   parseClawUserPromptForDisplay,
   inferModelEndpointFormatFromUrl,
   kunToolPermissionModeFromSettings,
@@ -52,11 +53,13 @@ function settings(): AppSettingsV1 {
     locale: 'en',
     theme: 'system',
     uiFontScale: 0.82,
+    chatContentMaxWidthPx: 896,
     provider: defaultModelProviderSettings(),
     agents: {
       kun: defaultKunRuntimeSettings()
     },
     workspaceRoot: '/tmp/workspace',
+    conversationWorkspaceRoot: '~/Documents/Kun',
     log: { enabled: false, retentionDays: 7 },
     checkpointCleanup: { enabled: false, intervalDays: 3 },
     notifications: { turnComplete: true },
@@ -72,6 +75,20 @@ function settings(): AppSettingsV1 {
     disabledSkillIds: []
   }
 }
+
+describe('chat content max width', () => {
+  it('defaults invalid values to 896px', () => {
+    expect(normalizeChatContentMaxWidth(undefined)).toBe(896)
+    expect(normalizeChatContentMaxWidth('bad')).toBe(896)
+  })
+
+  it('clamps and rounds to 8px steps', () => {
+    expect(normalizeChatContentMaxWidth(500)).toBe(640)
+    expect(normalizeChatContentMaxWidth(896)).toBe(896)
+    expect(normalizeChatContentMaxWidth(1300)).toBe(1200)
+    expect(normalizeChatContentMaxWidth(905)).toBe(904)
+  })
+})
 
 describe('model endpoint format inference', () => {
   it('treats /completions custom endpoints as Chat Completions-shaped', () => {
@@ -986,6 +1003,10 @@ describe('legacy Kun defaults migration', () => {
       provider: {
         apiKey: 'sk-default',
         baseUrl: 'https://api.deepseek.com',
+        proxy: {
+          enabled: true,
+          url: 'http://127.0.0.1:7890'
+        },
         providers: [
           ...defaultModelProviderSettings().providers,
           {
@@ -1020,6 +1041,10 @@ describe('legacy Kun defaults migration', () => {
       ])
     )
     expect(migrated.agents.kun.providerId).toBe('custom-provider-2')
+    expect(migrated.provider.proxy).toEqual({
+      enabled: true,
+      url: 'http://127.0.0.1:7890'
+    })
     expect(resolveKunRuntimeSettings(migrated)).toEqual(
       expect.objectContaining({
         apiKey: 'sk-custom',

@@ -217,6 +217,7 @@ export class KunRuntimeProvider implements AgentProvider {
         attachmentIds: turn.attachmentIds,
         activeSkillIds: turn.activeSkillIds,
         injectedMemoryIds: turn.injectedMemoryIds,
+        injectedMemorySummaries: turn.injectedMemorySummaries,
         skillInjectionBytes: turn.skillInjectionBytes,
         workspaceCheckpointId: item.workspaceCheckpointId ?? turn.workspaceCheckpointId
       }))
@@ -225,6 +226,20 @@ export class KunRuntimeProvider implements AgentProvider {
       const block = chatBlockFromItem(item)
       return block ? [block] : []
     }))
+    // Re-derive the live ask-user flag from the runtime's pending gate so a
+    // request the agent is still awaiting stays answerable after a rehydration
+    // (thread switch, SSE recovery, restart) — and a stale `pending` item from a
+    // finished thread, whose gate entry is gone, stays a read-only record (#606).
+    const pendingUserInputIds = new Set(
+      Array.isArray(thread.pendingUserInputIds) ? thread.pendingUserInputIds : []
+    )
+    if (pendingUserInputIds.size > 0) {
+      for (const block of blocks) {
+        if (block.kind === 'user_input' && pendingUserInputIds.has(block.requestId)) {
+          block.live = true
+        }
+      }
+    }
     const latestTurn = turns.at(-1)
     const latestUserMessageId = [...items].reverse().find((item) => item.kind === 'user_message')?.id
     return {
@@ -691,10 +706,11 @@ export class KunRuntimeProvider implements AgentProvider {
     )
   }
 
-  async listMemories(options: { workspace?: string; includeDeleted?: boolean } = {}): Promise<CoreMemoryRecordJson[]> {
+  async listMemories(options: { workspace?: string; includeDeleted?: boolean; all?: boolean } = {}): Promise<CoreMemoryRecordJson[]> {
     const query = buildQuery({
       workspace: options.workspace,
-      include_deleted: options.includeDeleted
+      include_deleted: options.includeDeleted,
+      all: options.all
     })
     const response = await rendererRuntimeClient.runtimeRequest(`${KUN_MEMORY_PATH}${query}`, 'GET')
     if (!response.ok) {

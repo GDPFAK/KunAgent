@@ -72,6 +72,7 @@ export type WebCitationSource = {
 
 export type RuntimeDisclosureMetadata = {
   displayText?: string
+  messageSource?: 'background_shell' // client-only rendering hint; never sent to the runtime
   turnId?: string
   workspaceCheckpointId?: string
   attachmentIds?: string[]
@@ -80,6 +81,7 @@ export type RuntimeDisclosureMetadata = {
   generatedFiles?: GeneratedFileReference[]
   activeSkillIds?: string[]
   injectedMemoryIds?: string[]
+  injectedMemorySummaries?: Array<{ id: string; content: string }>
   skillInjectionBytes?: number
   child?: RuntimeChildMetadata
   sources?: WebCitationSource[]
@@ -300,6 +302,13 @@ export type ChatBlock =
       status: 'pending' | 'submitted' | 'cancelled' | 'error'
       answers?: UserInputAnswer[]
       errorMessage?: string
+      /**
+       * True only for a request the live runtime is currently awaiting (set by
+       * the `onUserInput` stream event). Historical blocks rehydrated from a
+       * finished thread never carry it, so a stale `pending` request reopened
+       * from history is not re-surfaced as an actionable prompt (issue #606).
+       */
+      live?: boolean
     }
 
 export type ApprovalRequestPayload = {
@@ -505,7 +514,7 @@ export interface AgentProvider {
     attachmentId: string,
     options?: { threadId?: string; workspace?: string }
   ): Promise<CoreAttachmentContentResponseJson>
-  listMemories?(options?: { workspace?: string; includeDeleted?: boolean }): Promise<CoreMemoryRecordJson[]>
+  listMemories?(options?: { workspace?: string; includeDeleted?: boolean; all?: boolean }): Promise<CoreMemoryRecordJson[]>
   createMemory?(input: {
     content: string
     scope?: 'user' | 'workspace' | 'project'

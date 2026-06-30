@@ -51,6 +51,11 @@ import {
   delegationDiagnostics,
   delegationProfiles
 } from './delegation.js'
+import {
+  backgroundShellGet,
+  backgroundShellList,
+  backgroundShellStop
+} from './background-shells.js'
 import { isAuthorized, bearerToken } from '../auth.js'
 import { ERRORS } from './runtime-error.js'
 import type { ServerRuntime } from './server-runtime.js'
@@ -150,6 +155,18 @@ export function buildRouter(runtime: ServerRuntime): Router {
     if (!authorize(request, runtime)) return ERRORS.unauthorized()
     return delegationAbort(runtime.delegationRuntime, ctx.params.childId)
   })
+  router.add('GET', '/v1/background-shells', async (request) => {
+    if (!authorize(request, runtime)) return ERRORS.unauthorized()
+    return backgroundShellList(runtime.backgroundShellRuntime, request)
+  })
+  router.add('GET', '/v1/background-shells/:sessionId', async (request, ctx) => {
+    if (!authorize(request, runtime)) return ERRORS.unauthorized()
+    return backgroundShellGet(runtime.backgroundShellRuntime, ctx.params.sessionId)
+  })
+  router.add('POST', '/v1/background-shells/:sessionId/stop', async (request, ctx) => {
+    if (!authorize(request, runtime)) return ERRORS.unauthorized()
+    return backgroundShellStop(runtime.backgroundShellRuntime, ctx.params.sessionId)
+  })
   router.add('GET', '/v1/workspace/status', async (request) => {
     if (!authorize(request, runtime)) return ERRORS.unauthorized()
     const url = new URL(request.url)
@@ -166,7 +183,7 @@ export function buildRouter(runtime: ServerRuntime): Router {
   })
   router.add('GET', '/v1/threads/:id', async (request, ctx) => {
     if (!authorize(request, runtime)) return ERRORS.unauthorized()
-    return getThread(runtime.threadService, ctx.params.id, runtime.sessionStore)
+    return getThread(runtime.threadService, ctx.params.id, runtime.sessionStore, runtime.userInputGate)
   })
   router.add('PATCH', '/v1/threads/:id', async (request, ctx) => {
     if (!authorize(request, runtime)) return ERRORS.unauthorized()
