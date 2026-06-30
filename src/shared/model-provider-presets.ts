@@ -157,6 +157,12 @@ const GLM_REASONING: ModelProviderReasoningCapabilityV1 = {
   requestProtocol: 'glm-chat-completions'
 }
 
+const DEEPSEEK_REASONING: ModelProviderReasoningCapabilityV1 = {
+  supportedEfforts: ['off', 'high', 'max'],
+  defaultEffort: 'max',
+  requestProtocol: 'deepseek-chat-completions'
+}
+
 // 通义千问 / 混元 / 豆包的「思考」开关各家用私有 body 字段,无法用现有 requestProtocol 精确映射,
 // 这里统一按「内置推理」建模(requestProtocol: 'none'):只展示 effort 开关、不向上游发送特定协议字段,避免请求被拒。
 const QWEN_REASONING: ModelProviderReasoningCapabilityV1 = {
@@ -350,8 +356,8 @@ export const MODEL_PROVIDER_PRESETS: ModelProviderPreset[] = [
       'kimi-k2.7': textChatProfile(131_072),
       'kimi-k2.7-code': textChatProfile(131_072),
       'kimi-k2.6': textChatProfile(131_072),
-      'deepseek-v4-pro': textChatProfile(131_072),
-      'deepseek-v4-flash': textChatProfile(131_072),
+      'deepseek-v4-pro': textChatProfile(1_000_000, DEEPSEEK_REASONING),
+      'deepseek-v4-flash': textChatProfile(1_000_000, DEEPSEEK_REASONING),
       'mimo-v2.5': textChatProfile(131_072),
       'mimo-v2.5-pro': textChatProfile(131_072),
       'mimo-v2-pro': textChatProfile(131_072),

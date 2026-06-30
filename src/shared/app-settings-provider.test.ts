@@ -1219,4 +1219,34 @@ describe('provider presets', () => {
     expect(resolved.modelProfiles['minimax-m3'].endpointFormat).toBe('messages')
     expect(resolved.modelProfiles['glm-5.1'].endpointFormat).toBeUndefined()
   })
+
+  it('keeps OpenCode Go DeepSeek v4 profiles aligned with DeepSeek defaults (#658)', () => {
+    const preset = getModelProviderPreset('opencode-go')
+    expect(preset).not.toBeNull()
+    const profile = modelProviderPresetProfile(preset!, 'sk-opencode')
+
+    for (const modelId of ['deepseek-v4-pro', 'deepseek-v4-flash']) {
+      expect(profile.modelProfiles[modelId]).toMatchObject({
+        contextWindowTokens: 1_000_000,
+        reasoning: {
+          supportedEfforts: ['off', 'high', 'max'],
+          defaultEffort: 'max',
+          requestProtocol: 'deepseek-chat-completions'
+        }
+      })
+    }
+
+    const resolved = resolveKunRuntimeSettings({
+      ...settings(),
+      provider: {
+        ...defaultModelProviderSettings(),
+        providers: [...defaultModelProviderSettings().providers, profile]
+      },
+      agents: {
+        kun: { ...defaultKunRuntimeSettings(), providerId: profile.id, model: 'deepseek-v4-pro' }
+      }
+    })
+    expect(resolved.modelProfiles['deepseek-v4-pro']).toEqual(profile.modelProfiles['deepseek-v4-pro'])
+    expect(resolved.modelProfiles['deepseek-v4-flash']).toEqual(profile.modelProfiles['deepseek-v4-flash'])
+  })
 })
