@@ -71,7 +71,7 @@ const rehypePlugins = [
 ] satisfies StreamdownProps['rehypePlugins']
 
 const math = createMathPlugin({
-  singleDollarTextMath: true,
+  singleDollarTextMath: false,
   errorColor: 'var(--ds-text-muted)'
 })
 

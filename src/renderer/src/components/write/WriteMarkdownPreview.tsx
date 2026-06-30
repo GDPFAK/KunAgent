@@ -71,7 +71,7 @@ export const writeMarkdownHardenOptions = {
 }
 
 const math = createMathPlugin({
-  singleDollarTextMath: true,
+  singleDollarTextMath: false,
   errorColor: 'var(--ds-text-muted)'
 })
 
