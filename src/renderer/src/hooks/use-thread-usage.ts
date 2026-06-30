@@ -88,6 +88,22 @@ export function primaryCacheHitRate(
   return usage.lastTurnCacheHitRate ?? usage.cacheHitRate
 }
 
+/**
+ * Cumulative thread cache hit rate derived from token counts — the SAME formula
+ * the overall usage panel uses (cachedTokens / (cachedTokens + cacheMissTokens)).
+ * This keeps the conversation bottom bar consistent with the overall stats
+ * (issue #654): the last-turn rate could read 0% while the thread cumulative is
+ * non-zero. Falls back to the backend-provided `cacheHitRate` when no token
+ * telemetry is available.
+ */
+export function cumulativeCacheHitRate(
+  usage: Pick<ThreadUsageSummary, 'cachedTokens' | 'cacheMissTokens' | 'cacheHitRate'>
+): number | null {
+  const total = usage.cachedTokens + usage.cacheMissTokens
+  if (total > 0) return usage.cachedTokens / total
+  return usage.cacheHitRate
+}
+
 export function formatCacheMissReason(reason: string): string {
   switch (reason) {
     case 'cold_request':

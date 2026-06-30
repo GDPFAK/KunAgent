@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { formatCost, loadThreadUsage, primaryCacheHitRate } from './use-thread-usage'
+import { cumulativeCacheHitRate, formatCost, loadThreadUsage, primaryCacheHitRate } from './use-thread-usage'
 
 type RuntimeRequest = (path: string, method?: string) => Promise<{ ok: boolean; status: number; body: string }>
 
@@ -38,6 +38,15 @@ describe('thread usage formatting', () => {
     expect(primaryCacheHitRate({ cacheHitRate: 0.4, lastTurnCacheHitRate: 0.95 })).toBe(0.95)
     expect(primaryCacheHitRate({ cacheHitRate: 0.4, lastTurnCacheHitRate: null })).toBe(0.4)
     expect(primaryCacheHitRate({ cacheHitRate: null, lastTurnCacheHitRate: null })).toBeNull()
+  })
+
+  it('derives the cumulative cache rate from tokens to match the overall usage panel (#654)', () => {
+    // Last-turn rate could be 0 while the thread cumulative is non-zero — the
+    // chip must show the token-derived cumulative so it matches the overall panel.
+    expect(cumulativeCacheHitRate({ cachedTokens: 41, cacheMissTokens: 959, cacheHitRate: 0 })).toBeCloseTo(0.041, 3)
+    // Falls back to the provided rate when there is no token telemetry.
+    expect(cumulativeCacheHitRate({ cachedTokens: 0, cacheMissTokens: 0, cacheHitRate: 0.8 })).toBe(0.8)
+    expect(cumulativeCacheHitRate({ cachedTokens: 0, cacheMissTokens: 0, cacheHitRate: null })).toBeNull()
   })
 
   it('keeps cache hit rate unknown for cachedTokens-only thread usage buckets', async () => {
