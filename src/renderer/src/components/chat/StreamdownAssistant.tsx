@@ -1,4 +1,4 @@
-import type { ComponentPropsWithRef, MouseEvent, ReactElement } from 'react'
+  import type { ComponentPropsWithRef, MouseEvent, ReactElement } from 'react'
 import { useEffect, useRef, useState } from 'react'
 import { Streamdown, type StreamdownProps } from 'streamdown'
 import remarkGfm from 'remark-gfm'
@@ -10,6 +10,8 @@ import { openWorkspacePathInEditor } from '../../lib/open-workspace-path'
 import { previewWorkspaceFile } from '../../lib/workspace-file-preview'
 import { useChatStore } from '../../store/chat-store'
 import { StreamdownCode } from './StreamdownCode'
+import { createMathPlugin } from '@streamdown/math'
+import 'katex/dist/katex.min.css'
 
 /** Reveal ~1/8 of the outstanding backlog per frame… */
 const CATCHUP_DIVISOR = 8
@@ -67,6 +69,11 @@ const rehypePlugins = [
     }
   ]
 ] satisfies StreamdownProps['rehypePlugins']
+
+const math = createMathPlugin({
+  singleDollarTextMath: false,
+  errorColor: 'var(--ds-text-muted)'
+})
 
 const components = {
   code: StreamdownCode,
@@ -173,6 +180,7 @@ export function StreamdownAssistant({ text, streaming, className }: Props): Reac
       remarkPlugins={[remarkGfm]}
       rehypePlugins={rehypePlugins}
       components={components}
+      plugins={{ math }}
     >
       {pacedText}
     </Streamdown>
