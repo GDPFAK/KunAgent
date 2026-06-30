@@ -1444,7 +1444,8 @@ export const gitCheckpointCreatePayloadSchema = z
 
 export const gitCheckpointRestorePayloadSchema = z
   .object({
-    checkpointId: trimmedString(MAX_ID_LENGTH * 4)
+    checkpointId: trimmedString(MAX_ID_LENGTH * 4),
+    allowPartialRestore: z.boolean().optional()
   })
   .strict()
 

@@ -1095,6 +1095,7 @@ export function registerAppIpcHandlers(options: RegisterAppIpcHandlersOptions): 
     return restoreGitCheckpoint({
       dataDir: await resolveKunThreadsDataDir(),
       checkpointId: request.checkpointId,
+      ...(request.allowPartialRestore ? { allowPartialRestore: true } : {}),
       storage: resolveCheckpointStorageOptions(settings.checkpointCleanup),
       // Bridge the main-process runtimeRequest into the shape restoreGitCheckpoint
       // expects ((path, {method, body}) => {ok,status,body}). On a transport-level

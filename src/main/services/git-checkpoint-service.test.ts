@@ -474,6 +474,64 @@ describe('git checkpoint storage limits (issue #651)', () => {
     expect(metadata.skippedUntracked?.length).toBe(1)
   })
 
+  it('marks a checkpoint with skipped untracked files as partial and refuses to restore it (no data loss)', async () => {
+    // A large untracked file is skipped by the size cap, so the checkpoint is
+    // partial. Restoring would `git clean -fd` the never-captured file, so the
+    // restore must be refused unless the caller opts in.
+    await writeFile(join(repoRoot, 'huge.bin'), Buffer.alloc(2_000_000, 1))
+    const checkpoint = await createGitCheckpoint({
+      dataDir,
+      workspaceRoot: repoRoot,
+      threadId: 'thr_partial',
+      storage: { maxUntrackedFileBytes: 1_000_000 }
+    })
+    if (!checkpoint.ok) throw new Error(checkpoint.message)
+    const dir = join(dataDir, 'git-checkpoints', checkpoint.checkpointId)
+    const metadata = JSON.parse(await readFile(join(dir, 'metadata.json'), 'utf-8')) as { completeness?: string }
+    expect(metadata.completeness).toBe('partial')
+
+    const restored = await restoreGitCheckpoint({ dataDir, checkpointId: checkpoint.checkpointId })
+    expect(restored.ok).toBe(false)
+    if (restored.ok) throw new Error('expected partial restore to be refused')
+    expect(restored.reason).toBe('partial')
+    expect('skippedUntracked' in restored && restored.skippedUntracked).toContain('huge.bin')
+    // The destructive ops never ran: the skipped file is byte-for-byte intact.
+    expect((await stat(join(repoRoot, 'huge.bin'))).size).toBe(2_000_000)
+  })
+
+  it('marks a fully-captured checkpoint as complete', async () => {
+    await writeFile(join(repoRoot, 'small.txt'), 'tiny')
+    const checkpoint = await createGitCheckpoint({ dataDir, workspaceRoot: repoRoot, threadId: 'thr_complete' })
+    if (!checkpoint.ok) throw new Error(checkpoint.message)
+    const dir = join(dataDir, 'git-checkpoints', checkpoint.checkpointId)
+    const metadata = JSON.parse(await readFile(join(dir, 'metadata.json'), 'utf-8')) as { completeness?: string }
+    expect(metadata.completeness).toBe('complete')
+  })
+
+  it('restores a partial checkpoint with allowPartialRestore and captures skipped files in a full rescue', async () => {
+    await writeFile(join(repoRoot, 'huge.bin'), Buffer.alloc(2_000_000, 7))
+    const checkpoint = await createGitCheckpoint({
+      dataDir,
+      workspaceRoot: repoRoot,
+      threadId: 'thr_partial_ok',
+      storage: { maxUntrackedFileBytes: 1_000_000 }
+    })
+    if (!checkpoint.ok) throw new Error(checkpoint.message)
+
+    const restored = await restoreGitCheckpoint({
+      dataDir,
+      checkpointId: checkpoint.checkpointId,
+      allowPartialRestore: true
+    })
+    expect(restored.ok).toBe(true)
+    if (!restored.ok) throw new Error(restored.message)
+    expect(restored.rescueCheckpointId).toMatch(/^gcp_/)
+    // The rescue used unbounded caps, so the over-budget file IS recoverable
+    // from the rescue even though the live workspace was cleaned.
+    const rescueUntracked = join(dataDir, 'git-checkpoints', restored.rescueCheckpointId as string, 'untracked', 'huge.bin')
+    expect((await stat(rescueUntracked)).size).toBe(2_000_000)
+  })
+
   it('prunes oldest checkpoints beyond the per-thread cap', async () => {
     const ids: string[] = []
     for (let i = 0; i < 4; i += 1) {

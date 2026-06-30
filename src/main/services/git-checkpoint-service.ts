@@ -19,6 +19,13 @@ type GitCheckpointMetadata = {
   untrackedFiles: string[]
   /** Untracked files deliberately NOT snapshotted (too large / over budget). */
   skippedUntracked?: string[]
+  /**
+   * Whether the snapshot captured every untracked file. `partial` means some
+   * untracked files were skipped (see `skippedUntracked`); restoring a partial
+   * checkpoint can destroy those never-captured files, so restore refuses a
+   * partial checkpoint unless the caller explicitly opts in.
+   */
+  completeness?: 'complete' | 'partial'
 }
 
 /**
@@ -556,7 +563,8 @@ export async function createGitCheckpoint(params: {
       currentBranch,
       createdAt: new Date().toISOString(),
       untrackedFiles,
-      ...(skippedUntracked.length ? { skippedUntracked } : {})
+      ...(skippedUntracked.length ? { skippedUntracked } : {}),
+      completeness: skippedUntracked.length ? 'partial' : 'complete'
     }
     await writeFile(join(dir, 'metadata.json'), JSON.stringify(metadata, null, 2), 'utf-8')
     // Bound per-thread retention so an active thread cannot grow unboundedly.
@@ -625,6 +633,15 @@ export async function restoreGitCheckpoint(params: {
   checkpointId: string
   storage?: GitCheckpointStorageOptions
   /**
+   * Opt-in to restoring a PARTIAL checkpoint (one whose snapshot skipped some
+   * untracked files because they were over the size budget). A partial restore
+   * runs `git clean -fd`, which deletes those never-captured files; without this
+   * flag the restore is refused so the user does not silently lose data. When
+   * enabled, a full (unbounded) rescue checkpoint is taken first so the cleaned
+   * files remain recoverable.
+   */
+  allowPartialRestore?: boolean
+  /**
    * Optional runtime bridge used to verify that no thread is mid-turn before
    * running the destructive `git reset --hard` / `git clean -fd`. When omitted
    * (e.g. from existing callers and unit tests) the check is skipped and the
@@ -639,6 +656,23 @@ export async function restoreGitCheckpoint(params: {
   if (!metadata) {
     return { ok: false, reason: 'not_found', message: `Git checkpoint not found: ${checkpointId}` }
   }
+
+  // Partial-checkpoint data-loss guard (P0-01). If the snapshot skipped any
+  // untracked file, the upcoming `git clean -fd` would delete those files with
+  // no snapshot to restore them. Refuse unless the caller explicitly opts in.
+  const skippedUntracked = metadata.skippedUntracked ?? []
+  const isPartial = metadata.completeness === 'partial' || skippedUntracked.length > 0
+  if (isPartial && !params.allowPartialRestore) {
+    return {
+      ok: false,
+      reason: 'partial',
+      message:
+        `This checkpoint is partial: ${skippedUntracked.length} untracked file(s) were too large to snapshot and are NOT stored in it. ` +
+        'Restoring would permanently delete them. Re-run with allowPartialRestore to proceed (a full rescue checkpoint will be taken first).',
+      skippedUntracked
+    }
+  }
+
   try {
     const repositoryRoot = metadata.repositoryRoot
     await assertNoUnmerged(repositoryRoot)
@@ -684,9 +718,18 @@ export async function restoreGitCheckpoint(params: {
       }
     }
 
+    // The rescue checkpoint is the safety net for `reset --hard` + `clean -fd`,
+    // so it MUST capture everything currently in the workspace — including large
+    // untracked files the normal size budget would skip. Use unbounded caps here
+    // (this is a rare, explicit, destructive operation) so nothing the clean is
+    // about to delete becomes unrecoverable.
     const rescue = await createGitCheckpoint({
       dataDir: params.dataDir,
-      ...(params.storage ? { storage: params.storage } : {}),
+      storage: {
+        ...(params.storage ?? {}),
+        maxUntrackedFileBytes: Number.POSITIVE_INFINITY,
+        maxUntrackedTotalBytes: Number.POSITIVE_INFINITY
+      },
       workspaceRoot: repositoryRoot,
       threadId: `${metadata.threadId}:rollback-rescue`
     })

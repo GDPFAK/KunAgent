@@ -29,6 +29,14 @@ export type GitCheckpointRestoreResult =
         | 'git_unavailable'
         | 'not_found'
         | 'conflict'
+        | 'partial'
         | 'error'
       message: string
+      /**
+       * Present when `reason === 'partial'`: untracked files that existed at
+       * checkpoint time but were NOT snapshotted (over the size budget).
+       * Restoring would `git clean` them with no way to bring them back, so the
+       * restore is refused unless the caller opts in with `allowPartialRestore`.
+       */
+      skippedUntracked?: string[]
     }

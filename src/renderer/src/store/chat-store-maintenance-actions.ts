@@ -797,11 +797,40 @@ export function createMaintenanceActions(
       return
     }
     const { activeThreadId, workspaceRoot } = get()
-    const restored = await window.kunGui.restoreGitCheckpoint({ checkpointId: targetCheckpointId }).catch((error) => ({
+    let restored = await window.kunGui.restoreGitCheckpoint({ checkpointId: targetCheckpointId }).catch((error) => ({
       ok: false as const,
       reason: 'error' as const,
       message: error instanceof Error ? error.message : String(error)
     }))
+    // A partial checkpoint skipped some untracked files (too large to capture).
+    // Restoring would delete them, so the main process refuses unless the user
+    // opts in. Surface the at-risk files and, on confirmation, retry with the
+    // opt-in (the main process then takes a full rescue checkpoint first).
+    if (!restored.ok && restored.reason === 'partial') {
+      const skipped = 'skippedUntracked' in restored && Array.isArray(restored.skippedUntracked)
+        ? restored.skippedUntracked
+        : []
+      const preview = skipped.slice(0, 10).join(', ') + (skipped.length > 10 ? ` … (+${skipped.length - 10})` : '')
+      const proceed = await confirmDialog(
+        i18n.t('common:rollbackWorkspacePartialConfirm'),
+        i18n.t('common:rollbackWorkspacePartialConfirmDetail', { files: preview })
+      )
+      if (!proceed) {
+        set({ error: null })
+        return
+      }
+      if (get().busy) {
+        set({ error: i18n.t('common:rollbackWorkspaceBusyError') })
+        return
+      }
+      restored = await window.kunGui
+        .restoreGitCheckpoint({ checkpointId: targetCheckpointId, allowPartialRestore: true })
+        .catch((error) => ({
+          ok: false as const,
+          reason: 'error' as const,
+          message: error instanceof Error ? error.message : String(error)
+        }))
+    }
     if (!restored.ok) {
       set({ error: restored.message })
       return
