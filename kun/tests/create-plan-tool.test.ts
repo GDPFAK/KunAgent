@@ -92,6 +92,7 @@ describe('create_plan tool: advertisement', () => {
       'grep',
       'find',
       'ls',
+      'repo_map',
       'user_input',
       'request_user_input',
       CREATE_PLAN_TOOL_NAME
@@ -104,7 +105,7 @@ describe('create_plan tool: advertisement', () => {
     const tools = await host.listTools(buildContext({ threadMode: 'plan' }))
     const names = tools.map((tool) => tool.name)
 
-    expect(names).toEqual(['read', 'grep', 'find', 'ls', CREATE_PLAN_TOOL_NAME])
+    expect(names).toEqual(['read', 'grep', 'find', 'ls', 'repo_map', CREATE_PLAN_TOOL_NAME])
   })
 
   it('keeps the normal agent-mode default tool advertisement unchanged', async () => {

@@ -542,11 +542,10 @@ function MessageTurn({
   )
   const onlyCompactionProcess = processBlocks.length > 0 && workProcessBlocks.length === 0
   const hasProcessError = workProcessBlocks.some(processBlockHasError)
-  // Only force the work process open (and lock it open) while the turn is still
-  // running. Once the turn completes — even if a tool call failed mid-turn — the
-  // panel should auto-collapse like a normal completed turn and stay user-toggleable.
+  // Error details should stay visible after completion so provider/runtime
+  // failures do not disappear into a collapsed work summary.
   const forceExpandForError = isProcessing && hasProcessError
-  const workExpanded = forceExpandForError || (workExpandedOverride ?? isProcessing)
+  const workExpanded = forceExpandForError || (workExpandedOverride ?? (isProcessing || hasProcessError))
   const reviewBlocks = useMemo(
     () => turn.blocks.filter((block) => block.kind === 'review'),
     [turn.blocks]

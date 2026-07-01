@@ -341,7 +341,7 @@ describe('Kun built-in tools', () => {
 
   it('exposes pi-style coding and read-only tool groups', () => {
     expect(buildCodingBuiltinLocalTools().map((tool) => tool.name)).toEqual(['read', 'bash', 'edit', 'write'])
-    expect(buildReadOnlyBuiltinLocalTools().map((tool) => tool.name)).toEqual(['read', 'grep', 'find', 'ls'])
+    expect(buildReadOnlyBuiltinLocalTools().map((tool) => tool.name)).toEqual(['read', 'grep', 'find', 'ls', 'repo_map'])
   })
 
   it('supports pi-style configurable built-in tool factory APIs', async () => {
@@ -352,7 +352,18 @@ describe('Kun built-in tools', () => {
       ls: { defaultLimit: 1 },
       bash: { defaultTimeoutSeconds: 5 }
     })
-    expect(Object.keys(toolRecord).sort()).toEqual(['bash', 'edit', 'find', 'grep', 'ls', 'lsp', 'read', 'write'])
+    expect(Object.keys(toolRecord).sort()).toEqual([
+      'bash',
+      'edit',
+      'find',
+      'grep',
+      'ls',
+      'lsp',
+      'read',
+      'repo_map',
+      'verify_changes',
+      'write'
+    ])
 
     await writeFile(join(workspace, 'limited.txt'), 'one\ntwo\nthree\n', 'utf8')
     const customHost = new LocalToolHost({ tools: [toolRecord.read, toolRecord.ls] })
@@ -369,13 +380,35 @@ describe('Kun built-in tools', () => {
     expect(defaultGrepLocalToolOperations).toEqual({})
     expect(defaultLsLocalToolOperations.readdir).toBeTypeOf('function')
     expect(createCodingTools().map((tool) => tool.name)).toEqual(['read', 'bash', 'edit', 'write'])
-    expect(createReadOnlyTools().map((tool) => tool.name)).toEqual(['read', 'grep', 'find', 'ls'])
+    expect(createReadOnlyTools().map((tool) => tool.name)).toEqual(['read', 'grep', 'find', 'ls', 'repo_map'])
     expect(createCodingToolDefinitions().map((tool) => tool.name)).toEqual(['read', 'bash', 'edit', 'write'])
-    expect(createReadOnlyToolDefinitions().map((tool) => tool.name)).toEqual(['read', 'grep', 'find', 'ls'])
+    expect(createReadOnlyToolDefinitions().map((tool) => tool.name)).toEqual(['read', 'grep', 'find', 'ls', 'repo_map'])
     const allTools = createAllTools()
     const allDefinitions = createAllToolDefinitions()
-    expect(Object.keys(allTools).sort()).toEqual(['bash', 'edit', 'find', 'grep', 'ls', 'lsp', 'read', 'write'])
-    expect(Object.keys(allDefinitions).sort()).toEqual(['bash', 'edit', 'find', 'grep', 'ls', 'lsp', 'read', 'write'])
+    expect(Object.keys(allTools).sort()).toEqual([
+      'bash',
+      'edit',
+      'find',
+      'grep',
+      'ls',
+      'lsp',
+      'read',
+      'repo_map',
+      'verify_changes',
+      'write'
+    ])
+    expect(Object.keys(allDefinitions).sort()).toEqual([
+      'bash',
+      'edit',
+      'find',
+      'grep',
+      'ls',
+      'lsp',
+      'read',
+      'repo_map',
+      'verify_changes',
+      'write'
+    ])
     expect(createReadTool).toBe(createReadLocalTool)
     expect(createReadToolDefinition).toBe(createReadLocalTool)
     expect(createWriteTool).toBeTypeOf('function')

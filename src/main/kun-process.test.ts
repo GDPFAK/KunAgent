@@ -27,6 +27,7 @@ vi.mock('electron', () => ({
 }))
 
 let tempRoot: string | null = null
+let testKunPort = 18899
 
 function createSettings(binaryPath: string): AppSettingsV1 {
   return {
@@ -38,7 +39,7 @@ function createSettings(binaryPath: string): AppSettingsV1 {
     provider: defaultModelProviderSettings(),
     agents: {
       kun: {
-        ...defaultKunRuntimeSettings(18899),
+        ...defaultKunRuntimeSettings(testKunPort),
         binaryPath,
         autoStart: true
       }
@@ -96,8 +97,24 @@ function canBindTestPort(port: number): Promise<boolean> {
   })
 }
 
-beforeEach(() => {
+function allocateTestPort(): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const server = createServer()
+    server.unref()
+    server.once('error', reject)
+    server.listen(0, '127.0.0.1', () => {
+      const address = server.address()
+      server.close(() => {
+        if (address && typeof address === 'object') resolve(address.port)
+        else reject(new Error('failed to allocate a test port'))
+      })
+    })
+  })
+}
+
+beforeEach(async () => {
   tempRoot = mkdtempSync(join(tmpdir(), 'kun-process-'))
+  testKunPort = await allocateTestPort()
   configureLogger({ dir: tempRoot, enabled: true, retentionDays: 7 })
 })
 
@@ -117,7 +134,7 @@ describe('startKunChild', () => {
       'ready-child.js',
       [
         "const http = require('node:http')",
-        "const port = 18899",
+        `const port = ${testKunPort}`,
         "const server = http.createServer((req, res) => {",
         "  res.setHeader('content-type', 'application/json')",
         "  res.end(JSON.stringify({ service: 'kun', mode: 'serve', status: 'ok' }))",
@@ -136,7 +153,7 @@ describe('startKunChild', () => {
     await module.stopKunChildAndWait()
     const logText = await readKunLog()
     expect(logText).toContain('KUN_READY')
-    expect(logText).toContain('ready marker received on port 18899')
+    expect(logText).toContain(`ready marker received on port ${testKunPort}`)
   })
 
   it('does not settle on the ready marker until the /health endpoint responds', async () => {
@@ -148,7 +165,7 @@ describe('startKunChild', () => {
         "const http = require('node:http')",
         "const { existsSync } = require('node:fs')",
         `const healthSignalPath = ${JSON.stringify(healthSignalPath)}`,
-        "const port = 18899",
+        `const port = ${testKunPort}`,
         // Emit the ready marker right away but serve no /health yet: the
         // marker alone must NOT be enough to settle the launch.
         "process.stdout.write('KUN_READY ' + JSON.stringify({ service: 'kun', mode: 'serve', port }) + '\\n')",
@@ -195,7 +212,7 @@ describe('startKunChild', () => {
         "const http = require('node:http')",
         "const { existsSync } = require('node:fs')",
         `const readySignalPath = ${JSON.stringify(readySignalPath)}`,
-        "const port = 18899",
+        `const port = ${testKunPort}`,
         'let sentReady = false',
         // Only stand up the /health server once the signal exists so the
         // parallel health probe cannot settle the launch before then.
@@ -306,7 +323,7 @@ describe('waitForKunStartupSettled', () => {
         "const http = require('node:http')",
         "const { existsSync } = require('node:fs')",
         `const readySignalPath = ${JSON.stringify(readySignalPath)}`,
-        "const port = 18899",
+        `const port = ${testKunPort}`,
         'let sentReady = false',
         // Only stand up the /health server once the signal exists so the
         // parallel health probe cannot settle the launch before then.

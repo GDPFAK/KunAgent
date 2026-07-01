@@ -215,10 +215,6 @@ export function ProcessSectionRow({
   const { t } = useTranslation('common')
   const [userExpanded, setUserExpanded] = useState<boolean | null>(null)
 
-  if (section.kind === 'subagent') {
-    return <SubagentGroup blocks={section.blocks} />
-  }
-
   const assistantBlocks =
     section.kind === 'output'
       ? section.blocks.filter(
@@ -245,11 +241,16 @@ export function ProcessSectionRow({
   const reasoningText = section.kind === 'reasoning' ? getReasoningSectionText(section) : ''
   const canToggleSection = hasDetails && !forceExpanded
   const showActiveError = active && hasError
+  const shouldDeferDetails = section.kind !== 'subagent'
   const { ref: deferredDetailRef, shouldRender: shouldRenderDetail } = useDeferredRender<HTMLDivElement>({
-    enabled: expanded,
-    immediate: active || section.kind === 'execution',
+    enabled: shouldDeferDetails && expanded,
+    immediate: shouldDeferDetails && (active || section.kind === 'execution'),
     root: viewportRef
   })
+
+  if (section.kind === 'subagent') {
+    return <SubagentGroup blocks={section.blocks} />
+  }
 
   if (section.kind === 'execution' && section.blocks.length === 1) {
     const [block] = section.blocks
@@ -384,8 +385,8 @@ function ProcessStackRows({
         const autoOpenPending = processBlockIsAutoOpenPending(block, processing) || isPendingApproval(block)
         const errorTone = processBlockErrorTone(block)
         const isError = errorTone !== null
-        // Tool-call errors stay collapsed (red header only); other error blocks still auto-open.
-        const defaultOpen = isError && block.kind !== 'tool'
+        // Error details are visible by default but remain collapsible.
+        const defaultOpen = isError
         const forceOpen = autoOpenPending || autoOpenRequestInput
         const userClosed = closedBlockIds.has(block.id)
         const userOpened = openBlockId === block.id
@@ -500,8 +501,8 @@ function ProcessEntryRow({
   const errorTone = processBlockErrorTone(block)
   const isError = errorTone !== null
   const forceOpen = isAutoOpenPending || isAssistantProcessText || isStreamingAssistant
-  // Tool-call errors stay collapsed (red header only); other error blocks still auto-open.
-  const defaultOpen = isError && block.kind !== 'tool'
+  // Error details are visible by default but remain collapsible.
+  const defaultOpen = isError
   const open =
     canExpand &&
     (forceOpen || (userOpen ?? defaultOpen))
