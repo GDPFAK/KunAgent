@@ -4,6 +4,8 @@ import {
   buildMcpConfig,
   buildRemoteMcpConfig,
   customMcpConfigFragment,
+  auditMcpConfigSupplyChain,
+  auditMarketplaceInstall,
   isAllowedDocsUrl,
   isHttpsUrl,
   mcpConfigHasServer,
@@ -84,7 +86,7 @@ describe('PluginMarketplaceView MCP config helpers', () => {
 
     const merged = mergeMcpJsonConfig(
       existing,
-      buildMcpConfig('playwright', 'npx', ['-y', '@playwright/mcp@latest'])
+      buildMcpConfig('playwright', 'npx', ['-y', '@playwright/mcp@0.0.77'])
     )
     const parsed = JSON.parse(merged.text) as Record<string, any>
 
@@ -95,20 +97,50 @@ describe('PluginMarketplaceView MCP config helpers', () => {
       enabled: true,
       transport: 'stdio',
       command: 'npx',
-      args: ['-y', '@playwright/mcp@latest'],
+      args: ['-y', '@playwright/mcp@0.0.77'],
       trustScope: 'user'
     })
     expect(mcpConfigHasServer(merged.text, 'playwright')).toBe(true)
   })
 
   it('detects duplicate MCP servers instead of appending old-style snippets', () => {
-    const fragment = buildMcpConfig('context7', 'npx', ['-y', '@upstash/context7-mcp@latest'])
+    const fragment = buildMcpConfig('context7', 'npx', ['-y', '@upstash/context7-mcp@3.2.2'])
     const first = mergeMcpJsonConfig('', fragment)
     const second = mergeMcpJsonConfig(first.text, fragment)
 
     expect(first.alreadyExists).toBe(false)
     expect(second.alreadyExists).toBe(true)
     expect(JSON.parse(second.text).servers.context7).toMatchObject({ command: 'npx' })
+  })
+
+  it.each([
+    ['npx', '@upstash/context7-mcp@latest'],
+    ['npx.cmd', '@upstash/context7-mcp@3.2'],
+    ['C:\\Program Files\\nodejs\\npx.cmd', '@upstash/context7-mcp@^3.2.2']
+  ])('rejects non-exact package versions for %s', (command, packageSpec) => {
+    const audit = auditMcpConfigSupplyChain(buildMcpConfig('context7', command, ['-y', packageSpec]))
+    expect(audit.ok).toBe(false)
+    expect(audit.errors.join('\n')).toMatch(/exact npm package version/)
+  })
+
+  it.each(['npx', 'npx.cmd', 'C:\\Program Files\\nodejs\\npx.cmd'])('allows exact package versions for %s', (command) => {
+    const audit = auditMcpConfigSupplyChain(buildMcpConfig('context7', command, ['-y', '@upstash/context7-mcp@3.2.2']))
+    expect(audit.ok).toBe(true)
+    expect(audit.permissions).toEqual(expect.arrayContaining(['command', 'file', 'network']))
+  })
+
+  it('audits a marketplace MCP install before writing config', () => {
+    const audit = auditMarketplaceInstall({
+      id: 'context7',
+      kind: 'mcp',
+      title: 'Context7',
+      description: 'Use Context7',
+      group: 'recommended',
+      mcpConfig: () => buildMcpConfig('context7', 'npx', ['-y', '@upstash/context7-mcp@3.2.2']),
+      supplyChain: { source: 'mcp', permissions: ['command', 'network'] }
+    }, '/workspace')
+    expect(audit.ok).toBe(true)
+    expect(audit.permissions).toEqual(expect.arrayContaining(['command', 'file', 'network']))
   })
 
   it('accepts custom JSON as either a single server or a Kun config fragment', () => {

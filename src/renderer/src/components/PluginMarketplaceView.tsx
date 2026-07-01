@@ -62,10 +62,26 @@ type MarketplaceItem = {
   serverIds?: string[]
   mcpConfig?: (workspaceRoot: string) => JsonRecord
   oauth?: OAuthConnectorInfo
+  supplyChain?: SupplyChainInfo
   skillInstructions?: string
 }
 
 type JsonRecord = Record<string, unknown>
+
+type SupplyChainPermission = 'file' | 'command' | 'network' | 'secret'
+
+type SupplyChainInfo = {
+  source: 'mcp' | 'remote-mcp' | 'skill'
+  permissions: SupplyChainPermission[]
+  packageName?: string
+  version?: string
+}
+
+type MarketplaceInstallAudit = {
+  ok: boolean
+  permissions: SupplyChainPermission[]
+  errors: string[]
+}
 
 type OAuthConnectorInfo = {
   docsUrl: string
@@ -247,6 +263,90 @@ function buildRemoteMcpServer(url: string): JsonRecord {
     trustScope: 'user',
     timeoutMs: 30_000
   }
+}
+
+const PERMISSION_LABELS: Record<SupplyChainPermission, string> = {
+  file: 'File',
+  command: 'Command',
+  network: 'Network',
+  secret: 'Secret'
+}
+
+function uniquePermissions(permissions: readonly SupplyChainPermission[]): SupplyChainPermission[] {
+  return [...new Set(permissions)]
+}
+
+export function auditMcpConfigSupplyChain(config: JsonRecord): MarketplaceInstallAudit {
+  const permissions: SupplyChainPermission[] = ['network']
+  const errors: string[] = []
+  const servers = isJsonRecord(config.servers) ? config.servers : {}
+  for (const [id, server] of Object.entries(servers)) {
+    if (!isJsonRecord(server)) {
+      errors.push(`MCP server "${id}" must be an object.`)
+      continue
+    }
+    if (typeof server.command === 'string' && server.command.trim()) {
+      permissions.push('command', 'file')
+      const command = executableBasename(server.command)
+      const args = Array.isArray(server.args) ? server.args.filter((arg): arg is string => typeof arg === 'string') : []
+      if (command === 'npx') {
+        const spec = npxPackageSpec(args)
+        if (!spec) {
+          errors.push(`MCP server "${id}" uses npx without an exact package version.`)
+        } else if (!isExactNpmPackageSpec(spec)) {
+          errors.push(`MCP server "${id}" must pin an exact npm package version (got "${spec}").`)
+        }
+      }
+    }
+    if (isJsonRecord(server.env) && Object.keys(server.env).length > 0) {
+      permissions.push('secret')
+    }
+    if (typeof server.url === 'string') {
+      permissions.push('network')
+      if (!isHttpsUrl(server.url)) errors.push(`MCP server "${id}" URL must use HTTPS.`)
+    }
+  }
+  return { ok: errors.length === 0, permissions: uniquePermissions(permissions), errors }
+}
+
+export function auditMarketplaceInstall(item: MarketplaceItem, workspaceRoot: string): MarketplaceInstallAudit {
+  const configuredPermissions = item.supplyChain?.permissions ?? []
+  const config = item.mcpConfig?.(workspaceRoot)
+  if (!config) {
+    return {
+      ok: false,
+      permissions: uniquePermissions(configuredPermissions),
+      errors: ['MCP config is missing.']
+    }
+  }
+  const audit = auditMcpConfigSupplyChain(config)
+  return {
+    ok: audit.ok,
+    permissions: uniquePermissions([...configuredPermissions, ...audit.permissions]),
+    errors: audit.errors
+  }
+}
+
+function executableBasename(command: string): string {
+  const normalized = command.trim().replace(/^['"]|['"]$/g, '').replace(/\\/g, '/')
+  const basename = normalized.slice(normalized.lastIndexOf('/') + 1).toLowerCase()
+  return basename.replace(/\.(?:cmd|exe)$/i, '')
+}
+
+function npxPackageSpec(args: readonly string[]): string | null {
+  for (const arg of args) {
+    if (!arg || arg.startsWith('-')) continue
+    return arg
+  }
+  return null
+}
+
+function isExactNpmPackageSpec(spec: string): boolean {
+  if (spec.endsWith('@latest') || spec.includes('*') || spec.includes('^') || spec.includes('~')) return false
+  const at = spec.lastIndexOf('@')
+  if (at <= 0) return false
+  const version = spec.slice(at + 1)
+  return /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/.test(version)
 }
 
 export function buildMcpConfig(
@@ -594,8 +694,9 @@ const RECOMMENDED_ITEMS: MarketplaceItem[] = [
       buildMcpConfig(
         'playwright',
         'npx',
-        ['-y', '@playwright/mcp@latest']
-      )
+        ['-y', '@playwright/mcp@0.0.77']
+      ),
+    supplyChain: { source: 'mcp', packageName: '@playwright/mcp', version: '0.0.77', permissions: ['command', 'network', 'file'] }
   },
   {
     id: 'github',
@@ -607,8 +708,9 @@ const RECOMMENDED_ITEMS: MarketplaceItem[] = [
       buildMcpConfig(
         'github',
         'npx',
-        ['-y', '@modelcontextprotocol/server-github']
-      )
+        ['-y', '@modelcontextprotocol/server-github@2025.4.8']
+      ),
+    supplyChain: { source: 'mcp', packageName: '@modelcontextprotocol/server-github', version: '2025.4.8', permissions: ['command', 'network', 'secret'] }
   },
   {
     id: 'vercel',
@@ -635,6 +737,7 @@ const RECOMMENDED_ITEMS: MarketplaceItem[] = [
       ],
       noteKey: 'pluginOAuthVercelNote'
     },
+    supplyChain: { source: 'remote-mcp', permissions: ['network', 'secret'] },
     mcpConfig: () =>
       buildRemoteMcpConfig({
         vercel: 'https://mcp.vercel.com'
@@ -669,6 +772,7 @@ const RECOMMENDED_ITEMS: MarketplaceItem[] = [
       ],
       noteKey: 'pluginOAuthGoogleNote'
     },
+    supplyChain: { source: 'remote-mcp', permissions: ['network', 'secret', 'file'] },
     mcpConfig: () =>
       buildRemoteMcpConfig(GOOGLE_WORKSPACE_MCP_SERVERS)
   },
@@ -682,8 +786,9 @@ const RECOMMENDED_ITEMS: MarketplaceItem[] = [
       buildMcpConfig(
         'context7',
         'npx',
-        ['-y', '@upstash/context7-mcp@latest']
-      )
+        ['-y', '@upstash/context7-mcp@3.2.2']
+      ),
+    supplyChain: { source: 'mcp', packageName: '@upstash/context7-mcp', version: '3.2.2', permissions: ['command', 'network'] }
   },
   {
     id: 'sequential-thinking',
@@ -695,8 +800,9 @@ const RECOMMENDED_ITEMS: MarketplaceItem[] = [
       buildMcpConfig(
         'sequential-thinking',
         'npx',
-        ['-y', '@modelcontextprotocol/server-sequential-thinking']
-      )
+        ['-y', '@modelcontextprotocol/server-sequential-thinking@2025.12.18']
+      ),
+    supplyChain: { source: 'mcp', packageName: '@modelcontextprotocol/server-sequential-thinking', version: '2025.12.18', permissions: ['command'] }
   },
   {
     id: 'memory',
@@ -708,8 +814,9 @@ const RECOMMENDED_ITEMS: MarketplaceItem[] = [
       buildMcpConfig(
         'memory',
         'npx',
-        ['-y', '@modelcontextprotocol/server-memory']
-      )
+        ['-y', '@modelcontextprotocol/server-memory@2026.1.26']
+      ),
+    supplyChain: { source: 'mcp', packageName: '@modelcontextprotocol/server-memory', version: '2026.1.26', permissions: ['command', 'file'] }
   },
   {
     id: 'brave-search',
@@ -721,9 +828,10 @@ const RECOMMENDED_ITEMS: MarketplaceItem[] = [
       buildMcpConfig(
         'brave-search',
         'npx',
-        ['-y', '@modelcontextprotocol/server-brave-search'],
+        ['-y', '@modelcontextprotocol/server-brave-search@0.6.2'],
         { env: { BRAVE_API_KEY: '' } }
-      )
+      ),
+    supplyChain: { source: 'mcp', packageName: '@modelcontextprotocol/server-brave-search', version: '0.6.2', permissions: ['command', 'network', 'secret'] }
   },
   {
     id: 'code-review',
@@ -731,6 +839,7 @@ const RECOMMENDED_ITEMS: MarketplaceItem[] = [
     titleKey: 'pluginSkillReviewTitle',
     descriptionKey: 'pluginSkillReviewDesc',
     group: 'recommended',
+    supplyChain: { source: 'skill', permissions: ['file'] },
     skillInstructions:
       'Use this skill when reviewing a code change. Prioritize correctness, regressions, security, performance, and missing tests. Lead with concrete findings and file references.'
   },
@@ -740,6 +849,7 @@ const RECOMMENDED_ITEMS: MarketplaceItem[] = [
     titleKey: 'pluginSkillFrontendTitle',
     descriptionKey: 'pluginSkillFrontendDesc',
     group: 'recommended',
+    supplyChain: { source: 'skill', permissions: ['file'] },
     skillInstructions:
       'Use this skill when improving UI. Preserve the product style, check responsive states, avoid generic layouts, and verify the result visually before handing it back.'
   },
@@ -749,6 +859,7 @@ const RECOMMENDED_ITEMS: MarketplaceItem[] = [
     titleKey: 'pluginSkillBugTitle',
     descriptionKey: 'pluginSkillBugDesc',
     group: 'recommended',
+    supplyChain: { source: 'skill', permissions: ['file', 'command'] },
     skillInstructions:
       'Use this skill when investigating bugs. Reproduce or narrow the symptom, trace the data flow, identify the smallest fix, and add focused verification where possible.'
   },
@@ -758,6 +869,7 @@ const RECOMMENDED_ITEMS: MarketplaceItem[] = [
     titleKey: 'pluginSkillReleaseTitle',
     descriptionKey: 'pluginSkillReleaseDesc',
     group: 'recommended',
+    supplyChain: { source: 'skill', permissions: ['file'] },
     skillInstructions:
       'Use this skill when preparing release notes. Group user-facing changes by outcome, call out migrations or risks, and keep wording concise and scannable.'
   }
@@ -1053,6 +1165,8 @@ export function PluginMarketplaceView({ leftSidebarCollapsed, onToggleLeftSideba
 
   const installMcpItem = async (item: MarketplaceItem): Promise<void> => {
     if (!item.mcpConfig) return
+    const audit = auditMarketplaceInstall(item, workspaceRoot)
+    if (!audit.ok) throw new Error(audit.errors.join('\n'))
     await appendMcpConfig(item.id, item.mcpConfig(workspaceRoot))
   }
 
@@ -1130,7 +1244,10 @@ export function PluginMarketplaceView({ leftSidebarCollapsed, onToggleLeftSideba
             .map((arg) => arg.trim())
             .filter(Boolean)
         )
-        await appendMcpConfig(id, customMcpConfigFragment(id, customConfig, fallback))
+        const fragment = customMcpConfigFragment(id, customConfig, fallback)
+        const audit = auditMcpConfigSupplyChain(fragment)
+        if (!audit.ok) throw new Error(audit.errors.join('\n'))
+        await appendMcpConfig(id, fragment)
       } else {
         if (!selectedSkillRoot?.path) {
           setNotice({ tone: 'error', message: t('pluginSkillRootMissing') })
@@ -1896,6 +2013,11 @@ function PluginSection({
                     {item.oauth ? (
                       <span className="shrink-0 rounded-md bg-sky-500/15 px-2 py-0.5 text-[11px] font-semibold text-sky-700 dark:text-sky-200">
                         {t('pluginOAuthBadge')}
+                      </span>
+                    ) : null}
+                    {item.supplyChain?.permissions.length ? (
+                      <span className="shrink-0 rounded-md bg-ds-subtle px-2 py-0.5 text-[11px] font-semibold text-ds-muted">
+                        {item.supplyChain.permissions.map((permission) => PERMISSION_LABELS[permission]).join(' / ')}
                       </span>
                     ) : null}
                   </div>
