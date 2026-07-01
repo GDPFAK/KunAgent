@@ -16,6 +16,8 @@ export interface AttachmentStore {
     name: string
     data: Buffer
     mimeType?: string
+    documentText?: string
+    pageCount?: number
     localFilePath?: string
     textFallback?: AttachmentTextFallback
     threadId?: string
@@ -43,6 +45,8 @@ export class FileAttachmentStore implements AttachmentStore {
     name: string
     data: Buffer
     mimeType?: string
+    documentText?: string
+    pageCount?: number
     localFilePath?: string
     textFallback?: AttachmentTextFallback
     threadId?: string
@@ -50,14 +54,7 @@ export class FileAttachmentStore implements AttachmentStore {
   }): Promise<AttachmentMetadata> {
     await mkdir(this.options.rootDir, { recursive: true })
     const image = detectImage(input.data)
-    if (!image) throw new Error('unsupported image MIME type')
-    if (input.mimeType && input.mimeType !== image.mimeType) throw new Error('declared MIME type does not match image content')
-    if (!this.options.config.allowedMimeTypes.includes(image.mimeType)) throw new Error(`image MIME type is not allowed: ${image.mimeType}`)
-    if (input.data.byteLength > this.options.config.maxImageBytes) throw new Error(`image exceeds ${this.options.config.maxImageBytes} byte limit`)
-    const maxDimension = Math.max(image.width ?? 0, image.height ?? 0)
-    if (maxDimension > this.options.config.maxImageDimension) {
-      throw new Error(`image exceeds ${this.options.config.maxImageDimension}px dimension limit`)
-    }
+    const descriptor = image ? this.describeImage(image, input) : this.describeDocument(input)
     if (input.textFallback) validateTextFallback(input.textFallback, this.options.config)
     const hash = createHash('sha256').update(input.data).digest('hex')
     const id = `att_${hash.slice(0, 24)}`
@@ -68,8 +65,13 @@ export class FileAttachmentStore implements AttachmentStore {
     if (existing) {
       const next = mergeScope({
         ...existing,
+        kind: descriptor.kind,
+        mimeType: descriptor.mimeType,
         ...(input.localFilePath ? { localFilePath: input.localFilePath } : {}),
         ...(input.textFallback ? { textFallback: input.textFallback } : {}),
+        ...(descriptor.documentText !== undefined ? { documentText: descriptor.documentText } : {}),
+        ...(descriptor.pageCount ? { pageCount: descriptor.pageCount } : {}),
+        ...(descriptor.truncated !== undefined ? { truncated: descriptor.truncated } : {}),
         updatedAt: now
       }, input)
       await writeFile(contentPath, input.data)
@@ -79,11 +81,15 @@ export class FileAttachmentStore implements AttachmentStore {
     const metadata: AttachmentMetadata = AttachmentMetadataSchema.parse(mergeScope({
       id,
       name: input.name,
-      mimeType: image.mimeType,
+      kind: descriptor.kind,
+      mimeType: descriptor.mimeType,
       byteSize: input.data.byteLength,
       hash,
-      ...(image.width ? { width: image.width } : {}),
-      ...(image.height ? { height: image.height } : {}),
+      ...(descriptor.width ? { width: descriptor.width } : {}),
+      ...(descriptor.height ? { height: descriptor.height } : {}),
+      ...(descriptor.documentText !== undefined ? { documentText: descriptor.documentText } : {}),
+      ...(descriptor.pageCount ? { pageCount: descriptor.pageCount } : {}),
+      ...(descriptor.truncated !== undefined ? { truncated: descriptor.truncated } : {}),
       ...(input.localFilePath ? { localFilePath: input.localFilePath } : {}),
       ...(input.textFallback ? { textFallback: input.textFallback } : {}),
       threadIds: [],
@@ -94,6 +100,49 @@ export class FileAttachmentStore implements AttachmentStore {
     await writeFile(contentPath, input.data)
     await writeFile(metadataPath, JSON.stringify(metadata, null, 2), 'utf8')
     return metadata
+  }
+
+  private describeImage(
+    image: { mimeType: string; width?: number; height?: number },
+    input: { data: Buffer; mimeType?: string }
+  ): AttachmentDescriptor {
+    if (input.mimeType && input.mimeType !== image.mimeType) throw new Error('declared MIME type does not match image content')
+    if (!this.options.config.allowedMimeTypes.includes(image.mimeType)) throw new Error(`image MIME type is not allowed: ${image.mimeType}`)
+    if (input.data.byteLength > this.options.config.maxImageBytes) throw new Error(`image exceeds ${this.options.config.maxImageBytes} byte limit`)
+    const maxDimension = Math.max(image.width ?? 0, image.height ?? 0)
+    if (maxDimension > this.options.config.maxImageDimension) {
+      throw new Error(`image exceeds ${this.options.config.maxImageDimension}px dimension limit`)
+    }
+    return { kind: 'image', mimeType: image.mimeType, width: image.width, height: image.height }
+  }
+
+  private describeDocument(input: {
+    data: Buffer
+    mimeType?: string
+    documentText?: string
+    pageCount?: number
+  }): AttachmentDescriptor {
+    const mimeType = resolveDocumentMimeType(input)
+    const allowed = this.options.config.allowedDocumentMimeTypes
+    if (!mimeType || !allowed.includes(mimeType)) {
+      throw new Error(`unsupported attachment type (expected an image or an allowed document, got ${mimeType ?? input.mimeType ?? 'unknown'})`)
+    }
+    if (input.data.byteLength > this.options.config.maxDocumentBytes) {
+      throw new Error(`document exceeds ${this.options.config.maxDocumentBytes} byte limit`)
+    }
+    const rawText = input.documentText ?? decodeTextDocument(mimeType, input.data)
+    if (rawText === undefined) {
+      throw new Error(`document text is required for ${mimeType} attachments`)
+    }
+    const limit = this.options.config.maxDocumentTextChars
+    const truncated = rawText.length > limit
+    return {
+      kind: 'document',
+      mimeType,
+      documentText: truncated ? rawText.slice(0, limit) : rawText,
+      ...(input.pageCount ? { pageCount: input.pageCount } : {}),
+      ...(truncated ? { truncated: true } : {})
+    }
   }
 
   async get(id: string): Promise<AttachmentMetadata | null> {
@@ -185,6 +234,28 @@ function validateTextFallback(fallback: AttachmentTextFallback, config: Attachme
   if (maxDimension > config.textFallbackMaxImageDimension) {
     throw new Error(`fallback image exceeds ${config.textFallbackMaxImageDimension}px dimension limit`)
   }
+}
+
+type AttachmentDescriptor = {
+  kind: 'image' | 'document'
+  mimeType: string
+  width?: number
+  height?: number
+  documentText?: string
+  pageCount?: number
+  truncated?: boolean
+}
+
+function resolveDocumentMimeType(input: { data: Buffer; mimeType?: string }): string | undefined {
+  if (input.data.length >= 5 && input.data.subarray(0, 5).toString('ascii') === '%PDF-') {
+    return 'application/pdf'
+  }
+  return input.mimeType?.trim().toLowerCase() || undefined
+}
+
+function decodeTextDocument(mimeType: string, data: Buffer): string | undefined {
+  if (!mimeType.startsWith('text/') && mimeType !== 'application/json') return undefined
+  return data.toString('utf8').replace(/^\uFEFF/, '')
 }
 
 export function detectImage(buffer: Buffer): { mimeType: string; width?: number; height?: number } | null {

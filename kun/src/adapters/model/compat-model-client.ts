@@ -19,6 +19,7 @@ import {
   type ModelEndpointFormat
 } from '../../contracts/model-endpoint-format.js'
 import { createProxyFetch } from './proxy-fetch.js'
+import { wrapUntrustedContent } from '../../security/untrusted-content.js'
 
 /**
  * Configuration for the compatible HTTP model client. Chat
@@ -694,6 +695,9 @@ export class CompatModelClient implements ModelClient {
     }
     if (request.attachmentTextFallbacks?.length) {
       attachTextFallbacksToLatestUserMessage(out, request.attachmentTextFallbacks)
+    }
+    if (request.attachmentDocuments?.length) {
+      attachDocumentsToLatestUserMessage(out, request.attachmentDocuments)
     }
     return normalizeThinkingAssistantMessages(healToolMessagePairs(out), thinkingMode)
   }
@@ -2647,6 +2651,46 @@ function attachTextFallbacksToLatestUserMessage(
     message.content = text
     return
   }
+}
+
+function attachDocumentsToLatestUserMessage(
+  messages: ChatMessage[],
+  documents: NonNullable<ModelRequest['attachmentDocuments']>
+): void {
+  const text = documents.map(formatAttachmentDocument).join('\n\n')
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index]
+    if (message.role !== 'user') continue
+    if (typeof message.content === 'string') {
+      message.content = message.content ? `${message.content}\n\n${text}` : text
+      return
+    }
+    if (Array.isArray(message.content)) {
+      message.content.push({ type: 'text', text })
+      return
+    }
+    message.content = text
+    return
+  }
+}
+
+function formatAttachmentDocument(
+  document: NonNullable<ModelRequest['attachmentDocuments']>[number]
+): string {
+  return [
+    '[Attached document]',
+    `Name: ${document.name}`,
+    `FilePath: ${document.localFilePath ?? 'unknown'}`,
+    `MIME: ${document.mimeType}`,
+    ...(document.pageCount ? [`Pages: ${document.pageCount}`] : []),
+    ...(document.truncated ? ['Note: text truncated to fit the context limit'] : []),
+    'Content:',
+    wrapUntrustedContent({
+      content: document.text,
+      source: { kind: 'document', label: document.name }
+    }),
+    '[/Attached document]'
+  ].join('\n')
 }
 
 function formatAttachmentTextFallback(

@@ -279,6 +279,15 @@ function isPdfAttachmentFile(file: File): boolean {
   return file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')
 }
 
+function arrayBufferToBase64(buffer: ArrayBuffer): string {
+  const bytes = new Uint8Array(buffer)
+  let binary = ''
+  for (let index = 0; index < bytes.length; index += 0x8000) {
+    binary += String.fromCharCode(...bytes.subarray(index, index + 0x8000))
+  }
+  return btoa(binary)
+}
+
 function stripTransientAttachmentFields(attachments: AttachmentReference[]): AttachmentReference[] {
   return attachments.map(({ documentText: _documentText, ...attachment }) => attachment)
 }
@@ -1201,20 +1210,32 @@ export function Workbench(): ReactElement {
           if (!localFilePath || typeof window.kunGui?.readLocalPdfText !== 'function') {
             throw new Error(t('composerPdfAttachmentUnavailable'))
           }
+          if (!attachmentCapabilities || typeof provider.uploadAttachment !== 'function') {
+            throw new Error(t('composerAttachmentUnavailable'))
+          }
           const result = await window.kunGui.readLocalPdfText({ path: localFilePath })
           if (!result.ok) throw new Error(result.message)
           const documentText = result.text.trim()
           if (!documentText) throw new Error(t('composerPdfAttachmentNoText'))
-          uploaded.push({
-            id: `doc_${result.mtimeMs}_${index}_${file.name || 'pdf'}`,
-            kind: 'document',
+          const attachment = await provider.uploadAttachment({
             name: file.name || fileNameFromPath(result.path),
             mimeType: 'application/pdf',
-            byteSize: result.size,
+            dataBase64: arrayBufferToBase64(await file.arrayBuffer()),
+            documentText,
             pageCount: result.pageCount,
-            truncated: result.truncated,
+            localFilePath,
+            ...(activeThreadId ? { threadId: activeThreadId } : {}),
+            ...(workspace ? { workspace } : {})
+          })
+          uploaded.push({
+            id: attachment.id,
+            kind: 'document',
+            name: attachment.name,
+            mimeType: attachment.mimeType,
+            byteSize: attachment.byteSize,
+            pageCount: attachment.pageCount,
+            truncated: attachment.truncated,
             textPreview: documentText.slice(0, 240),
-            documentText
           })
           continue
         }
@@ -1285,9 +1306,8 @@ export function Workbench(): ReactElement {
   const sendWritePrompt = (value: string): void => {
     const v = value.trim()
     const attachments = composerAttachments
-    const imageAttachments = attachments.filter((attachment) => attachment.kind !== 'document')
     const documentAttachments = attachments.filter((attachment) => attachment.kind === 'document')
-    const attachmentIds = imageAttachments.map((attachment) => attachment.id)
+    const attachmentIds = attachments.map((attachment) => attachment.id)
     const publicAttachments = stripTransientAttachmentFields(attachments)
     if (!v && attachmentIds.length === 0 && documentAttachments.length === 0) return
     if (attachmentIds.length > 0 && !attachmentUploadEnabled) {
@@ -1647,9 +1667,8 @@ export function Workbench(): ReactElement {
     const v = value.trim()
     const draft = useSddDraftStore.getState().activeDraft
     const attachments = composerAttachments
-    const imageAttachments = attachments.filter((attachment) => attachment.kind !== 'document')
     const documentAttachments = attachments.filter((attachment) => attachment.kind === 'document')
-    const attachmentIds = imageAttachments.map((attachment) => attachment.id)
+    const attachmentIds = attachments.map((attachment) => attachment.id)
     const publicAttachments = stripTransientAttachmentFields(attachments)
     if ((!v && attachmentIds.length === 0 && documentAttachments.length === 0) || !draft) return
     if (attachmentIds.length > 0 && !attachmentUploadEnabled) {
@@ -2032,9 +2051,8 @@ export function Workbench(): ReactElement {
   const handleSendAsync = async (): Promise<void> => {
     const v = input.trim()
     const attachments = route === 'chat' || route === 'write' ? composerAttachments : []
-    const imageAttachments = attachments.filter((attachment) => attachment.kind !== 'document')
     const documentAttachments = attachments.filter((attachment) => attachment.kind === 'document')
-    const attachmentIds = imageAttachments.map((attachment) => attachment.id)
+    const attachmentIds = attachments.map((attachment) => attachment.id)
     const publicAttachments = stripTransientAttachmentFields(attachments)
     const fileReferences = route === 'chat' ? composerFileReferences : []
     const userFileReferences = composerReferencesToUserFileReferences(fileReferences)

@@ -87,9 +87,9 @@ describe('Attachment store and multimodal input', () => {
 
   it('rejects unsupported MIME, size, and dimensions', async () => {
     await expect(createStore().create({
-      name: 'bad.txt',
+      name: 'bad.bin',
       data: Buffer.from('nope'),
-      mimeType: 'text/plain'
+      mimeType: 'application/octet-stream'
     })).rejects.toThrow(/unsupported/)
 
     await expect(createStore({ maxImageBytes: 10 }).create({
@@ -485,6 +485,154 @@ describe('Attachment store and multimodal input', () => {
     expect(body?.messages?.[0]?.content).toContain('MIME: image/webp')
     expect(body?.messages?.[0]?.content).toContain('Dimensions: 1280x720')
     expect(body?.messages?.[0]?.content).toContain('```base64\nYWJj\n```')
+  })
+
+  it('stores PDF document attachments with extracted text', async () => {
+    const store = createStore()
+    const doc = await store.create({
+      name: 'spec.pdf',
+      data: Buffer.from('%PDF-1.7\nbinary-body'),
+      mimeType: 'application/pdf',
+      documentText: 'Hello from the PDF body.',
+      pageCount: 3,
+      threadId: 'thr_1'
+    })
+
+    expect(doc).toMatchObject({
+      kind: 'document',
+      mimeType: 'application/pdf',
+      documentText: 'Hello from the PDF body.',
+      pageCount: 3
+    })
+    await expect(store.resolveContent(doc.id, { threadId: 'thr_1' })).resolves.toMatchObject({
+      kind: 'document',
+      documentText: 'Hello from the PDF body.'
+    })
+  })
+
+  it('decodes and truncates text-like document attachments', async () => {
+    const store = createStore({ maxDocumentTextChars: 5 })
+    const doc = await store.create({
+      name: 'notes.md',
+      data: Buffer.from('\uFEFF0123456789', 'utf8'),
+      mimeType: 'text/markdown',
+      threadId: 'thr_1'
+    })
+
+    expect(doc).toMatchObject({
+      kind: 'document',
+      documentText: '01234',
+      truncated: true
+    })
+  })
+
+  it('rejects document attachments with disallowed MIME or missing extracted text', async () => {
+    await expect(createStore().create({
+      name: 'archive.zip',
+      data: Buffer.from('PK\u0003\u0004nope'),
+      mimeType: 'application/zip'
+    })).rejects.toThrow(/unsupported attachment type/)
+
+    await expect(createStore().create({
+      name: 'scan.pdf',
+      data: Buffer.from('%PDF-1.4 no extractable text'),
+      mimeType: 'application/pdf'
+    })).rejects.toThrow(/document text is required/)
+  })
+
+  it('injects document attachments into model requests as text context', async () => {
+    const store = createStore()
+    const doc = await store.create({
+      name: 'spec.pdf',
+      data: Buffer.from('%PDF-1.7 body'),
+      mimeType: 'application/pdf',
+      documentText: 'The deployment runbook lives here.',
+      pageCount: 2,
+      threadId: 'thr_1',
+      workspace: '/tmp/ws'
+    })
+    const seenRequests: ModelRequest[] = []
+    const model: ModelClient = {
+      provider: 'fake',
+      model: 'fake',
+      async *stream(request) {
+        seenRequests.push(request)
+        yield { kind: 'completed', stopReason: 'stop' }
+      }
+    }
+    const h = makeHarness(model, {
+      attachmentStore: store,
+      modelCapabilities: () => ({ ...visionCapabilities(), inputModalities: ['text'] })
+    })
+    await bootstrapThread(h, {
+      workspace: '/tmp/ws',
+      request: { prompt: 'summarize', attachmentIds: [doc.id], model: 'text-only' }
+    })
+
+    expect(await h.loop.runTurn(h.threadId, h.turnId)).toBe('completed')
+    expect(seenRequests.at(-1)?.attachments).toBeUndefined()
+    expect(seenRequests.at(-1)?.attachmentDocuments?.[0]).toMatchObject({
+      id: doc.id,
+      mimeType: 'application/pdf',
+      text: 'The deployment runbook lives here.',
+      pageCount: 2
+    })
+  })
+
+  it('formats document attachments as untrusted text for the model', async () => {
+    let body: { messages?: Array<{ role: string; content: unknown }> } | undefined
+    const client = new CompatModelClient({
+      baseUrl: 'https://model.example.test',
+      apiKey: '',
+      model: 'text-model',
+      nonStreaming: true,
+      fetchImpl: async (_url, init) => {
+        body = JSON.parse(String(init?.body))
+        return new Response(JSON.stringify({
+          id: 'cmpl_1',
+          model: 'text-model',
+          choices: [{ index: 0, finish_reason: 'stop', message: { role: 'assistant', content: 'ok' } }]
+        }), { status: 200, headers: { 'content-type': 'application/json' } })
+      }
+    })
+
+    for await (const _chunk of client.stream({
+      threadId: 'thr_1',
+      turnId: 'turn_1',
+      model: 'text-model',
+      prefix: [],
+      history: [{
+        id: 'item_user',
+        threadId: 'thr_1',
+        turnId: 'turn_1',
+        role: 'user',
+        status: 'completed',
+        createdAt: 'now',
+        finishedAt: 'now',
+        kind: 'user_message',
+        text: 'summarize'
+      }],
+      attachmentDocuments: [{
+        id: 'att_doc',
+        name: 'spec.pdf',
+        mimeType: 'application/pdf',
+        text: 'Runbook contents.',
+        byteSize: 42,
+        pageCount: 2,
+        localFilePath: '/tmp/picked/spec.pdf'
+      }],
+      tools: [],
+      abortSignal: new AbortController().signal
+    })) {
+      // drain stream
+    }
+
+    const content = String(body?.messages?.[0]?.content ?? '')
+    expect(content).toContain('[Attached document]')
+    expect(content).toContain('Name: spec.pdf')
+    expect(content).toContain('Pages: 2')
+    expect(content).toContain('<untrusted-content source="document:spec.pdf">')
+    expect(content).toContain('Runbook contents.')
   })
 
   function createStore(overrides: Partial<AttachmentsCapabilityConfig> = {}) {

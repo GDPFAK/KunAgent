@@ -302,11 +302,23 @@ export type SubagentsCapabilityConfig = z.output<typeof SubagentsCapabilityConfi
 export const DEFAULT_ATTACHMENT_TEXT_FALLBACK_MAX_BASE64_BYTES = 512 * 1024
 export const DEFAULT_ATTACHMENT_TEXT_FALLBACK_MAX_IMAGE_DIMENSION = 1280
 export const DEFAULT_ATTACHMENT_TEXT_FALLBACK_PREFERRED_MIME_TYPE = 'image/webp'
+export const DEFAULT_ATTACHMENT_DOCUMENT_MIME_TYPES = [
+  'application/pdf',
+  'text/plain',
+  'text/markdown',
+  'text/csv',
+  'application/json'
+]
+export const DEFAULT_ATTACHMENT_MAX_DOCUMENT_BYTES = 10 * 1024 * 1024
+export const DEFAULT_ATTACHMENT_MAX_DOCUMENT_TEXT_CHARS = 200_000
 
 export const AttachmentsCapabilityConfig = CapabilityToggleConfig.extend({
   maxImageBytes: z.number().int().positive().default(5 * 1024 * 1024),
   maxImageDimension: z.number().int().positive().default(4096),
   allowedMimeTypes: z.array(z.string().min(1)).default(['image/png', 'image/jpeg', 'image/webp']),
+  allowedDocumentMimeTypes: z.array(z.string().min(1)).default(DEFAULT_ATTACHMENT_DOCUMENT_MIME_TYPES),
+  maxDocumentBytes: z.number().int().positive().default(DEFAULT_ATTACHMENT_MAX_DOCUMENT_BYTES),
+  maxDocumentTextChars: z.number().int().positive().default(DEFAULT_ATTACHMENT_MAX_DOCUMENT_TEXT_CHARS),
   textFallbackMaxBase64Bytes: z.number().int().positive().default(DEFAULT_ATTACHMENT_TEXT_FALLBACK_MAX_BASE64_BYTES),
   textFallbackMaxImageDimension: z.number().int().positive().default(DEFAULT_ATTACHMENT_TEXT_FALLBACK_MAX_IMAGE_DIMENSION),
   textFallbackPreferredMimeType: z.string().min(1).default(DEFAULT_ATTACHMENT_TEXT_FALLBACK_PREFERRED_MIME_TYPE)
@@ -468,6 +480,9 @@ export const RuntimeCapabilityManifest = z
       maxImageBytes: z.number().int().positive(),
       maxImageDimension: z.number().int().positive(),
       allowedMimeTypes: z.array(z.string().min(1)),
+      allowedDocumentMimeTypes: z.array(z.string().min(1)),
+      maxDocumentBytes: z.number().int().positive(),
+      maxDocumentTextChars: z.number().int().positive(),
       textFallbackMaxBase64Bytes: z.number().int().positive(),
       textFallbackMaxImageDimension: z.number().int().positive(),
       textFallbackPreferredMimeType: z.string().min(1)
@@ -634,6 +649,9 @@ export function buildRuntimeCapabilityManifest(input: {
       maxImageBytes: config.attachments.maxImageBytes,
       maxImageDimension: config.attachments.maxImageDimension,
       allowedMimeTypes: config.attachments.allowedMimeTypes,
+      allowedDocumentMimeTypes: config.attachments.allowedDocumentMimeTypes,
+      maxDocumentBytes: config.attachments.maxDocumentBytes,
+      maxDocumentTextChars: config.attachments.maxDocumentTextChars,
       textFallbackMaxBase64Bytes: config.attachments.textFallbackMaxBase64Bytes,
       textFallbackMaxImageDimension: config.attachments.textFallbackMaxImageDimension,
       textFallbackPreferredMimeType: config.attachments.textFallbackPreferredMimeType

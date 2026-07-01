@@ -48,6 +48,7 @@ export type ModelRequest = {
   history: TurnItem[]
   attachments?: ModelInputAttachment[]
   attachmentTextFallbacks?: ModelTextAttachmentFallback[]
+  attachmentDocuments?: ModelDocumentAttachment[]
   tools: ModelToolSpec[]
   /**
    * Optional loop-level requirement. The agent loop uses this to keep
@@ -92,6 +93,17 @@ export type ModelTextAttachmentFallback = {
   height?: number
   localFilePath?: string
   wasCompressed?: boolean
+}
+
+export type ModelDocumentAttachment = {
+  id: string
+  name: string
+  mimeType: string
+  text: string
+  byteSize: number
+  pageCount?: number
+  truncated?: boolean
+  localFilePath?: string
 }
 
 export type ModelToolSpec = {

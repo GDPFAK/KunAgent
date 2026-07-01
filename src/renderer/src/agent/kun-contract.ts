@@ -53,11 +53,15 @@ export type CoreThreadJson = CoreThreadSummaryJson & {
 export type CoreAttachmentMetadataJson = {
   id: string
   name: string
+  kind?: 'image' | 'document'
   mimeType: string
   byteSize: number
   hash: string
   width?: number
   height?: number
+  documentText?: string
+  pageCount?: number
+  truncated?: boolean
   localFilePath?: string
   textFallback?: CoreAttachmentTextFallbackJson
   threadIds?: string[]
@@ -223,6 +227,9 @@ export type CoreRuntimeCapabilityManifestJson = {
     maxImageBytes: number
     maxImageDimension: number
     allowedMimeTypes: string[]
+    allowedDocumentMimeTypes?: string[]
+    maxDocumentBytes?: number
+    maxDocumentTextChars?: number
     textFallbackMaxBase64Bytes?: number
     textFallbackMaxImageDimension?: number
     textFallbackPreferredMimeType?: string
