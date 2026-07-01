@@ -31,6 +31,7 @@ import type { BackgroundShellRuntime } from '../../services/background-shell-run
 import type { ModelClient } from '../../ports/model-client.js'
 import type { RolesConfig } from '../../config/kun-config.js'
 import type { ImmutablePrefix } from '../../cache/immutable-prefix.js'
+import type { PublisherTrustStore } from '../../supplychain/publisher-trust-store.js'
 
 export type RuntimeToolDiagnostics = {
   providers: ToolProviderPolicy[]
@@ -112,5 +113,7 @@ export type ServerRuntime = {
   info(): RuntimeInfoResponse
   toolDiagnostics?(): RuntimeToolDiagnostics | Promise<RuntimeToolDiagnostics>
   skills?(): SkillRuntimeDiagnostics | Promise<SkillRuntimeDiagnostics>
+  /** Runtime-owned publisher trust roots used by supply-chain audit routes. */
+  supplyChainTrust?: PublisherTrustStore
   shutdown?(): Promise<void>
 }

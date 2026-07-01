@@ -84,7 +84,7 @@ describe('PluginMarketplaceView MCP config helpers', () => {
 
     const merged = mergeMcpJsonConfig(
       existing,
-      buildMcpConfig('playwright', 'npx', ['-y', '@playwright/mcp@latest'])
+      buildMcpConfig('playwright', 'npx', ['-y', '@playwright/mcp@0.0.77'])
     )
     const parsed = JSON.parse(merged.text) as Record<string, any>
 
@@ -95,10 +95,16 @@ describe('PluginMarketplaceView MCP config helpers', () => {
       enabled: true,
       transport: 'stdio',
       command: 'npx',
-      args: ['-y', '@playwright/mcp@latest'],
+      args: ['-y', '@playwright/mcp@0.0.77'],
       trustScope: 'user'
     })
     expect(mcpConfigHasServer(merged.text, 'playwright')).toBe(true)
+  })
+
+  it('pins recommended MCP package versions', () => {
+    const config = buildMcpConfig('context7', 'npx', ['-y', '@upstash/context7-mcp@3.2.2'])
+    expect(JSON.stringify(config)).not.toContain('@latest')
+    expect(recommendedMarketplaceItemIds()).toContain('context7')
   })
 
   it('detects duplicate MCP servers instead of appending old-style snippets', () => {

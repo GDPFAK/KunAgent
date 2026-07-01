@@ -35,6 +35,7 @@ import {
   type McpMarketplaceOverlayStatus
 } from './plugin-marketplace-runtime'
 import { SidebarTitlebarToggleButton } from './sidebar/SidebarPrimitives'
+import { KUN_SUPPLY_CHAIN_AUDIT_PATH } from '@shared/kun-endpoints'
 
 type PluginKind = 'mcp' | 'skill'
 type PluginFilter = 'all' | 'recommended' | 'installed'
@@ -63,6 +64,22 @@ type MarketplaceItem = {
   mcpConfig?: (workspaceRoot: string) => JsonRecord
   oauth?: OAuthConnectorInfo
   skillInstructions?: string
+  supplyChain?: SupplyChainManifest
+}
+
+type SupplyChainManifest = {
+  name?: string
+  version: string
+  publisher?: string
+  permissions?: string[]
+  contentHash?: string
+  signed?: boolean
+}
+
+type SupplyChainAuditResponse = {
+  installable: boolean
+  findings?: Array<{ severity: 'info' | 'warn' | 'block'; code: string; message: string }>
+  sensitivePermissions?: string[]
 }
 
 type JsonRecord = Record<string, unknown>
@@ -104,6 +121,39 @@ function saveInstalledPlugins(ids: string[]): void {
 
 function storageKey(kind: PluginKind, id: string): string {
   return `${kind}:${id}`
+}
+
+function manifestForItem(item: MarketplaceItem, content: string): SupplyChainManifest | null {
+  if (item.group !== 'recommended') return null
+  return {
+    name: item.supplyChain?.name ?? item.id,
+    version: item.supplyChain?.version ?? '1.0.0',
+    publisher: item.supplyChain?.publisher ?? 'kun',
+    permissions: item.supplyChain?.permissions ?? defaultPermissionsForItem(item),
+    contentHash: item.supplyChain?.contentHash,
+    signed: item.supplyChain?.signed ?? false
+  }
+}
+
+async function sha256Hex(content: string): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(content))
+  return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, '0')).join('')
+}
+
+function base64FromUtf8(content: string): string {
+  const bytes = new TextEncoder().encode(content)
+  let binary = ''
+  const chunkSize = 0x8000
+  for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(offset, offset + chunkSize))
+  }
+  return btoa(binary)
+}
+
+function defaultPermissionsForItem(item: MarketplaceItem): string[] {
+  if (item.kind === 'skill') return ['read']
+  if (item.oauth) return ['network', 'secrets']
+  return ['network', 'exec']
 }
 
 function normalizeSkillId(id: string): string {
@@ -594,8 +644,9 @@ const RECOMMENDED_ITEMS: MarketplaceItem[] = [
       buildMcpConfig(
         'playwright',
         'npx',
-        ['-y', '@playwright/mcp@latest']
-      )
+        ['-y', '@playwright/mcp@0.0.77']
+      ),
+    supplyChain: { version: '0.0.77', publisher: 'npm', permissions: ['network', 'exec'] }
   },
   {
     id: 'github',
@@ -607,8 +658,9 @@ const RECOMMENDED_ITEMS: MarketplaceItem[] = [
       buildMcpConfig(
         'github',
         'npx',
-        ['-y', '@modelcontextprotocol/server-github']
-      )
+        ['-y', '@modelcontextprotocol/server-github@2025.4.8']
+      ),
+    supplyChain: { version: '2025.4.8', publisher: 'npm', permissions: ['network', 'exec', 'secrets'] }
   },
   {
     id: 'vercel',
@@ -638,7 +690,8 @@ const RECOMMENDED_ITEMS: MarketplaceItem[] = [
     mcpConfig: () =>
       buildRemoteMcpConfig({
         vercel: 'https://mcp.vercel.com'
-      })
+      }),
+    supplyChain: { version: '1.0.0', publisher: 'vercel', permissions: ['network', 'secrets'] }
   },
   {
     id: 'google-workspace',
@@ -670,7 +723,8 @@ const RECOMMENDED_ITEMS: MarketplaceItem[] = [
       noteKey: 'pluginOAuthGoogleNote'
     },
     mcpConfig: () =>
-      buildRemoteMcpConfig(GOOGLE_WORKSPACE_MCP_SERVERS)
+      buildRemoteMcpConfig(GOOGLE_WORKSPACE_MCP_SERVERS),
+    supplyChain: { version: '1.0.0', publisher: 'google', permissions: ['network', 'secrets'] }
   },
   {
     id: 'context7',
@@ -682,8 +736,9 @@ const RECOMMENDED_ITEMS: MarketplaceItem[] = [
       buildMcpConfig(
         'context7',
         'npx',
-        ['-y', '@upstash/context7-mcp@latest']
-      )
+        ['-y', '@upstash/context7-mcp@3.2.2']
+      ),
+    supplyChain: { version: '3.2.2', publisher: 'npm', permissions: ['network', 'exec'] }
   },
   {
     id: 'sequential-thinking',
@@ -695,8 +750,9 @@ const RECOMMENDED_ITEMS: MarketplaceItem[] = [
       buildMcpConfig(
         'sequential-thinking',
         'npx',
-        ['-y', '@modelcontextprotocol/server-sequential-thinking']
-      )
+        ['-y', '@modelcontextprotocol/server-sequential-thinking@2025.12.18']
+      ),
+    supplyChain: { version: '2025.12.18', publisher: 'npm', permissions: ['exec'] }
   },
   {
     id: 'memory',
@@ -708,8 +764,9 @@ const RECOMMENDED_ITEMS: MarketplaceItem[] = [
       buildMcpConfig(
         'memory',
         'npx',
-        ['-y', '@modelcontextprotocol/server-memory']
-      )
+        ['-y', '@modelcontextprotocol/server-memory@2026.1.26']
+      ),
+    supplyChain: { version: '2026.1.26', publisher: 'npm', permissions: ['exec', 'filesystem-write'] }
   },
   {
     id: 'brave-search',
@@ -721,9 +778,10 @@ const RECOMMENDED_ITEMS: MarketplaceItem[] = [
       buildMcpConfig(
         'brave-search',
         'npx',
-        ['-y', '@modelcontextprotocol/server-brave-search'],
+        ['-y', '@modelcontextprotocol/server-brave-search@0.6.2'],
         { env: { BRAVE_API_KEY: '' } }
-      )
+      ),
+    supplyChain: { version: '0.6.2', publisher: 'npm', permissions: ['network', 'exec', 'secrets'] }
   },
   {
     id: 'code-review',
@@ -731,6 +789,7 @@ const RECOMMENDED_ITEMS: MarketplaceItem[] = [
     titleKey: 'pluginSkillReviewTitle',
     descriptionKey: 'pluginSkillReviewDesc',
     group: 'recommended',
+    supplyChain: { version: '1.0.0', publisher: 'kun', permissions: ['read'] },
     skillInstructions:
       'Use this skill when reviewing a code change. Prioritize correctness, regressions, security, performance, and missing tests. Lead with concrete findings and file references.'
   },
@@ -740,6 +799,7 @@ const RECOMMENDED_ITEMS: MarketplaceItem[] = [
     titleKey: 'pluginSkillFrontendTitle',
     descriptionKey: 'pluginSkillFrontendDesc',
     group: 'recommended',
+    supplyChain: { version: '1.0.0', publisher: 'kun', permissions: ['read'] },
     skillInstructions:
       'Use this skill when improving UI. Preserve the product style, check responsive states, avoid generic layouts, and verify the result visually before handing it back.'
   },
@@ -749,6 +809,7 @@ const RECOMMENDED_ITEMS: MarketplaceItem[] = [
     titleKey: 'pluginSkillBugTitle',
     descriptionKey: 'pluginSkillBugDesc',
     group: 'recommended',
+    supplyChain: { version: '1.0.0', publisher: 'kun', permissions: ['read'] },
     skillInstructions:
       'Use this skill when investigating bugs. Reproduce or narrow the symptom, trace the data flow, identify the smallest fix, and add focused verification where possible.'
   },
@@ -758,6 +819,7 @@ const RECOMMENDED_ITEMS: MarketplaceItem[] = [
     titleKey: 'pluginSkillReleaseTitle',
     descriptionKey: 'pluginSkillReleaseDesc',
     group: 'recommended',
+    supplyChain: { version: '1.0.0', publisher: 'kun', permissions: ['read'] },
     skillInstructions:
       'Use this skill when preparing release notes. Group user-facing changes by outcome, call out migrations or risks, and keep wording concise and scannable.'
   }
@@ -1053,7 +1115,34 @@ export function PluginMarketplaceView({ leftSidebarCollapsed, onToggleLeftSideba
 
   const installMcpItem = async (item: MarketplaceItem): Promise<void> => {
     if (!item.mcpConfig) return
-    await appendMcpConfig(item.id, item.mcpConfig(workspaceRoot))
+    const config = item.mcpConfig(workspaceRoot)
+    await auditMarketplaceInstall(item, JSON.stringify(config))
+    await appendMcpConfig(item.id, config)
+  }
+
+  const auditMarketplaceInstall = async (item: MarketplaceItem, content: string): Promise<void> => {
+    const manifest = manifestForItem(item, content)
+    if (!manifest) return
+    const contentHash = manifest.contentHash ?? await sha256Hex(content)
+    const response = await rendererRuntimeClient.runtimeRequest(
+      KUN_SUPPLY_CHAIN_AUDIT_PATH,
+      'POST',
+      JSON.stringify({
+        source: item.kind,
+        manifest: { ...manifest, contentHash },
+        contentBase64: base64FromUtf8(content),
+        strict: false,
+        sensitivePermissionConsent: true
+      })
+    )
+    if (!response.ok) {
+      throw new Error(response.body || 'supply-chain audit failed')
+    }
+    const audit = JSON.parse(response.body) as SupplyChainAuditResponse
+    if (!audit.installable) {
+      const blocked = audit.findings?.filter((finding) => finding.severity === 'block') ?? []
+      throw new Error(blocked[0]?.message ?? 'supply-chain audit blocked this install')
+    }
   }
 
   const addItem = async (item: MarketplaceItem): Promise<void> => {
@@ -1083,6 +1172,7 @@ export function PluginMarketplaceView({ leftSidebarCollapsed, onToggleLeftSideba
         description,
         item.skillInstructions ?? description
       )
+      await auditMarketplaceInstall(item, content)
       const result = await window.kunGui.saveSkillFile(selectedSkillRoot.path, item.id, content)
       if (!result.ok) {
         setNotice({ tone: 'error', message: result.message })

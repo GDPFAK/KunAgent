@@ -56,6 +56,7 @@ import {
   backgroundShellList,
   backgroundShellStop
 } from './background-shells.js'
+import { auditSupplyChainPackage, checkSupplyChainUpdate } from './supply-chain.js'
 import { isAuthorized, bearerToken } from '../auth.js'
 import { ERRORS } from './runtime-error.js'
 import type { ServerRuntime } from './server-runtime.js'
@@ -102,6 +103,14 @@ export function buildRouter(runtime: ServerRuntime): Router {
   router.add('GET', '/v1/runtime/tools', async (request) => {
     if (!authorize(request, runtime)) return ERRORS.unauthorized()
     return runtimeToolDiagnosticsJsonResponse(runtime)
+  })
+  router.add('POST', '/v1/supply-chain/audit', async (request) => {
+    if (!authorize(request, runtime)) return ERRORS.unauthorized()
+    return auditSupplyChainPackage(runtime, request)
+  })
+  router.add('POST', '/v1/supply-chain/update-check', async (request) => {
+    if (!authorize(request, runtime)) return ERRORS.unauthorized()
+    return checkSupplyChainUpdate(request)
   })
   router.add('GET', '/v1/skills', async (request) => {
     if (!authorize(request, runtime)) return ERRORS.unauthorized()

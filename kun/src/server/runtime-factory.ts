@@ -82,6 +82,7 @@ import { BackgroundShellRuntime } from '../services/background-shell-runtime.js'
 import { stopBashSessionById, createBashLocalTool } from '../adapters/tool/builtin-bash-tool.js'
 import { createBackgroundShellTool } from '../adapters/tool/background-shell-tool.js'
 import type { LocalTool } from '../adapters/tool/local-tool-host.js'
+import { loadPublisherTrustStore } from '../supplychain/publisher-trust-store.js'
 
 export type KunServeRuntimeOptions = {
   host: string
@@ -167,6 +168,7 @@ export async function createKunServeRuntime(
     ]
   })
   const threadService = new ThreadService({ threadStore, sessionStore, events, ids, nowIso })
+  const supplyChainTrust = await loadPublisherTrustStore(join(options.dataDir, 'supply-chain-trusted-keys.json'))
   const modelProfiles = modelContextProfilesFromConfig({
     contextCompaction: options.contextCompaction,
     models: options.models
@@ -614,6 +616,7 @@ export async function createKunServeRuntime(
       videoGen: videoGenProviders.diagnostics
     }),
     skills: () => skillRuntime.diagnostics(),
+    supplyChainTrust,
     shutdown: async () => {
       try {
         loop.shutdownGoalResume()
