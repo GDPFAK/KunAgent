@@ -26,6 +26,7 @@ import { buildDelegationToolProviders } from '../adapters/tool/delegation-tool-p
 import { buildWebToolProviders } from '../adapters/tool/web-tool-provider.js'
 import { buildImageGenToolProviders } from '../adapters/tool/image-gen-tool-provider.js'
 import { buildComputerUseToolProviders } from '../adapters/tool/computer-use-tool-provider.js'
+import { createRemotePortForwardRuntime } from '../adapters/tool/remote-port-forward-tool.js'
 import { createRemoteHostsService } from '../remote/remote-hosts-service.js'
 import { RemoteTargetRegistry } from '../remote/remote-target-registry.js'
 import {
@@ -274,6 +275,7 @@ export async function createKunServeRuntime(
   const backgroundShellTool = createBackgroundShellTool({
     listBackgroundSessions: (threadId) => backgroundShellRuntime.listSessions(threadId)
   })
+  const remotePortForwardRuntime = createRemotePortForwardRuntime()
   const withBackgroundShellTools = (tools: LocalTool[]): LocalTool[] => {
     const mapped = tools.map((tool) =>
       tool.name === 'bash'
@@ -458,6 +460,7 @@ export async function createKunServeRuntime(
     // Host control is available to the top-level agent only, never to
     // delegated subagents (which use childRegistry/baseToolProviders).
     ...computerUseProviders.providers,
+    remotePortForwardRuntime.provider,
     {
       id: 'goal',
       kind: 'gui' as const,
@@ -605,6 +608,7 @@ export async function createKunServeRuntime(
     },
     disposeThreadResources(threadId) {
       remoteTargetRegistry.evict(threadId)
+      remotePortForwardRuntime.disposeThreadResources(threadId)
     },
     resumeInterruptedGoals(threadIds) {
       return loop.resumeInterruptedGoals(threadIds)
@@ -667,6 +671,7 @@ export async function createKunServeRuntime(
     shutdown: async () => {
       try {
         loop.shutdownGoalResume()
+        remotePortForwardRuntime.shutdown()
         await mcpProviders.close()
       } finally {
         await stores.shutdown?.()
