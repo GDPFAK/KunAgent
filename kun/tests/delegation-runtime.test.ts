@@ -81,6 +81,80 @@ describe('DelegationRuntime', () => {
     })).rejects.toThrow(/budget/)
   })
 
+  it('enforces per-child token and time budgets', async () => {
+    const externalUsage: unknown[] = []
+    const tokenRuntime = createRuntime({
+      recordExternalUsage: (_threadId, usage) => externalUsage.push(usage),
+      executor: async () => ({
+        summary: 'used too many tokens',
+        usage: { promptTokens: 8, completionTokens: 4, totalTokens: 12 }
+      })
+    })
+    const tokenLimited = await tokenRuntime.runChild({
+      parentThreadId: 'thr_tokens',
+      parentTurnId: 'turn_tokens',
+      prompt: 'bounded task',
+      tokenBudget: 10,
+      signal: new AbortController().signal
+    })
+    expect(tokenLimited).toMatchObject({
+      status: 'failed',
+      tokenBudget: 10,
+      budgetExceeded: 'token',
+      usage: { totalTokens: 12 }
+    })
+    expect(tokenLimited.error).toContain('12 > 10')
+    expect(externalUsage).toHaveLength(1)
+
+    const timeRuntime = createRuntime({
+      executor: async ({ signal }) => new Promise<never>((_resolve, reject) => {
+        signal.addEventListener('abort', () => reject(signal.reason), { once: true })
+      })
+    })
+    const timeLimited = await timeRuntime.runChild({
+      parentThreadId: 'thr_time',
+      parentTurnId: 'turn_time',
+      prompt: 'slow task',
+      timeBudgetMs: 10,
+      signal: new AbortController().signal
+    })
+    expect(timeLimited).toMatchObject({
+      status: 'failed',
+      timeBudgetMs: 10,
+      budgetExceeded: 'time'
+    })
+    expect(timeLimited.error).toContain('10ms')
+  })
+
+  it('validates evidence-return contracts', async () => {
+    const withEvidence = createRuntime({
+      executor: async () => ({ summary: 'done', evidence: ['read src/index.ts', 'ran unit tests'] })
+    })
+    await expect(withEvidence.runChild({
+      parentThreadId: 'thr_evidence',
+      parentTurnId: 'turn_evidence',
+      prompt: 'investigate',
+      returnFormat: 'evidence',
+      signal: new AbortController().signal
+    })).resolves.toMatchObject({
+      status: 'completed',
+      returnFormat: 'evidence',
+      evidence: ['read src/index.ts', 'ran unit tests']
+    })
+
+    const withoutEvidence = createRuntime({ executor: async () => ({ summary: 'done' }) })
+    await expect(withoutEvidence.runChild({
+      parentThreadId: 'thr_missing_evidence',
+      parentTurnId: 'turn_missing_evidence',
+      prompt: 'investigate',
+      returnFormat: 'evidence',
+      signal: new AbortController().signal
+    })).resolves.toMatchObject({
+      status: 'failed',
+      error: 'child contract requires evidence but none was returned'
+    })
+  })
+
   it('executes delegate_task through the normal tool host', async () => {
     const runtime = createRuntime()
     const host = new LocalToolHost({
@@ -107,6 +181,28 @@ describe('DelegationRuntime', () => {
         usage: { totalTokens: 3 }
       })
     }
+  })
+
+  it('rejects invalid delegate_task budgets before starting a child', async () => {
+    const runtime = createRuntime()
+    const host = new LocalToolHost({
+      registry: new CapabilityRegistry(buildDelegationToolProviders(runtime))
+    })
+    const result = await host.execute({
+      callId: 'call_invalid_budget',
+      toolName: 'delegate_task',
+      arguments: { prompt: 'Investigate', tokenBudget: 0 }
+    }, {
+      threadId: 'thr_1',
+      turnId: 'turn_1',
+      workspace: '/tmp/ws',
+      approvalPolicy: 'auto',
+      abortSignal: new AbortController().signal,
+      awaitApproval: async () => 'allow'
+    })
+
+    expect(result.item).toMatchObject({ kind: 'tool_result', isError: true })
+    expect((await runtime.diagnostics('thr_1')).childRuns).toEqual([])
   })
 
   it('caps concurrency at maxParallel and queues the overflow instead of erroring', async () => {

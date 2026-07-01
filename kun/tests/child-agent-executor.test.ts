@@ -87,6 +87,56 @@ describe('child agent executor', () => {
     expect(seen[0]?.tools).toEqual([])
   })
 
+  it('returns bounded tool evidence when the contract requests it', async () => {
+    let step = 0
+    const evidenceModel: ModelClient = {
+      provider: 'evidence-test',
+      model: 'evidence-test',
+      async *stream(): AsyncIterable<ModelStreamChunk> {
+        step += 1
+        if (step === 1) {
+          yield {
+            kind: 'tool_call_complete',
+            callId: 'call_inspect',
+            toolName: 'inspect',
+            arguments: { path: 'src/index.ts' }
+          }
+          yield { kind: 'completed', stopReason: 'tool_calls' }
+          return
+        }
+        yield { kind: 'assistant_text_delta', text: 'Inspection complete.' }
+        yield { kind: 'completed', stopReason: 'stop' }
+      }
+    }
+    const inspect = LocalToolHost.defineTool({
+      name: 'inspect',
+      description: 'Inspect a source file.',
+      inputSchema: { type: 'object' },
+      policy: 'auto',
+      execute: async () => ({ output: { ok: true } })
+    })
+    const executor = createChildAgentExecutor({
+      model: evidenceModel,
+      toolHost: new LocalToolHost({ tools: [inspect] }),
+      prefix: createImmutablePrefix({ systemPrompt: 'child system' }),
+      defaultModel: 'evidence-test',
+      nowIso: () => '2026-06-03T00:00:00.000Z'
+    })
+
+    const result = await executor({
+      childId: 'child_evidence',
+      parentThreadId: 'thr_parent',
+      parentTurnId: 'turn_parent',
+      prompt: 'Inspect the entry point',
+      toolPolicy: 'inherit',
+      returnFormat: 'evidence',
+      signal: new AbortController().signal
+    })
+
+    expect(result.summary).toBe('Inspection complete.')
+    expect(result.evidence).toEqual(['inspect src/index.ts: completed'])
+  })
+
   it('fails the child run when the child loop cannot produce a completed turn', async () => {
     const executor = createChildAgentExecutor({
       model: model([{ kind: 'error', message: 'model failed', code: 'bad_model' }]),
