@@ -14,10 +14,11 @@ export async function uploadAttachment(
   const parsed = AttachmentUploadRequest.safeParse(body.value)
   if (!parsed.success) return ERRORS.attachmentValidation('invalid attachment upload body', parsed.error.issues)
   try {
+    const data = decodeBase64(parsed.data.dataBase64)
     const attachment = await store.create({
       name: parsed.data.name,
       mimeType: parsed.data.mimeType,
-      data: Buffer.from(parsed.data.dataBase64, 'base64'),
+      data,
       localFilePath: parsed.data.localFilePath,
       textFallback: parsed.data.textFallback,
       threadId: parsed.data.threadId,
@@ -27,6 +28,16 @@ export async function uploadAttachment(
   } catch (error) {
     return ERRORS.attachmentValidation(errorMessage(error))
   }
+}
+
+function decodeBase64(value: string): Buffer {
+  const normalized = value.replace(/\s/g, '')
+  if (normalized.length === 0 || normalized.length % 4 !== 0 || !/^[A-Za-z0-9+/]*={0,2}$/.test(normalized)) {
+    throw new Error('attachment data is not valid base64')
+  }
+  const data = Buffer.from(normalized, 'base64')
+  if (data.toString('base64') !== normalized) throw new Error('attachment data is not valid base64')
+  return data
 }
 
 export async function getAttachmentMetadata(

@@ -5,6 +5,8 @@ import type { AttachmentsCapabilityConfig } from '../contracts/capabilities.js'
 import type { AttachmentDiagnostics, AttachmentMetadata, AttachmentTextFallback } from '../contracts/attachments.js'
 import { AttachmentMetadata as AttachmentMetadataSchema } from '../contracts/attachments.js'
 
+const ATTACHMENT_ID_PATTERN = /^att_[0-9a-f]{24}$/
+
 export type AttachmentContent = AttachmentMetadata & {
   data: Buffer
 }
@@ -95,6 +97,7 @@ export class FileAttachmentStore implements AttachmentStore {
   }
 
   async get(id: string): Promise<AttachmentMetadata | null> {
+    if (!ATTACHMENT_ID_PATTERN.test(id)) return null
     try {
       return AttachmentMetadataSchema.parse(JSON.parse(await readFile(this.metadataPath(id), 'utf8')))
     } catch {
@@ -103,6 +106,7 @@ export class FileAttachmentStore implements AttachmentStore {
   }
 
   async resolveContent(id: string, scope: { threadId?: string; workspace?: string }): Promise<AttachmentContent> {
+    if (!ATTACHMENT_ID_PATTERN.test(id)) throw new Error(`invalid attachment id: ${id}`)
     const metadata = await this.get(id)
     if (!metadata) throw new Error(`attachment not found: ${id}`)
     if (!isAuthorized(metadata, scope)) throw new Error(`attachment is not authorized for this turn: ${id}`)

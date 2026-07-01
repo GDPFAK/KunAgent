@@ -79,6 +79,12 @@ describe('Attachment store and multimodal input', () => {
     })
   })
 
+  it('rejects attachment ids that could escape the store directory', async () => {
+    const store = createStore()
+    await expect(store.get('../outside')).resolves.toBeNull()
+    await expect(store.resolveContent('..\\outside', {})).rejects.toThrow(/invalid attachment id/)
+  })
+
   it('rejects unsupported MIME, size, and dimensions', async () => {
     await expect(createStore().create({
       name: 'bad.txt',
@@ -170,6 +176,21 @@ describe('Attachment store and multimodal input', () => {
       })
     )
     expect(await readJson(diagnostics)).toMatchObject({ enabled: true, count: 1 })
+  })
+
+  it('rejects malformed base64 attachment uploads', async () => {
+    const h = buildHarness()
+    h.runtime.attachmentStore = createStore()
+    const response = await dispatchRequest(
+      h.router,
+      new Request('http://localhost/v1/attachments', {
+        method: 'POST',
+        headers: { authorization: 'Bearer tok-1', 'content-type': 'application/json' },
+        body: JSON.stringify({ name: 'shot.png', dataBase64: 'not-base64!' })
+      })
+    )
+    expect(response.status).toBe(400)
+    expect(await readJson(response)).toMatchObject({ message: 'attachment data is not valid base64' })
   })
 
   it('resolves image attachments for vision models and text fallbacks for text-only models', async () => {

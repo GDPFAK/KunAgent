@@ -35,4 +35,25 @@ describe('readJsonBody', () => {
       message: 'invalid JSON body'
     })
   })
+
+  it('rejects a declared body that exceeds the configured byte limit', async () => {
+    const result = await readJsonBody(new Request('http://localhost/v1/demo', {
+      method: 'POST',
+      headers: { 'content-length': '128' },
+      body: '{}'
+    }), 32)
+    expect(result.ok).toBe(false)
+    if (result.ok) return
+    expect(result.response.status).toBe(413)
+  })
+
+  it('rejects a streamed body that exceeds the configured byte limit', async () => {
+    const result = await readJsonBody(new Request('http://localhost/v1/demo', {
+      method: 'POST',
+      body: JSON.stringify({ text: 'x'.repeat(128) })
+    }), 32)
+    expect(result.ok).toBe(false)
+    if (result.ok) return
+    expect(result.response.status).toBe(413)
+  })
 })
