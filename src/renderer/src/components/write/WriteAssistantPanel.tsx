@@ -12,6 +12,7 @@ import {
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import type { AttachmentReference, RuntimeConnectionStatus, ChatBlock } from '../../agent/types'
+import type { CoreRuntimeSkillJson } from '../../agent/kun-contract'
 import type { QueuedUserMessage } from '../../store/chat-store-types'
 import type { ModelProviderModelGroup } from '@shared/kun-gui-api'
 import {
@@ -37,6 +38,8 @@ type Props = {
   composerProviderId?: string
   composerPickList: string[]
   composerModelGroups?: ModelProviderModelGroup[]
+  skillCommands?: CoreRuntimeSkillJson[]
+  disabledSkillIds?: string[]
   composerReasoningEffort: ComposerReasoningEffort
   setComposerModel: (modelId: string, providerId?: string) => void
   setComposerReasoningEffort: (effort: ComposerReasoningEffort) => void
@@ -60,6 +63,8 @@ type Props = {
   className?: string
 }
 
+const EMPTY_SKILL_COMMANDS: CoreRuntimeSkillJson[] = []
+
 export function WriteAssistantPanel({
   input,
   setInput,
@@ -75,6 +80,8 @@ export function WriteAssistantPanel({
   composerProviderId,
   composerPickList,
   composerModelGroups = [],
+  skillCommands = EMPTY_SKILL_COMMANDS,
+  disabledSkillIds,
   composerReasoningEffort,
   setComposerModel,
   setComposerReasoningEffort,
@@ -309,6 +316,8 @@ export function WriteAssistantPanel({
           composerProviderId={composerProviderId}
           composerPickList={composerPickList}
           composerModelGroups={composerModelGroups}
+          skillCommands={skillCommands}
+          disabledSkillIds={disabledSkillIds}
           composerReasoningEffort={composerReasoningEffort}
           onComposerModelChange={setComposerModel}
           onComposerReasoningEffortChange={setComposerReasoningEffort}
