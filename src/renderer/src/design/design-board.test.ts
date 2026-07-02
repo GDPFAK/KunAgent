@@ -393,14 +393,20 @@ describe('design board helpers', () => {
     })
   })
 
-  it('keeps a regular (non-foundation) screen at its measured auto-grown size across re-syncs', () => {
+  it('keeps a regular (non-foundation) screen at its measured auto-grown HEIGHT across re-syncs, but pins width to the device target', () => {
     // Regression test: HtmlFrameOverlay's live measurement grows a REGULAR page's
     // frame (not just foundation design-system/logo docs) to match its real HTML
-    // content and writes that height into the artifact node. Because board sync
+    // content height and writes that into the artifact node. Because board sync
     // recomputes for every artifact whenever ANY artifact's node changes, it must
     // not stomp this measured height back to the generic target placeholder size
     // on the next (unrelated) re-sync — that reset is exactly what produced a
     // short, clipped frame showing mostly blank space below real content.
+    //
+    // Width, however, must stay pinned to the fixed device target size even if
+    // the artifact node holds a stray measured width (from window.innerWidth-based
+    // measurement, which is sensitive to webview zoom timing and produced wildly
+    // inconsistent per-screen widths) — regular screens are a fixed-width device
+    // viewport, not a width-auto-growing reference document.
     const doc = createEmptyDocument()
     const root = doc.objects[doc.rootId]
     const existing = createHtmlFrameShape('首页', 2080, -400, 'home', 'desktop')
@@ -417,16 +423,16 @@ describe('design board helpers', () => {
     const firstSync = syncHtmlArtifactsToBoardDocument(doc, [measuredArtifact])
     expect(firstSync.updatedFrameIds).toEqual([existing.id])
     expect(firstSync.document.objects[existing.id]).toMatchObject({
-      width: 1852,
+      width: 1280,
       height: 2903
     })
 
     // Re-run sync again (as happens whenever any other artifact's node changes)
-    // against the now-updated document. The already-measured frame must stay put.
+    // against the now-updated document. The already-measured height must stay put.
     const secondSync = syncHtmlArtifactsToBoardDocument(firstSync.document, [measuredArtifact])
     expect(secondSync.updatedFrameIds).toEqual([])
     expect(secondSync.document.objects[existing.id]).toMatchObject({
-      width: 1852,
+      width: 1280,
       height: 2903
     })
   })

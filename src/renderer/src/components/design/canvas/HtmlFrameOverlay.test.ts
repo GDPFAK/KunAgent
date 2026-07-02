@@ -3,6 +3,7 @@ import {
   HTML_FRAME_CONTENT_SIZE_QUERY,
   buildHtmlFrameScrollbarSuppressionScript,
   executeHtmlFrameWebviewScript,
+  htmlFrameAllowsWidthAutoGrow,
   htmlFrameDrawingActive,
   htmlFrameOverlayPointerEvents,
   htmlFrameShouldSuppressDocumentScrollbars,
@@ -364,6 +365,21 @@ describe('HtmlFrameOverlay measurement decision', () => {
     expect(resolveHtmlFrameMeasurementDecision(null)).toBeNull()
     expect(resolveHtmlFrameMeasurementDecision({ height: Number.NaN })).toBeNull()
     expect(resolveHtmlFrameMeasurementDecision({ width: Number.NaN, height: 844 })).toBeNull()
+  })
+})
+
+describe('HtmlFrameOverlay width auto-grow policy', () => {
+  it('lets foundation reference docs (design system / logo) auto-grow width', () => {
+    expect(htmlFrameAllowsWidthAutoGrow('design-system')).toBe(true)
+    expect(htmlFrameAllowsWidthAutoGrow('logo')).toBe(true)
+  })
+
+  it('pins regular screens to their fixed device width regardless of measured content', () => {
+    // Regular screens represent a fixed device viewport (e.g. a 390px phone
+    // mockup). Letting their width follow measured content produced wildly
+    // inconsistent per-screen widths (window.innerWidth-based measurement can
+    // race with the webview's native zoom factor applying).
+    expect(htmlFrameAllowsWidthAutoGrow(undefined)).toBe(false)
   })
 })
 

@@ -299,6 +299,21 @@ export function shouldAutoResizeHtmlFrame({
   )
 }
 
+/**
+ * Only foundation reference docs (design system / logo) may auto-grow their
+ * frame WIDTH from measured content — they legitimately need to widen to show
+ * component grids/specimens. Regular screens represent a fixed device
+ * viewport (e.g. a 390px-wide phone mockup); letting their measured width
+ * feed back into the frame produces wildly inconsistent per-screen widths
+ * (window.innerWidth-based width measurement is sensitive to webview zoom
+ * timing), so their width must stay pinned to the device target regardless of
+ * measured content. This must stay consistent with design-board.ts's
+ * genericFrameSizeForArtifact, which is the other half of this width policy.
+ */
+export function htmlFrameAllowsWidthAutoGrow(foundationRole: DesignArtifactFoundationRole | undefined): boolean {
+  return Boolean(foundationRole)
+}
+
 export function htmlFrameDrawingActive({
   foundationRole,
   previewStatus,
@@ -918,7 +933,9 @@ function ScreenOverlayInner({
           buildHtmlFrameScrollbarSuppressionScript(suppressScrollbars)
         )?.catch(() => undefined)
         if (!allowAutoGrow) return
-        const widthChanged = Math.abs(nextWidth - current.width) > FRAME_AUTO_GROW_THRESHOLD
+        const widthChanged =
+          htmlFrameAllowsWidthAutoGrow(foundationRole) &&
+          Math.abs(nextWidth - current.width) > FRAME_AUTO_GROW_THRESHOLD
         const heightChanged = Math.abs(nextHeight - current.height) > FRAME_AUTO_GROW_THRESHOLD
         if (!widthChanged && !heightChanged) return
         const patch = {

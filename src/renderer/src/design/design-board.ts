@@ -153,42 +153,31 @@ function genericFrameSizeForArtifact(
 }
 
 /**
- * The frame size an artifact's real HTML content has already been measured to
- * (via HtmlFrameOverlay's live auto-grow), or null if it has never been
- * measured (still sitting at a pristine template default). Regular screens and
- * foundation reference docs (design system / logo) both auto-grow to their
- * real content height — this must stay in sync with `measureContentSize` in
- * HtmlFrameOverlay.tsx, otherwise a correctly measured page gets stomped back
- * to the generic placeholder size the next time this sync runs (which is
- * every time ANY artifact's node changes, since board sync recomputes for all
- * artifacts from current state).
+ * Only foundation reference docs (design system / logo) are allowed to
+ * auto-grow their frame WIDTH from measured content — they legitimately need
+ * to widen to show component grids/specimens. Regular screens represent a
+ * fixed device viewport (e.g. a 390px-wide phone mockup); their width must
+ * stay pinned to the device target regardless of any measured/stored width,
+ * matching `htmlFrameAllowsWidthAutoGrow` in HtmlFrameOverlay.tsx (the other
+ * half of this width policy — that side stops WRITING a measured width for
+ * regular screens, this side stops TRUSTING one that's already stored).
  */
-function measuredFrameSizeForArtifact(
-  artifact: DesignArtifact,
-  index: number
-): Pick<Rect, 'width' | 'height'> | null {
+function measuredFrameHeightForArtifact(artifact: DesignArtifact, index: number): number | null {
+  const measuredAutoNode = autoArtifactNode(artifact, index)
+  if (!measuredAutoNode) return null
+  return Math.max(BOARD_HTML_FRAME_MIN_HEIGHT, Math.round(measuredAutoNode.height))
+}
+
+function measuredFrameWidthForFoundationArtifact(artifact: DesignArtifact, index: number): number | null {
   const measuredAutoNode = autoArtifactNode(artifact, index)
   if (!measuredAutoNode) return null
   const measuredWidth = Math.round(measuredAutoNode.width)
-  const measuredHeight = Math.round(measuredAutoNode.height)
-  if (isFoundationArtifact(artifact)) {
-    // Foundation frames migrated from the old compact 420-wide "card" preset
-    // report that legacy width as their auto node before ever being measured
-    // for real. Treat the width (only) as "not yet measured" in that case —
-    // the height may still be a genuine measurement worth keeping.
-    const compact = defaultDesignArtifactNode(index)
-    const hasLegacyCompactWidth = Math.abs(measuredWidth - compact.width) < 1
-    return {
-      width: hasLegacyCompactWidth
-        ? defaultFrameSizeForDesignTarget('web').width
-        : Math.max(BOARD_HTML_FRAME_MIN_WIDTH, measuredWidth),
-      height: Math.max(BOARD_HTML_FRAME_MIN_HEIGHT, measuredHeight)
-    }
-  }
-  return {
-    width: Math.max(BOARD_HTML_FRAME_MIN_WIDTH, measuredWidth),
-    height: Math.max(BOARD_HTML_FRAME_MIN_HEIGHT, measuredHeight)
-  }
+  // Foundation frames migrated from the old compact 420-wide "card" preset
+  // report that legacy width as their auto node before ever being measured
+  // for real; treat that as "not yet measured".
+  const compact = defaultDesignArtifactNode(index)
+  if (Math.abs(measuredWidth - compact.width) < 1) return null
+  return Math.max(BOARD_HTML_FRAME_MIN_WIDTH, measuredWidth)
 }
 
 function defaultFrameSizeForArtifact(
@@ -196,7 +185,15 @@ function defaultFrameSizeForArtifact(
   index: number,
   designTarget: DesignTarget | undefined
 ): Pick<Rect, 'width' | 'height'> {
-  return measuredFrameSizeForArtifact(artifact, index) ?? genericFrameSizeForArtifact(artifact, designTarget)
+  const generic = genericFrameSizeForArtifact(artifact, designTarget)
+  const measuredHeight = measuredFrameHeightForArtifact(artifact, index)
+  const measuredWidth = isFoundationArtifact(artifact)
+    ? measuredFrameWidthForFoundationArtifact(artifact, index)
+    : null
+  return {
+    width: measuredWidth ?? generic.width,
+    height: measuredHeight ?? generic.height
+  }
 }
 
 function defaultDevicePresetForArtifact(
