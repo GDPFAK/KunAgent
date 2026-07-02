@@ -4,7 +4,7 @@
  * generate an HTML artifact from their own brief plus the text flowing in from
  * upstream nodes. Persisted as JSON; execution lives in design-graph-run.ts.
  */
-export type DesignGraphNodeKind = 'prompt' | 'design'
+export type DesignGraphNodeKind = 'prompt' | 'design' | 'image'
 export type DesignGraphNodeStatus = 'idle' | 'running' | 'done' | 'error'
 
 export type DesignGraphNodeData = {
@@ -48,7 +48,7 @@ function normalizeNode(raw: unknown): DesignGraphNode | null {
     id: n.id,
     position: { x: Number(n.position?.x) || 0, y: Number(n.position?.y) || 0 },
     data: {
-      kind: d.kind === 'prompt' ? 'prompt' : 'design',
+      kind: d.kind === 'prompt' ? 'prompt' : d.kind === 'image' ? 'image' : 'design',
       label: typeof d.label === 'string' ? d.label : '',
       brief: typeof d.brief === 'string' ? d.brief : '',
       status:

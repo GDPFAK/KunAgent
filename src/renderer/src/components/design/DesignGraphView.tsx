@@ -1,7 +1,7 @@
 import '@xyflow/react/dist/style.css'
 import type { ReactElement } from 'react'
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react'
-import { ExternalLink, Loader2, MessageSquare, Play, Plus, Sparkles, X } from 'lucide-react'
+import { ExternalLink, Image as ImageIcon, Loader2, MessageSquare, Play, Plus, Sparkles, X } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import {
   Background,
@@ -41,11 +41,13 @@ type GraphActions = {
   updateBrief: (id: string, brief: string) => void
   previewOutput: (path: string) => void
   deleteNode: (id: string) => void
+  workspaceRoot: string
 }
 const GraphContext = createContext<GraphActions>({
   updateBrief: () => {},
   previewOutput: () => {},
-  deleteNode: () => {}
+  deleteNode: () => {},
+  workspaceRoot: ''
 })
 
 const btnGhost =
@@ -56,7 +58,7 @@ const btnPrimary =
 function nodeData(data: NodeProps['data']): DesignGraphNodeData {
   const d = data as Partial<DesignGraphNodeData>
   return {
-    kind: d.kind === 'prompt' ? 'prompt' : 'design',
+    kind: d.kind === 'prompt' ? 'prompt' : d.kind === 'image' ? 'image' : 'design',
     label: typeof d.label === 'string' ? d.label : '',
     brief: typeof d.brief === 'string' ? d.brief : '',
     status: d.status,
@@ -71,11 +73,32 @@ function StatusBadge({ status }: { status?: DesignGraphNodeData['status'] }): Re
   return null
 }
 
+function NodeImage({ path, workspaceRoot }: { path: string; workspaceRoot: string }): ReactElement | null {
+  const [url, setUrl] = useState('')
+  useEffect(() => {
+    setUrl('')
+    if (!path || !workspaceRoot || typeof window.kunGui?.readWorkspaceImage !== 'function') return
+    let cancelled = false
+    void window.kunGui
+      .readWorkspaceImage({ path, workspaceRoot })
+      .then((r) => {
+        if (!cancelled && r.ok) setUrl(r.dataUrl)
+      })
+      .catch(() => undefined)
+    return () => {
+      cancelled = true
+    }
+  }, [path, workspaceRoot])
+  if (!url) return null
+  return <img src={url} alt="" className="nodrag mt-1 max-h-28 w-full rounded object-contain" />
+}
+
 function GraphNode({ id, data }: NodeProps): ReactElement {
   const { t } = useTranslation('common')
-  const { updateBrief, previewOutput, deleteNode } = useContext(GraphContext)
+  const { updateBrief, previewOutput, deleteNode, workspaceRoot } = useContext(GraphContext)
   const d = nodeData(data)
   const isPrompt = d.kind === 'prompt'
+  const isImage = d.kind === 'image'
   return (
     <div
       className={`group relative min-w-[170px] max-w-[230px] rounded-lg border bg-white px-2 py-1.5 shadow-sm dark:bg-[#1f242c] ${
@@ -97,8 +120,14 @@ function GraphNode({ id, data }: NodeProps): ReactElement {
       <Handle type="target" position={Position.Left} className="!h-2 !w-2 !border-0 !bg-[#3b82d8]" />
       <div className="mb-1 flex items-center justify-between gap-1">
         <span className="inline-flex items-center gap-1 text-[10px] font-medium uppercase tracking-wide text-[#8b95a3]">
-          {isPrompt ? <MessageSquare className="h-3 w-3" strokeWidth={2} /> : <Sparkles className="h-3 w-3" strokeWidth={2} />}
-          {isPrompt ? t('designNodePrompt') : t('designNodeDesign')}
+          {isPrompt ? (
+            <MessageSquare className="h-3 w-3" strokeWidth={2} />
+          ) : isImage ? (
+            <ImageIcon className="h-3 w-3" strokeWidth={2} />
+          ) : (
+            <Sparkles className="h-3 w-3" strokeWidth={2} />
+          )}
+          {isPrompt ? t('designNodePrompt') : isImage ? t('designNodeImage') : t('designNodeDesign')}
         </span>
         <StatusBadge status={d.status} />
       </div>
@@ -106,10 +135,18 @@ function GraphNode({ id, data }: NodeProps): ReactElement {
         value={d.brief}
         onChange={(e) => updateBrief(id, e.target.value)}
         rows={2}
-        placeholder={isPrompt ? t('designNodePromptPlaceholder') : t('designNodeDesignPlaceholder')}
+        placeholder={
+          isPrompt
+            ? t('designNodePromptPlaceholder')
+            : isImage
+              ? t('designNodeImagePlaceholder')
+              : t('designNodeDesignPlaceholder')
+        }
         className="nodrag w-full resize-none bg-transparent text-[12px] text-[#1f2733] outline-none dark:text-white/90"
       />
-      {!isPrompt && d.outputPath ? (
+      {isImage && d.outputPath ? (
+        <NodeImage path={d.outputPath} workspaceRoot={workspaceRoot} />
+      ) : !isPrompt && d.outputPath ? (
         <button
           type="button"
           onClick={() => previewOutput(d.outputPath as string)}
@@ -263,7 +300,9 @@ export function DesignGraphView({ artifact, workspaceRoot }: Props): ReactElemen
     try {
       for (const nodeId of order) {
         const node = nodesRef.current.find((n) => n.id === nodeId)
-        if (!node || nodeData(node.data).kind !== 'design') continue
+        if (!node) continue
+        const nodeKind = nodeData(node.data).kind
+        if (nodeKind !== 'design' && nodeKind !== 'image') continue
         const upstream = edgesRef.current
           .filter((e) => e.target === nodeId)
           .map((e) => {
@@ -274,9 +313,11 @@ export function DesignGraphView({ artifact, workspaceRoot }: Props): ReactElemen
           })
           .filter(Boolean)
           .join('\n')
-        const outputRelativePath = graphDir ? `${graphDir}/${nodeId}.html` : `${nodeId}.html`
+        const ext = nodeKind === 'image' ? 'png' : 'html'
+        const outputRelativePath = graphDir ? `${graphDir}/${nodeId}.${ext}` : `${nodeId}.${ext}`
         patchNode(nodeId, { status: 'running' })
         const ok = await runDesignNode({
+          kind: nodeKind,
           brief: nodeData(node.data).brief,
           upstreamContext: upstream,
           outputRelativePath,
@@ -293,7 +334,7 @@ export function DesignGraphView({ artifact, workspaceRoot }: Props): ReactElemen
   }, [running, artifact.relativePath, workspaceRoot, persist, patchNode, t, setFileError])
 
   return (
-    <GraphContext.Provider value={{ updateBrief, previewOutput: setPreviewPath, deleteNode }}>
+    <GraphContext.Provider value={{ updateBrief, previewOutput: setPreviewPath, deleteNode, workspaceRoot }}>
       <div className="flex min-h-0 flex-1">
         <div className="relative min-h-0 flex-1">
         <div className="ds-no-drag absolute left-3 top-3 z-10 flex items-center gap-1.5">
@@ -304,6 +345,10 @@ export function DesignGraphView({ artifact, workspaceRoot }: Props): ReactElemen
           <button type="button" onClick={() => addNode('design')} className={btnGhost}>
             <Plus className="h-3.5 w-3.5" strokeWidth={2} />
             {t('designAddDesign')}
+          </button>
+          <button type="button" onClick={() => addNode('image')} className={btnGhost}>
+            <Plus className="h-3.5 w-3.5" strokeWidth={2} />
+            {t('designAddImage')}
           </button>
           <button type="button" onClick={() => void runGraph()} disabled={running} className={btnPrimary}>
             {running ? <Loader2 className="h-3.5 w-3.5 animate-spin" strokeWidth={2} /> : <Play className="h-3.5 w-3.5" strokeWidth={2} />}

@@ -72,6 +72,37 @@ export function buildDesignTurnPrompt(options: DesignTurnOptions): string {
   return lines.join('\n')
 }
 
+export type DesignImageNodeOptions = {
+  text?: string
+  /** Workspace-relative .png path the node's image must end up at. */
+  outputRelativePath: string
+  workspaceRoot: string
+  designContext?: DesignContext
+}
+
+/**
+ * Image node (node canvas): generate an image with the generate_image tool and
+ * land it at the exact reserved .png path so the canvas can display it.
+ */
+export function buildDesignImageNodePrompt(options: DesignImageNodeOptions): string {
+  const lines = [
+    'Kun is asking you to generate an IMAGE for a design node.',
+    `Workspace: ${options.workspaceRoot}`,
+    `Reserved output file: ${options.outputRelativePath}`,
+    '',
+    'How to proceed:',
+    '- Use the generate_image tool to create the image from the brief below.',
+    `- The tool saves to its own location; then save or copy the result to the EXACT path \`${options.outputRelativePath}\` (create parent directories as needed) so the canvas can display it.`,
+    '- Do not modify any other file.',
+    '- Reply with a one-paragraph description of the image you generated.'
+  ]
+  const contextLines = formatDesignContextLines(options.designContext)
+  if (contextLines.length > 0) lines.push('', ...contextLines)
+  const text = options.text?.trim()
+  if (text) lines.push('', 'Brief:', text.slice(0, WRITE_PROTOTYPE_MAX_TEXT_CHARS))
+  return lines.join('\n')
+}
+
 export type DesignFromCodeOptions = {
   /** Workspace-relative (or absolute) path to the existing UI code to reverse-design. */
   sourceRelativePath: string
