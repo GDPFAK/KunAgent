@@ -63,8 +63,10 @@ const api = {
     ipcRenderer.invoke('skill:list', { workspaceRoot }),
   listSkillRoots: (workspaceRoot) =>
     ipcRenderer.invoke('skill:list-roots', { workspaceRoot }),
-  saveSkillFile: (rootPath, skillName, content) =>
-    ipcRenderer.invoke('skill:save-file', { rootPath, skillName, content }),
+  saveSkillFile: (rootPath, skillName, content, manifestContent) =>
+    ipcRenderer.invoke('skill:save-file', { rootPath, skillName, content, manifestContent }),
+  importSkillsFromGitHub: (rootPath, url) =>
+    ipcRenderer.invoke('skill:import-github', { rootPath, url }),
   openSkillRoot: (rootPath) =>
     ipcRenderer.invoke('skill:open-root', rootPath),
   listUiPlugins: () =>
@@ -188,6 +190,24 @@ const api = {
     ipcRenderer.invoke('write:open-prototype', payload),
   transcribeSpeech: (payload) =>
     ipcRenderer.invoke('speech:transcribe', payload),
+  getLocalWhisperModelStatus: (modelId) =>
+    ipcRenderer.invoke('speech:local-whisper:status', modelId),
+  downloadLocalWhisperModel: (payload) =>
+    ipcRenderer.invoke('speech:local-whisper:download', payload),
+  cancelLocalWhisperModel: (modelId) =>
+    ipcRenderer.invoke('speech:local-whisper:cancel', modelId),
+  checkLocalWhisperDownloadSources: (payload) =>
+    ipcRenderer.invoke('speech:local-whisper:sources', payload),
+  deleteLocalWhisperModel: (modelId) =>
+    ipcRenderer.invoke('speech:local-whisper:delete', modelId),
+  onLocalWhisperModelProgress: (handler) => {
+    const wrapped = (
+      _: Electron.IpcRendererEvent,
+      payload: Parameters<typeof handler>[0]
+    ) => handler(payload)
+    ipcRenderer.on('speech:local-whisper:progress', wrapped)
+    return () => ipcRenderer.removeListener('speech:local-whisper:progress', wrapped)
+  },
   listWriteInlineCompletionDebugEntries: () =>
     ipcRenderer.invoke('write:inline-completion-debug:list'),
   clearWriteInlineCompletionDebugEntries: () =>

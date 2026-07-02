@@ -375,7 +375,7 @@ export function WorkflowView({ leftSidebarCollapsed, onToggleLeftSidebar }: Prop
           <div className="grid w-full min-w-0 items-center gap-2.5 px-3 py-2 sm:px-4 md:pl-5 md:pr-2">
             <div
               className={`flex min-w-0 items-center gap-2.5 ${
-                leftSidebarCollapsed ? 'ds-window-controls-safe-inset' : ''
+                leftSidebarCollapsed ? 'ds-window-controls-collapsed-titlebar-inset' : ''
               }`}
             >
               <SidebarTitlebarToggleButton

@@ -12,6 +12,7 @@ import {
   defaultScheduleSettings,
   defaultWorkflowSettings,
   defaultWriteSettings,
+  defaultTerminalSettings,
   type AppSettingsV1
 } from '../shared/app-settings'
 import { fetchUpstreamModelIds, readConfiguredKunModelIds } from './upstream-models'
@@ -56,6 +57,7 @@ function settings(dataDir: string, model = 'settings-model'): AppSettingsV1 {
     schedule: defaultScheduleSettings(),
     workflow: defaultWorkflowSettings(),
     design: defaultDesignSettings(),
+    terminal: defaultTerminalSettings(),
     guiUpdate: { channel: 'stable' },
     codePromptPrefix: '',
     disabledSkillIds: []

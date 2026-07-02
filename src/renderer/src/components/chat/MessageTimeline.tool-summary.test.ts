@@ -279,6 +279,23 @@ describe('MessageTimeline Kun runtime metadata smoke', () => {
     expect(html).toContain('https://example.com/kun')
   })
 
+  it('renders failed tool bubbles with the orange warning tone', () => {
+    const block: ToolBlock = toolBlock({
+      summary: 'recognize_image failed',
+      status: 'error',
+      detail: 'model request failed with status 401',
+      meta: { toolName: 'recognize_image', exit_code: 1 }
+    })
+
+    const html = renderToStaticMarkup(createElement(MessageBubble, { block }))
+
+    expect(html).toContain('border-orange-300/80')
+    expect(html).toContain('bg-orange-500/10')
+    expect(html).toContain('text-orange-800')
+    expect(html).not.toContain('border-red-300/80')
+    expect(html).not.toContain('bg-red-500/10')
+  })
+
   it('renders the same runtime metadata on process timeline rows', () => {
     const block: ChatBlock = toolBlock({
       summary: 'delegate: research',
@@ -362,6 +379,10 @@ describe('MessageTimeline Kun runtime metadata smoke', () => {
     expect(html).toContain('Recognize image recognize_image')
     expect(html).toContain('model request failed with status 401')
     expect(html).toContain('role="button"')
+    expect(html).toContain('text-orange-700')
+    expect(html).toContain('border-orange-200/80')
+    expect(html).not.toContain('text-red-600')
+    expect(html).not.toContain('border-red-200/80')
   })
 
   it('expands active reasoning so the current process is visible', () => {
@@ -687,6 +708,45 @@ describe('MessageTimeline Kun runtime metadata smoke', () => {
     const forkIndex = html.search(/forkFromAssistantResponse|Fork a new thread from this response|从这条回答分叉新会话/)
     const copyIndex = html.slice(forkIndex).search(/copyMessage|Copy message|复制消息/)
     expect(forkIndex).toBeGreaterThanOrEqual(0)
+    expect(copyIndex).toBeGreaterThan(0)
+  })
+
+  it('renders the workspace rollback action with fork in completed assistant response actions', () => {
+    const blocks: ChatBlock[] = [
+      {
+        kind: 'user',
+        id: 'user_1',
+        turnId: 'turn_1',
+        text: 'change files',
+        meta: { workspaceCheckpointId: 'gcp_1' }
+      },
+      {
+        kind: 'assistant',
+        id: 'assistant_1',
+        turnId: 'turn_1',
+        text: 'done'
+      }
+    ]
+
+    const html = renderToStaticMarkup(
+      createElement(MessageTimeline, {
+        blocks,
+        liveReasoning: '',
+        live: '',
+        activeThreadId: 'thr_1',
+        runtimeConnection: 'ready',
+        onRetryConnection: () => undefined,
+        onOpenSettings: () => undefined
+      })
+    )
+
+    expect(html).toMatch(/rollbackWorkspace|Rollback commit|回滚提交/)
+    expect(html).toMatch(/rollbackWorkspaceFromAssistantResponse|Rollback this response&#x27;s Git commit|只回滚这条回答对应的 Git 提交/)
+    const rollbackIndex = html.search(/rollbackWorkspaceFromAssistantResponse|Rollback this response&#x27;s Git commit|只回滚这条回答对应的 Git 提交/)
+    const forkIndex = html.slice(rollbackIndex).search(/forkFromAssistantResponse|Fork a new thread from this response|从这条回答分叉新会话/)
+    const copyIndex = html.slice(rollbackIndex + Math.max(forkIndex, 0)).search(/copyMessage|Copy message|复制消息/)
+    expect(rollbackIndex).toBeGreaterThanOrEqual(0)
+    expect(forkIndex).toBeGreaterThan(0)
     expect(copyIndex).toBeGreaterThan(0)
   })
 

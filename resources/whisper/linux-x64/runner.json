@@ -1,0 +1,8 @@
+{
+  "runner": "whisper-cli",
+  "source": "https://github.com/ggml-org/whisper.cpp.git",
+  "ref": "v1.9.1",
+  "platform": "linux",
+  "arch": "x64",
+  "builtAt": "2026-06-20T05:59:12.575Z"
+}

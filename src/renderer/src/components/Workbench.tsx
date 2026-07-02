@@ -26,6 +26,7 @@ import type { AttachmentReference, ChatBlock, NormalizedThread, UserFileReferenc
 import type { CoreRuntimeInfoJson, CoreRuntimeSkillJson } from '../agent/kun-contract'
 import { getProvider } from '../agent/registry'
 import { rendererRuntimeClient } from '../agent/runtime-client'
+import { applyTheme } from '../lib/apply-theme'
 import { useChatStore } from '../store/chat-store'
 import {
   isClawThread,
@@ -418,6 +419,8 @@ export function Workbench(): ReactElement {
     composerPickList,
     composerModelGroups,
     disabledSkillIds,
+    composerMode,
+    setComposerMode,
     setComposerModel,
     setThreadSearch,
     renameThread,
@@ -480,6 +483,8 @@ export function Workbench(): ReactElement {
       composerPickList: s.composerPickList,
       composerModelGroups: s.composerModelGroups,
       disabledSkillIds: s.disabledSkillIds,
+      composerMode: s.composerMode,
+      setComposerMode: s.setComposerMode,
       setComposerModel: s.setComposerModel,
       setThreadSearch: s.setThreadSearch,
       renameThread: s.renameThread,
@@ -494,7 +499,6 @@ export function Workbench(): ReactElement {
     }))
   )
   const [input, setInput] = useState('')
-  const [mode, setMode] = useState<'plan' | 'agent'>('agent')
   const [useWorktreePool, setUseWorktreePool] = useState(false)
   const [worktreeBranch, setWorktreeBranch] = useState('')
   const [composerReasoningEffort, setComposerReasoningEffort] =
@@ -823,11 +827,11 @@ export function Workbench(): ReactElement {
   } = useWorkbenchPlanController({
     blocks,
     busy,
-    mode,
+    mode: composerMode,
     route,
     sendMessage,
     setError,
-    setMode,
+    setComposerMode,
     setRightPanelMode,
     setRightSidebarWidth,
     t,
@@ -885,10 +889,10 @@ export function Workbench(): ReactElement {
       event.preventDefault()
 
       if (commandId === 'toggle-plan-mode') {
-        if (mode === 'plan') {
-          setMode('agent')
+        if (composerMode === 'plan') {
+          setComposerMode('agent')
         } else {
-          setMode('plan')
+          setComposerMode('plan')
           void handleGuiPlanCommand()
         }
         return
@@ -922,9 +926,9 @@ export function Workbench(): ReactElement {
     createThread,
     handleGuiPlanCommand,
     keyboardShortcutBindings,
-    mode,
+    composerMode,
     openSettings,
-    setMode,
+    setComposerMode,
     toggleTerminal,
     useWorktreePool,
     worktreeBranch
@@ -961,6 +965,13 @@ export function Workbench(): ReactElement {
     writeFocusModePreference(enabled)
     setFocusModeEnabled(enabled)
   }
+
+  const toggleTheme = useCallback((): void => {
+    const isDark = document.documentElement.getAttribute('data-theme') === 'dark'
+    const next = isDark ? 'light' : 'dark'
+    applyTheme(next)
+    void rendererRuntimeClient.setSettings({ theme: next }).catch(() => undefined)
+  }, [])
 
   useEffect(() => {
     const previousThreadId = prevThreadId.current
@@ -1192,7 +1203,7 @@ export function Workbench(): ReactElement {
   const attachmentUploadEnabled = isChatAttachmentUploadEnabled({
     runtimeConnection,
     route,
-    mode,
+    mode: composerMode,
     attachmentStoreAvailable: runtimeInfo?.capabilities.attachments.available,
     modelSupportsImageInput: selectedModelSupportsImageInput
   })
@@ -1427,7 +1438,7 @@ export function Workbench(): ReactElement {
       const providerId =
         writeState.assistantProviderId.trim() || providerIdForComposerModel(composerModelGroups, model)
       const reasoningEffort = composerReasoningEffortRequestValue(composerReasoningEffort)
-      const sent = await sendMessage(prompt, mode === 'plan' ? 'plan' : 'agent', {
+      const sent = await sendMessage(prompt, composerMode === 'plan' ? 'plan' : 'agent', {
         ...(!v && attachmentIds.length > 0 ? { displayText: t('composerImageOnlyDisplay') } : {}),
         ...(model ? { model } : {}),
         ...(providerId ? { providerId } : {}),
@@ -1760,7 +1771,7 @@ export function Workbench(): ReactElement {
     // while the draft was closed or in another thread).
     void refreshSddChatTranscriptFromProvider(draft)
     setInput('')
-    setMode('agent')
+    setComposerMode('agent')
     setRoute('chat')
     if (options.openAssistant ?? runtimeConnection === 'ready') {
       setRightSidebarWidth((width) => Math.max(width, 420))
@@ -1976,7 +1987,7 @@ export function Workbench(): ReactElement {
     const model = writeAssistantModel.trim()
     const providerId = resolvedWriteAssistantProviderId.trim()
     const reasoningEffort = composerReasoningEffortRequestValue(composerReasoningEffort)
-    const sent = await sendMessage(prompt, mode === 'plan' ? 'plan' : 'agent', {
+    const sent = await sendMessage(prompt, composerMode === 'plan' ? 'plan' : 'agent', {
       displayText: v || t('composerImageOnlyDisplay'),
       ...(model ? { model } : {}),
       ...(providerId ? { providerId } : {}),
@@ -2214,7 +2225,7 @@ export function Workbench(): ReactElement {
       relativePath: planRelativePath,
       workspaceRoot: draft.workspaceRoot
     }
-    setMode('plan')
+    setComposerMode('plan')
     const sent = await sendPlanTurn(prompt, {
       displayText: t('sddGeneratePlanAction'),
       workspaceRoot: draft.workspaceRoot,
@@ -2378,7 +2389,7 @@ export function Workbench(): ReactElement {
       void handleGuiPlanCommand(planCommand.kind === 'create' ? planCommand.request : undefined)
       return
     }
-    if (route === 'chat' && mode === 'plan') {
+    if (route === 'chat' && composerMode === 'plan') {
       const prepared = await prepareChatMessage()
       if (!prepared) return
       setInput('')
@@ -2461,7 +2472,7 @@ export function Workbench(): ReactElement {
               channelId: activeClawChannelId,
               modelHint: activeClawChannel?.model,
               ...(reasoningEffort ? { reasoningEffort } : {}),
-              mode
+              mode: composerMode
             })
           : { kind: 'noop' as const }
         if (taskResult.kind === 'created') {
@@ -2475,12 +2486,12 @@ export function Workbench(): ReactElement {
         }
         if (!activeThreadId) {
           await selectClawChannel(activeClawChannelId)
-          await useChatStore.getState().sendMessage(v, mode === 'plan' ? 'plan' : 'agent', {
+          await useChatStore.getState().sendMessage(v, composerMode === 'plan' ? 'plan' : 'agent', {
             ...(reasoningEffort ? { reasoningEffort } : {})
           })
           return
         }
-        await sendMessage(v, mode === 'plan' ? 'plan' : 'agent', {
+        await sendMessage(v, composerMode === 'plan' ? 'plan' : 'agent', {
           ...(reasoningEffort ? { reasoningEffort } : {})
         })
       })()
@@ -2491,12 +2502,9 @@ export function Workbench(): ReactElement {
     setInput('')
     clearComposerAttachments()
     clearComposerFileReferences()
-    // When the canvas panel is open in code mode, teach the agent the ShapeOps
-    // vocabulary (+ current snapshot) so it can drive the canvas. Injected into
-    // the model text only; the chat still shows the clean user message.
     let outboundText = prepared.text
     let outboundDisplay = prepared.displayText
-    if (route === 'chat' && mode === 'agent' && rightPanelMode === 'canvas') {
+    if (route === 'chat' && composerMode === 'agent' && rightPanelMode === 'canvas') {
       const snapshot = snapshotCanvas(
         useCanvasShapeStore.getState().document,
         useCanvasSelectionStore.getState().selectedIds
@@ -2508,7 +2516,7 @@ export function Workbench(): ReactElement {
       outboundText = `${prepared.text}\n\n${canvasPrompt}`
       outboundDisplay = prepared.displayText ?? prepared.text
     }
-    void sendMessage(outboundText, mode === 'plan' ? 'plan' : 'agent', {
+    void sendMessage(outboundText, composerMode === 'plan' ? 'plan' : 'agent', {
       ...(outboundDisplay ? { displayText: outboundDisplay } : {}),
       ...(reasoningEffort ? { reasoningEffort } : {}),
       ...(attachmentIds.length ? { attachmentIds, attachments } : {}),
@@ -2836,8 +2844,8 @@ export function Workbench(): ReactElement {
               <WriteAssistantPanel
                 input={input}
                 setInput={setInput}
-                mode={mode}
-                setMode={setMode}
+                mode={composerMode}
+                setMode={setComposerMode}
                 busy={busy}
                 runtimeConnection={runtimeConnection}
                 activeThreadId={activeThreadId}
@@ -2875,8 +2883,8 @@ export function Workbench(): ReactElement {
                 draft={activeSddDraft}
                 input={input}
                 setInput={setInput}
-                mode={mode}
-                setMode={setMode}
+                mode={composerMode}
+                setMode={setComposerMode}
                 busy={busy}
                 runtimeConnection={runtimeConnection}
                 activeThreadId={activeThreadId}
@@ -3062,6 +3070,7 @@ export function Workbench(): ReactElement {
               onOpenRequirementDraft={(draft) => void openSddRequirementDraftFromHistory(draft)}
               onOpenSettings={(section) => openSettings(section)}
               onOpenPlugins={openPluginsView}
+              onToggleTheme={toggleTheme}
               focusModeEnabled={focusModeEnabled}
               onFocusModeChange={updateFocusMode}
               onToggleConnectPhone={toggleConnectPhone}
@@ -3088,18 +3097,12 @@ export function Workbench(): ReactElement {
         }`}
       >
         {route === 'plugins' ? (
-          <>
-            <div className="ds-no-drag shrink-0 px-4 pt-4">
-              <SidebarTitlebarToggleButton
-                onClick={toggleLeftSidebar}
-                title={leftSidebarCollapsed ? t('sidebarExpand') : t('sidebarCollapse')}
-                ariaLabel={leftSidebarCollapsed ? t('sidebarExpand') : t('sidebarCollapse')}
-              />
-            </div>
-            <Suspense fallback={<div className="h-full bg-ds-main" />}>
-              <PluginMarketplaceView />
-            </Suspense>
-          </>
+          <Suspense fallback={<div className="h-full bg-ds-main" />}>
+            <PluginMarketplaceView
+              leftSidebarCollapsed={leftSidebarCollapsed}
+              onToggleLeftSidebar={toggleLeftSidebar}
+            />
+          </Suspense>
         ) : route === 'schedule' ? (
           <Suspense fallback={<div className="h-full bg-ds-main" />}>
             <ScheduleTasksView
@@ -3136,8 +3139,8 @@ export function Workbench(): ReactElement {
                   workspaceRoot={workspaceRoot}
                   input={input}
                   setInput={setInput}
-                  mode={mode}
-                  setMode={setMode}
+                  mode={composerMode}
+                  setMode={setComposerMode}
                   busy={busy}
                   runtimeConnection={runtimeConnection}
                   activeThreadId={activeThreadId}
@@ -3173,8 +3176,8 @@ export function Workbench(): ReactElement {
               <DesignAIRail
                 input={input}
                 setInput={setInput}
-                mode={mode}
-                setMode={setMode}
+                mode={composerMode}
+                setMode={setComposerMode}
                 busy={busy}
                 runtimeConnection={runtimeConnection}
                 activeThreadId={activeThreadId}
@@ -3252,11 +3255,11 @@ export function Workbench(): ReactElement {
           ) : (
             <section className="ds-chat-stage ds-drag flex min-h-0 min-w-0 flex-1 flex-col">
             <div className={`${stageInsetClass} flex min-h-0 min-w-0 flex-1 flex-col`}>
-            <header className="chat-topbar ds-topbar-surface relative z-10 mt-3 flex min-h-[46px] w-full shrink-0 items-stretch overflow-visible rounded-[24px]">
-              <div className="chat-topbar-grid grid w-full min-w-0 items-start gap-2.5 px-3 py-2 sm:px-4 md:pl-5 md:pr-2">
+            <header className="chat-topbar ds-topbar-surface relative z-10 flex w-full shrink-0 items-stretch overflow-visible">
+              <div className="chat-topbar-grid grid w-full min-w-0 items-center gap-2.5 px-3 py-2 sm:px-4 md:pl-5 md:pr-2">
                 <div
                   className={`chat-topbar-session flex min-w-0 items-center gap-2.5 ${
-                    leftSidebarCollapsed ? 'ds-window-controls-safe-inset' : ''
+                    leftSidebarCollapsed ? 'ds-window-controls-collapsed-titlebar-inset' : ''
                   }`}
                 >
                   <SidebarTitlebarToggleButton
@@ -3266,7 +3269,7 @@ export function Workbench(): ReactElement {
                   />
                   <SessionHeader compact className="min-w-0 flex-1" />
                 </div>
-                <div className="chat-topbar-actions flex min-w-0 flex-wrap items-center justify-end gap-2 self-start">
+                <div className="chat-topbar-actions flex min-w-0 flex-wrap items-center justify-end gap-2 self-center">
                   {busy ? (
                     <span className="inline-flex shrink-0 rounded-full bg-amber-500/16 px-2.5 py-1 text-[11.5px] font-semibold text-amber-950 dark:text-amber-100">
                       {t('running')}
@@ -3307,8 +3310,8 @@ export function Workbench(): ReactElement {
               <FloatingComposer
                 input={input}
                 setInput={setInput}
-                mode={mode}
-                setMode={setMode}
+                mode={composerMode}
+                setMode={setComposerMode}
                 busy={busy}
                 runtimeReady={runtimeConnection === 'ready'}
                 hasActiveThread={Boolean(activeThreadId)}

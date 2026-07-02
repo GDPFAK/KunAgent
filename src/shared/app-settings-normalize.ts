@@ -1,5 +1,6 @@
 import {
   DEFAULT_GUI_UPDATE_CHANNEL,
+  DEFAULT_CURSOR_SPOTLIGHT_COLOR,
   DEFAULT_LOG_RETENTION_DAYS,
   normalizeGuiUpdateChannel,
   type AppBehaviorConfigV1,
@@ -32,6 +33,7 @@ import { normalizeScheduleSettings } from './app-settings-schedule'
 import { normalizeWorkflowSettings } from './app-settings-workflow'
 import { normalizeWriteSettings } from './app-settings-write'
 import { normalizeDesignSettings } from './app-settings-design'
+import { normalizeTerminalSettings, type TerminalSettingsPatchV1 } from './app-settings-terminal'
 
 export function normalizeAppSettings(settings: AppSettingsV1): AppSettingsV1 {
   const migrated = shouldMigrateLegacySettings(settings)
@@ -48,6 +50,7 @@ export function normalizeAppSettings(settings: AppSettingsV1): AppSettingsV1 {
     workflow?: WorkflowSettingsPatchV1
     design?: DesignSettingsPatchV1
     guiUpdate?: Partial<GuiUpdateConfigV1>
+    terminal?: TerminalSettingsPatchV1
   }
   const providerSettings = normalizeModelProviderSettings(maybeSettings.provider)
   const runtime = getKunRuntimeSettings(maybeSettings)
@@ -77,6 +80,7 @@ export function normalizeAppSettings(settings: AppSettingsV1): AppSettingsV1 {
         ? maybeSettings.uiFontScale
         : 'small',
     cursorSpotlight: maybeSettings.cursorSpotlight !== false,
+    cursorSpotlightColor: normalizeCursorSpotlightColor(maybeSettings.cursorSpotlightColor),
     provider: providerSettings,
     agents: kunSettingsEnvelope(mergeKunRuntimeSettings(defaultKunRuntimeSettings(), {
       ...runtime,
@@ -100,6 +104,7 @@ export function normalizeAppSettings(settings: AppSettingsV1): AppSettingsV1 {
     schedule: normalizeScheduleSettings(maybeSettings.schedule),
     workflow: normalizeWorkflowSettings(maybeSettings.workflow),
     design: normalizeDesignSettings(maybeSettings.design),
+    terminal: normalizeTerminalSettings(maybeSettings.terminal),
     guiUpdate: {
       channel: normalizeGuiUpdateChannel(
         maybeSettings.guiUpdate?.channel ?? DEFAULT_GUI_UPDATE_CHANNEL
@@ -108,6 +113,12 @@ export function normalizeAppSettings(settings: AppSettingsV1): AppSettingsV1 {
     codePromptPrefix: typeof maybeSettings.codePromptPrefix === 'string' ? maybeSettings.codePromptPrefix : '',
     disabledSkillIds: normalizeDisabledSkillIds(maybeSettings.disabledSkillIds)
   }
+}
+
+export function normalizeCursorSpotlightColor(value: unknown): string {
+  if (typeof value !== 'string') return DEFAULT_CURSOR_SPOTLIGHT_COLOR
+  const color = value.trim()
+  return /^#[0-9a-fA-F]{6}$/.test(color) ? color.toLowerCase() : DEFAULT_CURSOR_SPOTLIGHT_COLOR
 }
 
 function normalizeDisabledSkillIds(value: unknown): string[] {

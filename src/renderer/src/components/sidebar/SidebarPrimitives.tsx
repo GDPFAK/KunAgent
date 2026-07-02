@@ -36,7 +36,7 @@ export function SidebarTitlebarToggleButton({
       aria-label={ariaLabel ?? title}
       className={cx('ds-titlebar-sidebar-toggle ds-no-drag', className)}
     >
-      {children ?? <PanelLeft className="h-[13px] w-[13px]" strokeWidth={1.55} />}
+      {children ?? <PanelLeft className="h-4 w-4" strokeWidth={1.75} />}
     </button>
   )
 }

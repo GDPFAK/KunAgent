@@ -1,0 +1,7 @@
+{
+  "runner": "whisper-cli.exe",
+  "source": "https://github.com/ggml-org/whisper.cpp/releases/download/v1.9.1/whisper-bin-x64.zip",
+  "ref": "v1.9.1",
+  "platform": "win32",
+  "arch": "x64"
+}

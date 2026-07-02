@@ -82,6 +82,15 @@ const DND_MIME = 'application/x-workflow-node'
 const PRESET_DND_MIME = 'application/x-workflow-preset'
 const MODULE_DND_MIME = 'application/x-workflow-module'
 
+export const WORKFLOW_EDITOR_HEADER_CLASS =
+  'workflow-editor-header ds-drag flex shrink-0 items-center gap-3 border-b border-ds-border px-4'
+export const WORKFLOW_EDITOR_HEADER_SIDEBAR_COLLAPSED_CLASS =
+  'workflow-editor-header-sidebar-collapsed'
+export const WORKFLOW_EDITOR_SIDEBAR_CLASS =
+  'workflow-editor-sidebar ds-drag flex w-[184px] shrink-0 flex-col border-r border-ds-border bg-ds-card/40'
+export const WORKFLOW_EDITOR_BACK_BUTTON_CLASS =
+  'ds-no-drag flex h-9 items-center gap-2 rounded-xl px-2 text-[13px] font-medium text-ds-muted transition hover:bg-ds-hover hover:text-ds-ink'
+
 type WorkflowConnectionsArg = ReturnType<typeof flowToWorkflowGraph>['connections']
 
 type Props = {
@@ -428,392 +437,402 @@ function WorkflowEditorInner({
   )
 
   return (
-    <div className="ds-no-drag fixed inset-0 z-[60] flex flex-col bg-ds-main">
-      <header
-        className="ds-drag flex shrink-0 items-center gap-3 border-b border-ds-border py-2.5 pr-4"
-        style={{ paddingLeft: 'calc(var(--ds-window-controls-safe-inset) + 2.5rem)' }}
-      >
-        <button
-          type="button"
-          onClick={onBack}
-          className="inline-flex h-9 items-center gap-1.5 rounded-xl border border-ds-border bg-ds-card px-3 text-[13px] text-ds-muted transition hover:bg-ds-hover hover:text-ds-ink"
-        >
-          <ArrowLeft className="h-4 w-4" strokeWidth={1.8} />
-          {t('workflowBack')}
-        </button>
-        <input
-          className="min-w-0 flex-1 rounded-xl border border-transparent bg-transparent px-2 py-1.5 text-[15px] font-medium text-ds-ink outline-none focus:border-ds-border focus:bg-ds-card"
-          value={name}
-          placeholder={t('workflowNamePlaceholder')}
-          onChange={(event) => {
-            setName(event.target.value)
-            setDirty(true)
-          }}
-        />
-        <label className="flex shrink-0 items-center gap-2 text-[13px] font-medium text-ds-muted">
-          {t('workflowEnabled')}
-          <input
-            type="checkbox"
-            checked={enabled}
-            onChange={(event) => {
-              setEnabled(event.target.checked)
-              setDirty(true)
-            }}
-          />
-        </label>
-        <button
-          type="button"
-          onClick={() => setShowHistory(true)}
-          title={t('workflowRunHistory')}
-          aria-label={t('workflowRunHistory')}
-          className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-ds-border bg-ds-card text-ds-muted transition hover:bg-ds-hover hover:text-ds-ink"
-        >
-          <History className="h-4 w-4" strokeWidth={1.8} />
-        </button>
-        <button
-          type="button"
-          onClick={() => setShowEnv(true)}
-          title={t('workflowEnvVars')}
-          aria-label={t('workflowEnvVars')}
-          className="relative inline-flex h-9 items-center gap-1.5 rounded-xl border border-ds-border bg-ds-card px-3 text-[13px] font-medium text-ds-muted transition hover:bg-ds-hover hover:text-ds-ink"
-        >
-          <Variable className="h-4 w-4" strokeWidth={1.8} />
-          {t('workflowEnvVars')}
-          {env.length > 0 ? (
-            <span className="inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-accent/15 px-1 text-[10px] font-semibold text-accent">
-              {env.length}
-            </span>
-          ) : null}
-        </button>
-        <button
-          type="button"
-          onClick={() => void handleSave()}
-          disabled={saving}
-          className="inline-flex h-9 items-center gap-1.5 rounded-xl border border-ds-border bg-ds-card px-3 text-[13px] font-medium text-ds-ink transition hover:bg-ds-hover disabled:opacity-60"
-        >
-          <Save className="h-4 w-4" strokeWidth={1.8} />
-          {dirty ? t('workflowSave') : t('workflowSaved')}
-        </button>
-        {running ? (
-          <button
-            type="button"
-            onClick={() => void onStop()}
-            className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-red-500/90 px-4 text-[13px] font-semibold text-white shadow-sm transition hover:bg-red-500"
-          >
-            <Square className="h-3.5 w-3.5" strokeWidth={2} />
-            {t('workflowStop')}
-          </button>
-        ) : (
-          <button
-            type="button"
-            onClick={() => void handleRun()}
-            className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-ds-userbubble px-4 text-[13px] font-semibold text-ds-userbubbleFg shadow-sm transition hover:opacity-90"
-          >
-            <Play className="h-4 w-4" strokeWidth={2} />
-            {t('workflowRunNow')}
-          </button>
-        )}
-      </header>
-
-      <div className="flex min-h-0 flex-1">
-        {!leftPanelCollapsed ? (
-        <aside className="flex w-[184px] shrink-0 flex-col gap-1 overflow-y-auto border-r border-ds-border bg-ds-card/40 px-2 py-3">
-          <span className="px-2 pb-1 text-[11px] font-semibold uppercase tracking-wide text-ds-faint">
-            {t('workflowPalette')}
-          </span>
-          {WORKFLOW_PALETTE_GROUPS.map((group) => {
-            const collapsed = collapsedGroups.has(group.id)
-            return (
-              <div key={group.id} className="flex flex-col">
-                <button
-                  type="button"
-                  onClick={() => toggleGroup(group.id)}
-                  className="flex items-center gap-1 px-2 py-1 text-[10.5px] font-semibold uppercase tracking-wide text-ds-faint transition hover:text-ds-muted"
-                >
-                  <ChevronRight
-                    className={`h-3 w-3 shrink-0 transition-transform ${collapsed ? '' : 'rotate-90'}`}
-                    strokeWidth={2}
-                  />
-                  <span className="min-w-0 flex-1 truncate text-left">{t(`workflowGroup_${group.id}`)}</span>
-                </button>
-                {!collapsed
-                  ? group.kinds.map((kind) => {
-                      const Icon = NODE_ICONS[kind]
-                      return (
-                        <button
-                          key={kind}
-                          type="button"
-                          draggable
-                          onDragStart={(event) => onPaletteDragStart(event, kind)}
-                          onClick={() => addNode(kind)}
-                          className="flex cursor-grab items-center gap-2 rounded-lg border border-transparent px-2 py-1.5 text-left text-[12.5px] text-ds-ink transition hover:border-ds-border hover:bg-ds-hover active:cursor-grabbing"
-                        >
-                          <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-accent/10 text-accent">
-                            <Icon className="h-3.5 w-3.5" strokeWidth={1.9} />
-                          </span>
-                          <span className="min-w-0 flex-1 truncate">{t(`workflowNode_${kind}`)}</span>
-                          <Plus className="h-3.5 w-3.5 shrink-0 text-ds-faint" strokeWidth={1.8} />
-                        </button>
-                      )
-                    })
-                  : null}
-              </div>
-            )
-          })}
-
-          <div className="flex flex-col">
-            <div className="flex items-center gap-1 pr-1">
-              <button
-                type="button"
-                onClick={() => toggleGroup('custom')}
-                className="flex min-w-0 flex-1 items-center gap-1 px-2 py-1 text-[10.5px] font-semibold uppercase tracking-wide text-ds-faint transition hover:text-ds-muted"
-              >
-                <ChevronRight
-                  className={`h-3 w-3 shrink-0 transition-transform ${collapsedGroups.has('custom') ? '' : 'rotate-90'}`}
-                  strokeWidth={2}
-                />
-                <span className="min-w-0 flex-1 truncate text-left">{t('workflowGroup_custom')}</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setShowModules(true)}
-                title={t('workflowModulesManage')}
-                aria-label={t('workflowModulesManage')}
-                className="flex h-5 w-5 shrink-0 items-center justify-center rounded text-ds-faint transition hover:bg-ds-hover hover:text-ds-ink"
-              >
-                <Settings2 className="h-3.5 w-3.5" strokeWidth={1.8} />
-              </button>
-            </div>
-            {!collapsedGroups.has('custom') ? (
-              <>
-                {modules.map((module) => {
-                  const Icon = NODE_ICONS.custom
-                  return (
-                    <button
-                      key={module.id}
-                      type="button"
-                      draggable
-                      onDragStart={(event) => onModuleDragStart(event, module.id)}
-                      onClick={() => addModuleNode(module)}
-                      title={module.description || module.name}
-                      className="flex cursor-grab items-center gap-2 rounded-lg border border-transparent px-2 py-1.5 text-left text-[12.5px] text-ds-ink transition hover:border-ds-border hover:bg-ds-hover active:cursor-grabbing"
-                    >
-                      <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-accent/10 text-accent">
-                        <Icon className="h-3.5 w-3.5" strokeWidth={1.9} />
-                      </span>
-                      <span className="min-w-0 flex-1 truncate">{module.name}</span>
-                      <Plus className="h-3.5 w-3.5 shrink-0 text-ds-faint" strokeWidth={1.8} />
-                    </button>
-                  )
-                })}
-                {presets.map((preset) => {
-                  const Icon = NODE_ICONS[preset.nodeType]
-                  return (
-                    <div key={preset.id} className="group/preset relative flex items-center">
-                      <button
-                        type="button"
-                        draggable
-                        onDragStart={(event) => onPresetDragStart(event, preset.id)}
-                        onClick={() => addPresetNode(preset)}
-                        className="flex min-w-0 flex-1 cursor-grab items-center gap-2 rounded-lg border border-transparent px-2 py-1.5 pr-7 text-left text-[12.5px] text-ds-ink transition hover:border-ds-border hover:bg-ds-hover active:cursor-grabbing"
-                      >
-                        <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-accent/10 text-accent">
-                          <Icon className="h-3.5 w-3.5" strokeWidth={1.9} />
-                        </span>
-                        <span className="min-w-0 flex-1 truncate">{preset.label}</span>
-                      </button>
-                      <button
-                        type="button"
-                        title={t('workflowPresetDelete')}
-                        aria-label={t('workflowPresetDelete')}
-                        onClick={() => void onDeletePreset(preset.id)}
-                        className="absolute right-1 flex h-5 w-5 items-center justify-center rounded text-ds-faint opacity-0 transition hover:bg-red-500/10 hover:text-red-600 group-hover/preset:opacity-100"
-                      >
-                        <X className="h-3 w-3" strokeWidth={2} />
-                      </button>
-                    </div>
-                  )
-                })}
-                {modules.length === 0 && presets.length === 0 ? (
-                  <p className="px-2 py-1 text-[11px] leading-4 text-ds-faint">{t('workflowPresetEmpty')}</p>
-                ) : null}
-              </>
-            ) : null}
+    <div className="ds-no-drag fixed inset-0 z-[60] flex bg-ds-main">
+      {!leftPanelCollapsed ? (
+        <aside className={WORKFLOW_EDITOR_SIDEBAR_CLASS}>
+          <div className="shrink-0 px-2 pb-2 pt-3">
+            <div aria-hidden className="ds-titlebar-safe-block" />
+            <button type="button" onClick={onBack} className={WORKFLOW_EDITOR_BACK_BUTTON_CLASS}>
+              <ArrowLeft className="h-4 w-4" strokeWidth={1.8} />
+              {t('workflowBack')}
+            </button>
           </div>
-        </aside>
-        ) : null}
-
-        <div className="relative min-w-0 flex-1" onDrop={onCanvasDrop} onDragOver={onCanvasDragOver}>
-          <WorkflowRunStatusContext.Provider value={runStatus}>
-            <WorkflowNodeActionsContext.Provider value={nodeActions}>
-              <ReactFlow
-                className="ds-workflow-canvas"
-                nodes={rfNodes}
-                edges={styledEdges}
-                nodeTypes={workflowNodeTypes}
-                onNodesChange={onNodesChange}
-                onEdgesChange={onEdgesChange}
-                onConnect={onConnect}
-                onConnectStart={onConnectStart}
-                onConnectEnd={onConnectEnd}
-                onNodeClick={(_, node) => setSelectedNodeId(node.id)}
-                onPaneClick={() => setSelectedNodeId(null)}
-                fitView
-                fitViewOptions={{ maxZoom: 1, padding: 0.2 }}
-                minZoom={0.2}
-                proOptions={{ hideAttribution: true }}
-              >
-                <Background variant={BackgroundVariant.Dots} gap={18} size={1} />
-                <Controls showInteractive={false} />
-                <MiniMap
-                  pannable
-                  zoomable
-                  className="ds-workflow-minimap"
-                  style={{ width: 150, height: 96 }}
-                  nodeColor="var(--ds-accent)"
-                  nodeStrokeColor="transparent"
-                  nodeBorderRadius={3}
-                  maskColor="rgb(15 23 42 / 0.08)"
-                />
-              </ReactFlow>
-            </WorkflowNodeActionsContext.Provider>
-          </WorkflowRunStatusContext.Provider>
-          {rfNodes.length === 0 ? (
-            <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-2 text-center">
-              <MousePointerClick className="h-8 w-8 text-ds-faint" strokeWidth={1.4} />
-              <p className="text-[13px] text-ds-faint">{t('workflowEmptyCanvas')}</p>
-            </div>
-          ) : null}
-          {connectMenu ? (
-            <>
-              <div className="fixed inset-0 z-[70]" onClick={() => setConnectMenu(null)} />
-              <div
-                className="fixed z-[71] max-h-[60vh] w-44 overflow-y-auto rounded-lg border border-ds-border bg-ds-card p-1 shadow-lg"
-                style={{ left: connectMenu.x, top: connectMenu.y }}
-              >
-                {WORKFLOW_PALETTE_GROUPS.map((group) => {
-                  const kinds = group.kinds.filter((kind) => !TRIGGER_KINDS.has(kind))
-                  if (kinds.length === 0) return null
-                  return (
-                    <div key={group.id}>
-                      <div className="px-2 pb-0.5 pt-1.5 text-[9.5px] font-semibold uppercase tracking-wide text-ds-faint">
-                        {t(`workflowGroup_${group.id}`)}
-                      </div>
-                      {kinds.map((kind) => {
+          <div className="ds-no-drag flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto px-2 pb-3">
+            <span className="px-2 pb-1 text-[11px] font-semibold uppercase tracking-wide text-ds-faint">
+              {t('workflowPalette')}
+            </span>
+            {WORKFLOW_PALETTE_GROUPS.map((group) => {
+              const collapsed = collapsedGroups.has(group.id)
+              return (
+                <div key={group.id} className="flex flex-col">
+                  <button
+                    type="button"
+                    onClick={() => toggleGroup(group.id)}
+                    className="flex items-center gap-1 px-2 py-1 text-[10.5px] font-semibold uppercase tracking-wide text-ds-faint transition hover:text-ds-muted"
+                  >
+                    <ChevronRight
+                      className={`h-3 w-3 shrink-0 transition-transform ${collapsed ? '' : 'rotate-90'}`}
+                      strokeWidth={2}
+                    />
+                    <span className="min-w-0 flex-1 truncate text-left">{t(`workflowGroup_${group.id}`)}</span>
+                  </button>
+                  {!collapsed
+                    ? group.kinds.map((kind) => {
                         const Icon = NODE_ICONS[kind]
                         return (
                           <button
                             key={kind}
                             type="button"
-                            onClick={() => addConnectedNode(kind)}
-                            className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[12.5px] text-ds-ink transition hover:bg-ds-hover"
+                            draggable
+                            onDragStart={(event) => onPaletteDragStart(event, kind)}
+                            onClick={() => addNode(kind)}
+                            className="flex cursor-grab items-center gap-2 rounded-lg border border-transparent px-2 py-1.5 text-left text-[12.5px] text-ds-ink transition hover:border-ds-border hover:bg-ds-hover active:cursor-grabbing"
                           >
-                            <Icon className="h-3.5 w-3.5 text-accent" strokeWidth={1.9} />
-                            {t(`workflowNode_${kind}`)}
+                            <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-accent/10 text-accent">
+                              <Icon className="h-3.5 w-3.5" strokeWidth={1.9} />
+                            </span>
+                            <span className="min-w-0 flex-1 truncate">{t(`workflowNode_${kind}`)}</span>
+                            <Plus className="h-3.5 w-3.5 shrink-0 text-ds-faint" strokeWidth={1.8} />
                           </button>
                         )
-                      })}
-                    </div>
-                  )
-                })}
+                      })
+                    : null}
+                </div>
+              )
+            })}
+
+            <div className="flex flex-col">
+              <div className="flex items-center gap-1 pr-1">
+                <button
+                  type="button"
+                  onClick={() => toggleGroup('custom')}
+                  className="flex min-w-0 flex-1 items-center gap-1 px-2 py-1 text-[10.5px] font-semibold uppercase tracking-wide text-ds-faint transition hover:text-ds-muted"
+                >
+                  <ChevronRight
+                    className={`h-3 w-3 shrink-0 transition-transform ${collapsedGroups.has('custom') ? '' : 'rotate-90'}`}
+                    strokeWidth={2}
+                  />
+                  <span className="min-w-0 flex-1 truncate text-left">{t('workflowGroup_custom')}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowModules(true)}
+                  title={t('workflowModulesManage')}
+                  aria-label={t('workflowModulesManage')}
+                  className="flex h-5 w-5 shrink-0 items-center justify-center rounded text-ds-faint transition hover:bg-ds-hover hover:text-ds-ink"
+                >
+                  <Settings2 className="h-3.5 w-3.5" strokeWidth={1.8} />
+                </button>
               </div>
-            </>
-          ) : null}
-
-          <button
-            type="button"
-            onClick={() => setLeftPanelCollapsed((value) => !value)}
-            title={leftPanelCollapsed ? t('workflowExpandPanel') : t('workflowCollapsePanel')}
-            aria-label={leftPanelCollapsed ? t('workflowExpandPanel') : t('workflowCollapsePanel')}
-            className="absolute left-0 top-1/2 z-10 flex h-12 w-5 -translate-y-1/2 items-center justify-center rounded-r-lg border border-l-0 border-ds-border bg-ds-card text-ds-faint shadow-sm transition hover:text-ds-ink"
-          >
-            {leftPanelCollapsed ? (
-              <ChevronRight className="h-4 w-4" strokeWidth={2} />
-            ) : (
-              <ChevronLeft className="h-4 w-4" strokeWidth={2} />
-            )}
-          </button>
-          <button
-            type="button"
-            onClick={() => setRightPanelCollapsed((value) => !value)}
-            title={rightPanelCollapsed ? t('workflowExpandPanel') : t('workflowCollapsePanel')}
-            aria-label={rightPanelCollapsed ? t('workflowExpandPanel') : t('workflowCollapsePanel')}
-            className="absolute right-0 top-1/2 z-10 flex h-12 w-5 -translate-y-1/2 items-center justify-center rounded-l-lg border border-r-0 border-ds-border bg-ds-card text-ds-faint shadow-sm transition hover:text-ds-ink"
-          >
-            {rightPanelCollapsed ? (
-              <ChevronLeft className="h-4 w-4" strokeWidth={2} />
-            ) : (
-              <ChevronRight className="h-4 w-4" strokeWidth={2} />
-            )}
-          </button>
-        </div>
-
-        {!rightPanelCollapsed ? (
-        <aside className="flex w-[320px] shrink-0 flex-col overflow-hidden border-l border-ds-border bg-ds-card/40">
-          <div className="flex shrink-0 items-center gap-1 border-b border-ds-border px-2 pt-2">
-            {(['config', 'log'] as const).map((tab) => (
-              <button
-                key={tab}
-                type="button"
-                onClick={() => setRightTab(tab)}
-                className={`relative flex items-center gap-1.5 px-3 py-2 text-[12.5px] font-medium transition ${
-                  rightTab === tab ? 'text-ds-ink' : 'text-ds-faint hover:text-ds-muted'
-                }`}
-              >
-                {tab === 'config' ? t('workflowTabConfig') : t('workflowTabRunLog')}
-                {tab === 'log' && running ? (
-                  <span className="h-1.5 w-1.5 rounded-full bg-amber-500 animate-pulse" />
-                ) : null}
-                {rightTab === tab ? (
-                  <span className="absolute inset-x-2 -bottom-px h-0.5 rounded-full bg-accent" />
-                ) : null}
-              </button>
-            ))}
-          </div>
-          <div className="flex min-h-0 flex-1 flex-col">
-            {rightTab === 'config' ? (
-              <NodeConfigPanel
-                node={selectedNode}
-                settings={settings}
-                lastResult={selectedNodeId ? logResults[selectedNodeId] ?? lastResults[selectedNodeId] ?? null : null}
-                onChange={handleNodeChange}
-                onDelete={handleDeleteNode}
-                onSavePreset={handleSavePreset}
-                workflowName={name}
-                upstreamNodes={upstreamNodes}
-                workflowId={workflow.id}
-                onBeforeTest={handleSave}
-              />
-            ) : (
-              <WorkflowRunLogPanel nodes={workflow.nodes} results={logResults} running={running} />
-            )}
+              {!collapsedGroups.has('custom') ? (
+                <>
+                  {modules.map((module) => {
+                    const Icon = NODE_ICONS.custom
+                    return (
+                      <button
+                        key={module.id}
+                        type="button"
+                        draggable
+                        onDragStart={(event) => onModuleDragStart(event, module.id)}
+                        onClick={() => addModuleNode(module)}
+                        title={module.description || module.name}
+                        className="flex cursor-grab items-center gap-2 rounded-lg border border-transparent px-2 py-1.5 text-left text-[12.5px] text-ds-ink transition hover:border-ds-border hover:bg-ds-hover active:cursor-grabbing"
+                      >
+                        <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-accent/10 text-accent">
+                          <Icon className="h-3.5 w-3.5" strokeWidth={1.9} />
+                        </span>
+                        <span className="min-w-0 flex-1 truncate">{module.name}</span>
+                        <Plus className="h-3.5 w-3.5 shrink-0 text-ds-faint" strokeWidth={1.8} />
+                      </button>
+                    )
+                  })}
+                  {presets.map((preset) => {
+                    const Icon = NODE_ICONS[preset.nodeType]
+                    return (
+                      <div key={preset.id} className="group/preset relative flex items-center">
+                        <button
+                          type="button"
+                          draggable
+                          onDragStart={(event) => onPresetDragStart(event, preset.id)}
+                          onClick={() => addPresetNode(preset)}
+                          className="flex min-w-0 flex-1 cursor-grab items-center gap-2 rounded-lg border border-transparent px-2 py-1.5 pr-7 text-left text-[12.5px] text-ds-ink transition hover:border-ds-border hover:bg-ds-hover active:cursor-grabbing"
+                        >
+                          <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-accent/10 text-accent">
+                            <Icon className="h-3.5 w-3.5" strokeWidth={1.9} />
+                          </span>
+                          <span className="min-w-0 flex-1 truncate">{preset.label}</span>
+                        </button>
+                        <button
+                          type="button"
+                          title={t('workflowPresetDelete')}
+                          aria-label={t('workflowPresetDelete')}
+                          onClick={() => void onDeletePreset(preset.id)}
+                          className="absolute right-1 flex h-5 w-5 items-center justify-center rounded text-ds-faint opacity-0 transition hover:bg-red-500/10 hover:text-red-600 group-hover/preset:opacity-100"
+                        >
+                          <X className="h-3 w-3" strokeWidth={2} />
+                        </button>
+                      </div>
+                    )
+                  })}
+                  {modules.length === 0 && presets.length === 0 ? (
+                    <p className="px-2 py-1 text-[11px] leading-4 text-ds-faint">{t('workflowPresetEmpty')}</p>
+                  ) : null}
+                </>
+              ) : null}
+            </div>
           </div>
         </aside>
+      ) : null}
+
+      <div className="flex min-w-0 flex-1 flex-col">
+        <header
+          className={`${WORKFLOW_EDITOR_HEADER_CLASS}${leftPanelCollapsed ? ` ${WORKFLOW_EDITOR_HEADER_SIDEBAR_COLLAPSED_CLASS}` : ''}`}
+        >
+          {leftPanelCollapsed ? (
+            <button type="button" onClick={onBack} className={`${WORKFLOW_EDITOR_BACK_BUTTON_CLASS} shrink-0`}>
+              <ArrowLeft className="h-4 w-4" strokeWidth={1.8} />
+              {t('workflowBack')}
+            </button>
+          ) : null}
+          <input
+            className="min-w-0 flex-1 rounded-xl border border-transparent bg-transparent px-2 py-1.5 text-[15px] font-medium text-ds-ink outline-none focus:border-ds-border focus:bg-ds-card"
+            value={name}
+            placeholder={t('workflowNamePlaceholder')}
+            onChange={(event) => {
+              setName(event.target.value)
+              setDirty(true)
+            }}
+          />
+          <label className="flex shrink-0 items-center gap-2 text-[13px] font-medium text-ds-muted">
+            {t('workflowEnabled')}
+            <input
+              type="checkbox"
+              checked={enabled}
+              onChange={(event) => {
+                setEnabled(event.target.checked)
+                setDirty(true)
+              }}
+            />
+          </label>
+          <button
+            type="button"
+            onClick={() => setShowHistory(true)}
+            title={t('workflowRunHistory')}
+            aria-label={t('workflowRunHistory')}
+            className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-ds-border bg-ds-card text-ds-muted transition hover:bg-ds-hover hover:text-ds-ink"
+          >
+            <History className="h-4 w-4" strokeWidth={1.8} />
+          </button>
+          <button
+            type="button"
+            onClick={() => setShowEnv(true)}
+            title={t('workflowEnvVars')}
+            aria-label={t('workflowEnvVars')}
+            className="relative inline-flex h-9 items-center gap-1.5 rounded-xl border border-ds-border bg-ds-card px-3 text-[13px] font-medium text-ds-muted transition hover:bg-ds-hover hover:text-ds-ink"
+          >
+            <Variable className="h-4 w-4" strokeWidth={1.8} />
+            {t('workflowEnvVars')}
+            {env.length > 0 ? (
+              <span className="inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-accent/15 px-1 text-[10px] font-semibold text-accent">
+                {env.length}
+              </span>
+            ) : null}
+          </button>
+          <button
+            type="button"
+            onClick={() => void handleSave()}
+            disabled={saving}
+            className="inline-flex h-9 items-center gap-1.5 rounded-xl border border-ds-border bg-ds-card px-3 text-[13px] font-medium text-ds-ink transition hover:bg-ds-hover disabled:opacity-60"
+          >
+            <Save className="h-4 w-4" strokeWidth={1.8} />
+            {dirty ? t('workflowSave') : t('workflowSaved')}
+          </button>
+          {running ? (
+            <button
+              type="button"
+              onClick={() => void onStop()}
+              className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-red-500/90 px-4 text-[13px] font-semibold text-white shadow-sm transition hover:bg-red-500"
+            >
+              <Square className="h-3.5 w-3.5" strokeWidth={2} />
+              {t('workflowStop')}
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={() => void handleRun()}
+              className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-ds-userbubble px-4 text-[13px] font-semibold text-ds-userbubbleFg shadow-sm transition hover:opacity-90"
+            >
+              <Play className="h-4 w-4" strokeWidth={2} />
+              {t('workflowRunNow')}
+            </button>
+          )}
+        </header>
+
+        <div className="flex min-h-0 flex-1">
+          <div className="relative min-w-0 flex-1" onDrop={onCanvasDrop} onDragOver={onCanvasDragOver}>
+            <WorkflowRunStatusContext.Provider value={runStatus}>
+              <WorkflowNodeActionsContext.Provider value={nodeActions}>
+                <ReactFlow
+                  className="ds-workflow-canvas"
+                  nodes={rfNodes}
+                  edges={styledEdges}
+                  nodeTypes={workflowNodeTypes}
+                  onNodesChange={onNodesChange}
+                  onEdgesChange={onEdgesChange}
+                  onConnect={onConnect}
+                  onConnectStart={onConnectStart}
+                  onConnectEnd={onConnectEnd}
+                  onNodeClick={(_, node) => setSelectedNodeId(node.id)}
+                  onPaneClick={() => setSelectedNodeId(null)}
+                  fitView
+                  fitViewOptions={{ maxZoom: 1, padding: 0.2 }}
+                  minZoom={0.2}
+                  proOptions={{ hideAttribution: true }}
+                >
+                  <Background variant={BackgroundVariant.Dots} gap={18} size={1} />
+                  <Controls showInteractive={false} />
+                  <MiniMap
+                    pannable
+                    zoomable
+                    className="ds-workflow-minimap"
+                    style={{ width: 150, height: 96 }}
+                    nodeColor="var(--ds-accent)"
+                    nodeStrokeColor="transparent"
+                    nodeBorderRadius={3}
+                    maskColor="rgb(15 23 42 / 0.08)"
+                  />
+                </ReactFlow>
+              </WorkflowNodeActionsContext.Provider>
+            </WorkflowRunStatusContext.Provider>
+            {rfNodes.length === 0 ? (
+              <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-2 text-center">
+                <MousePointerClick className="h-8 w-8 text-ds-faint" strokeWidth={1.4} />
+                <p className="text-[13px] text-ds-faint">{t('workflowEmptyCanvas')}</p>
+              </div>
+            ) : null}
+            {connectMenu ? (
+              <>
+                <div className="fixed inset-0 z-[70]" onClick={() => setConnectMenu(null)} />
+                <div
+                  className="fixed z-[71] max-h-[60vh] w-44 overflow-y-auto rounded-lg border border-ds-border bg-ds-card p-1 shadow-lg"
+                  style={{ left: connectMenu.x, top: connectMenu.y }}
+                >
+                  {WORKFLOW_PALETTE_GROUPS.map((group) => {
+                    const kinds = group.kinds.filter((kind) => !TRIGGER_KINDS.has(kind))
+                    if (kinds.length === 0) return null
+                    return (
+                      <div key={group.id}>
+                        <div className="px-2 pb-0.5 pt-1.5 text-[9.5px] font-semibold uppercase tracking-wide text-ds-faint">
+                          {t(`workflowGroup_${group.id}`)}
+                        </div>
+                        {kinds.map((kind) => {
+                          const Icon = NODE_ICONS[kind]
+                          return (
+                            <button
+                              key={kind}
+                              type="button"
+                              onClick={() => addConnectedNode(kind)}
+                              className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[12.5px] text-ds-ink transition hover:bg-ds-hover"
+                            >
+                              <Icon className="h-3.5 w-3.5 text-accent" strokeWidth={1.9} />
+                              {t(`workflowNode_${kind}`)}
+                            </button>
+                          )
+                        })}
+                      </div>
+                    )
+                  })}
+                </div>
+              </>
+            ) : null}
+
+            <button
+              type="button"
+              onClick={() => setLeftPanelCollapsed((value) => !value)}
+              title={leftPanelCollapsed ? t('workflowExpandPanel') : t('workflowCollapsePanel')}
+              aria-label={leftPanelCollapsed ? t('workflowExpandPanel') : t('workflowCollapsePanel')}
+              className="absolute left-0 top-1/2 z-10 flex h-12 w-5 -translate-y-1/2 items-center justify-center rounded-r-lg border border-l-0 border-ds-border bg-ds-card text-ds-faint shadow-sm transition hover:text-ds-ink"
+            >
+              {leftPanelCollapsed ? (
+                <ChevronRight className="h-4 w-4" strokeWidth={2} />
+              ) : (
+                <ChevronLeft className="h-4 w-4" strokeWidth={2} />
+              )}
+            </button>
+            <button
+              type="button"
+              onClick={() => setRightPanelCollapsed((value) => !value)}
+              title={rightPanelCollapsed ? t('workflowExpandPanel') : t('workflowCollapsePanel')}
+              aria-label={rightPanelCollapsed ? t('workflowExpandPanel') : t('workflowCollapsePanel')}
+              className="absolute right-0 top-1/2 z-10 flex h-12 w-5 -translate-y-1/2 items-center justify-center rounded-l-lg border border-r-0 border-ds-border bg-ds-card text-ds-faint shadow-sm transition hover:text-ds-ink"
+            >
+              {rightPanelCollapsed ? (
+                <ChevronLeft className="h-4 w-4" strokeWidth={2} />
+              ) : (
+                <ChevronRight className="h-4 w-4" strokeWidth={2} />
+              )}
+            </button>
+          </div>
+
+          {!rightPanelCollapsed ? (
+            <aside className="flex w-[320px] shrink-0 flex-col overflow-hidden border-l border-ds-border bg-ds-card/40">
+              <div className="flex shrink-0 items-center gap-1 border-b border-ds-border px-2 pt-2">
+                {(['config', 'log'] as const).map((tab) => (
+                  <button
+                    key={tab}
+                    type="button"
+                    onClick={() => setRightTab(tab)}
+                    className={`relative flex items-center gap-1.5 px-3 py-2 text-[12.5px] font-medium transition ${
+                      rightTab === tab ? 'text-ds-ink' : 'text-ds-faint hover:text-ds-muted'
+                    }`}
+                  >
+                    {tab === 'config' ? t('workflowTabConfig') : t('workflowTabRunLog')}
+                    {tab === 'log' && running ? (
+                      <span className="h-1.5 w-1.5 rounded-full bg-amber-500 animate-pulse" />
+                    ) : null}
+                    {rightTab === tab ? (
+                      <span className="absolute inset-x-2 -bottom-px h-0.5 rounded-full bg-accent" />
+                    ) : null}
+                  </button>
+                ))}
+              </div>
+              <div className="flex min-h-0 flex-1 flex-col">
+                {rightTab === 'config' ? (
+                  <NodeConfigPanel
+                    node={selectedNode}
+                    settings={settings}
+                    lastResult={
+                      selectedNodeId ? logResults[selectedNodeId] ?? lastResults[selectedNodeId] ?? null : null
+                    }
+                    onChange={handleNodeChange}
+                    onDelete={handleDeleteNode}
+                    onSavePreset={handleSavePreset}
+                    workflowName={name}
+                    upstreamNodes={upstreamNodes}
+                    workflowId={workflow.id}
+                    onBeforeTest={handleSave}
+                  />
+                ) : (
+                  <WorkflowRunLogPanel nodes={workflow.nodes} results={logResults} running={running} />
+                )}
+              </div>
+            </aside>
+          ) : null}
+        </div>
+
+        {showModules ? (
+          <ModuleManager
+            modules={modules}
+            onChange={(next) => void onSaveModules(next)}
+            onClose={() => setShowModules(false)}
+          />
+        ) : null}
+
+        {showEnv ? (
+          <EnvVarsModal
+            env={env}
+            onChange={(next) => {
+              setEnv(next)
+              setDirty(true)
+            }}
+            onClose={() => setShowEnv(false)}
+          />
+        ) : null}
+
+        {showHistory ? (
+          <WorkflowRunHistory runs={workflow.runs} nodes={workflow.nodes} onClose={() => setShowHistory(false)} />
         ) : null}
       </div>
-
-      {showModules ? (
-        <ModuleManager
-          modules={modules}
-          onChange={(next) => void onSaveModules(next)}
-          onClose={() => setShowModules(false)}
-        />
-      ) : null}
-
-      {showEnv ? (
-        <EnvVarsModal
-          env={env}
-          onChange={(next) => {
-            setEnv(next)
-            setDirty(true)
-          }}
-          onClose={() => setShowEnv(false)}
-        />
-      ) : null}
-
-      {showHistory ? (
-        <WorkflowRunHistory runs={workflow.runs} nodes={workflow.nodes} onClose={() => setShowHistory(false)} />
-      ) : null}
     </div>
   )
 }

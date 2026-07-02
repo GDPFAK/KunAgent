@@ -1,0 +1,9 @@
+{
+  "runner": "whisper-cli",
+  "source": "https://github.com/ggml-org/whisper.cpp/releases/download/v1.9.1/whisper-bin-ubuntu-arm64.tar.gz",
+  "sourceSha256": "e0b66cd551ff6f2a28fabe3c6e89691eea037bb76833493abb9a71ca788994b3",
+  "ref": "v1.9.1",
+  "platform": "linux",
+  "arch": "arm64",
+  "builtAt": "2026-06-20T06:45:00.000Z"
+}

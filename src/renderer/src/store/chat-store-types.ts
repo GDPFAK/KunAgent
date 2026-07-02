@@ -96,6 +96,7 @@ export type SettingsRouteSection =
   | 'easterEgg'
   | 'claw'
   | 'updates'
+  | 'terminal'
 export type AppRoute = 'chat' | 'write' | 'design' | 'settings' | 'plugins' | 'claw' | 'schedule' | 'workflow'
 export type PluginHostRoute = 'chat' | 'claw'
 
@@ -172,6 +173,7 @@ export type ChatState = {
   turnReasoningFirstAtByUserId: Record<string, number>
   turnReasoningLastAtByUserId: Record<string, number>
   inspectorSelectedId: string | null
+  composerMode: 'plan' | 'agent'
   composerModel: string
   composerProviderId: string
   composerPickList: string[]
@@ -190,6 +192,7 @@ export type ChatState = {
   activeClawChannelId: string
   appendLocalClawTurn: (userText: string, replyText: string) => void
   setError: (message: string | null) => void
+  setComposerMode: (mode: 'plan' | 'agent') => void
   setComposerModel: (modelId: string, providerId?: string) => void
   loadComposerModels: () => Promise<void>
   setRoute: (r: AppRoute) => void
@@ -257,6 +260,7 @@ export type ChatState = {
   drainQueuedMessages: () => Promise<void>
   removeQueuedMessage: (id: string) => void
   rewindAndResend: (userBlockId: string, newText: string) => Promise<void>
+  rollbackWorkspaceToCheckpoint: (checkpointId: string) => Promise<void>
   interrupt: (options?: { discard?: boolean }) => Promise<void>
   renameActiveThread: (title: string) => Promise<void>
   renameThread: (threadId: string, title: string) => Promise<void>

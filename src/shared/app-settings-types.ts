@@ -1,5 +1,6 @@
 import type { GuiUpdateChannel } from './gui-update'
 import type { KeyboardShortcutsConfigV1 } from './keyboard-shortcuts'
+import type { LocalWhisperDownloadSourceId } from './local-whisper'
 import type { ApprovalPolicy, SandboxMode } from '../../kun/src/contracts/policy.js'
 import type { ComputerUseMode } from '../../kun/src/contracts/capabilities.js'
 import type { ModelEndpointFormat } from '../../kun/src/contracts/model-endpoint-format.js'
@@ -20,10 +21,12 @@ export {
   type ApprovalPolicy,
   type SandboxMode
 } from '../../kun/src/contracts/policy.js'
+export const KUN_TOOL_PERMISSION_MODES = ['always-ask', 'read-only', 'sensitive-ask', 'workspace-write', 'bypass'] as const
+export type KunToolPermissionMode = (typeof KUN_TOOL_PERMISSION_MODES)[number]
 export type UiFontScale = 'small' | 'medium' | 'large'
 export type ScheduleRunMode = 'agent' | 'plan'
 export type ScheduleKind = 'manual' | 'interval' | 'daily' | 'at'
-export type ScheduleTaskStatus = 'idle' | 'running' | 'success' | 'error'
+export type ScheduleTaskStatus = 'idle' | 'queued' | 'running' | 'success' | 'error'
 export type ScheduleModel = 'deepseek-v4-pro' | 'deepseek-v4-flash'
 export type ScheduleReasoningEffort = 'auto' | 'off' | 'low' | 'medium' | 'high' | 'max'
 export type ClawRunMode = ScheduleRunMode
@@ -38,7 +41,7 @@ export const IMAGE_GENERATION_PROTOCOLS = ['openai-images', 'minimax-image', 'co
 export type ImageGenerationProtocol = (typeof IMAGE_GENERATION_PROTOCOLS)[number]
 export const DEFAULT_IMAGE_GENERATION_PROTOCOL: ImageGenerationProtocol = 'openai-images'
 export const CUSTOM_SPEECH_TO_TEXT_PROVIDER_ID = 'custom'
-export const SPEECH_TO_TEXT_PROTOCOLS = ['openai-transcriptions', 'mimo-asr'] as const
+export const SPEECH_TO_TEXT_PROTOCOLS = ['openai-transcriptions', 'mimo-asr', 'local-whisper'] as const
 export type SpeechToTextProtocol = (typeof SPEECH_TO_TEXT_PROTOCOLS)[number]
 export const DEFAULT_SPEECH_TO_TEXT_PROTOCOL: SpeechToTextProtocol = 'openai-transcriptions'
 export const CUSTOM_TEXT_TO_SPEECH_PROVIDER_ID = 'custom'
@@ -59,7 +62,8 @@ export const DEFAULT_SCHEDULE_MODEL = 'deepseek-v4-flash'
 export const SCHEDULE_MODEL_IDS = ['deepseek-v4-pro', 'deepseek-v4-flash'] as const
 export const DEFAULT_SCHEDULE_REASONING_EFFORT = 'medium'
 export const SCHEDULE_REASONING_EFFORT_IDS = ['auto', 'off', 'low', 'medium', 'high', 'max'] as const
-export const DEFAULT_SCHEDULE_INTERNAL_PORT = 8788
+export const MIN_KUN_LOCAL_PORT = 10_000
+export const DEFAULT_SCHEDULE_INTERNAL_PORT = 18788
 // 这些默认目录与 legacy-data-migration.ts 的 HOME_DATA_MIGRATION_MAPPINGS
 // 一一对应:老安装的 ~/.deepseekgui/* 在启动期被搬到这里。
 export const DEFAULT_WRITE_WORKSPACE_ROOT = '~/.kun/write_workspace'
@@ -74,8 +78,9 @@ export const DEFAULT_WRITE_INLINE_COMPLETION_MAX_TOKENS = 96
 export const DEFAULT_WRITE_INLINE_LONG_COMPLETION_DEBOUNCE_MS = 2_800
 export const DEFAULT_WRITE_INLINE_LONG_COMPLETION_MIN_ACCEPT_SCORE = 0.36
 export const DEFAULT_WRITE_INLINE_LONG_COMPLETION_MAX_TOKENS = 256
-export const DEFAULT_KUN_PORT = 8899
+export const DEFAULT_KUN_PORT = 18899
 export const DEFAULT_LOG_RETENTION_DAYS = 3
+export const DEFAULT_CURSOR_SPOTLIGHT_COLOR = '#85c1f1'
 export const DEFAULT_WEIXIN_BRIDGE_RPC_URL = 'http://127.0.0.1:18790/api/v1/admin/rpc'
 export const DEFAULT_MODEL_PROVIDER_ID = 'deepseek'
 export const NETWORK_PROXY_PROTOCOLS = ['http', 'https', 'socks', 'socks4', 'socks4a', 'socks5', 'socks5h'] as const
@@ -234,6 +239,38 @@ export type KunRuntimeSettingsV1 = {
   quality: KunDesignQualitySettingsV1
 }
 
+export function kunToolPermissionModeSettings(
+  mode: KunToolPermissionMode
+): Pick<KunRuntimeSettingsV1, 'approvalPolicy' | 'sandboxMode'> {
+  switch (mode) {
+    case 'always-ask':
+      return { approvalPolicy: 'always', sandboxMode: 'danger-full-access' }
+    case 'read-only':
+      return { approvalPolicy: 'on-request', sandboxMode: 'danger-full-access' }
+    case 'sensitive-ask':
+      return { approvalPolicy: 'untrusted', sandboxMode: 'danger-full-access' }
+    case 'workspace-write':
+      return { approvalPolicy: 'on-request', sandboxMode: 'workspace-write' }
+    case 'bypass':
+      return { approvalPolicy: 'auto', sandboxMode: 'danger-full-access' }
+  }
+}
+
+export function kunToolPermissionModeFromSettings(
+  settings: Pick<KunRuntimeSettingsV1, 'approvalPolicy' | 'sandboxMode'>
+): KunToolPermissionMode {
+  if (settings.approvalPolicy === 'always') return 'always-ask'
+  if (settings.approvalPolicy === 'untrusted') return 'sensitive-ask'
+  if (
+    settings.approvalPolicy === 'auto' &&
+    settings.sandboxMode === 'danger-full-access'
+  ) {
+    return 'bypass'
+  }
+  if (settings.sandboxMode === 'workspace-write') return 'workspace-write'
+  return 'read-only'
+}
+
 /** Detection aggressiveness for the design-quality linter. */
 export type KunDesignQualityStrictness = 'relaxed' | 'standard' | 'strict'
 
@@ -291,6 +328,8 @@ export type KunSpeechToTextSettingsV1 = {
   /** Custom speech API key override. Empty inherits the selected provider API key when providerId is set. */
   apiKey: string
   model: string
+  /** Download source used when protocol is local-whisper. */
+  localWhisperDownloadSource: LocalWhisperDownloadSourceId
   /** Language hint sent to the provider ("zh", "en", ...). Empty means auto-detect. */
   language: string
   timeoutMs: number
@@ -509,6 +548,12 @@ export type ScheduledTaskV1 = {
   model: string
   reasoningEffort: ScheduleReasoningEffort
   mode: ScheduleRunMode
+  /** Higher-priority queued tasks run first. */
+  priority?: number
+  /** Task ids that must have completed successfully before this task runs. */
+  dependsOn?: string[]
+  /** Run the task in an isolated worktree from workspaceRoot. */
+  useWorktree?: boolean
   schedule: ScheduledTaskScheduleV1
   createdAt: string
   updatedAt: string
@@ -1597,6 +1642,8 @@ export type ClawRunResult =
        * Absent on the fire-and-forget (no `waitForResult`) path.
        */
       completed?: boolean
+      /** The task was accepted by the background queue but has not started. */
+      queued?: boolean
     }
   | { ok: false; message: string }
 
@@ -1619,11 +1666,47 @@ export type ScheduleRuntimeStatus = {
   internalServerRunning: boolean
   internalUrl: string
   runningTaskIds: string[]
+  queuedTaskIds: string[]
   powerSaveBlockerActive: boolean
 }
 
 export type GuiUpdateConfigV1 = {
   channel: GuiUpdateChannel
+}
+
+export type TerminalColorMode = 'none' | 'custom'
+
+export type TerminalColorSettingsV1 = {
+  /** 'none' = monochrome (all ANSI colors map to foreground, no red commands); 'custom' = use user-defined colors. */
+  colorMode: TerminalColorMode
+  foreground: string
+  background: string
+  cursor: string
+  selectionBackground: string
+  black: string
+  red: string
+  green: string
+  yellow: string
+  blue: string
+  magenta: string
+  cyan: string
+  white: string
+  brightBlack: string
+  brightRed: string
+  brightGreen: string
+  brightYellow: string
+  brightBlue: string
+  brightMagenta: string
+  brightCyan: string
+  brightWhite: string
+}
+
+export type TerminalSettingsV1 = {
+  colors: TerminalColorSettingsV1
+}
+
+export type TerminalSettingsPatchV1 = {
+  colors?: Partial<TerminalColorSettingsV1>
 }
 
 export type AppSettingsV1 = {
@@ -1632,6 +1715,7 @@ export type AppSettingsV1 = {
   theme: 'system' | 'light' | 'dark'
   uiFontScale: UiFontScale
   cursorSpotlight?: boolean
+  cursorSpotlightColor?: string
   provider: ModelProviderSettingsV1
   agents: KunSettingsEnvelopeV1
   workspaceRoot: string
@@ -1645,13 +1729,14 @@ export type AppSettingsV1 = {
   workflow: WorkflowSettingsV1
   design: DesignSettingsV1
   guiUpdate: GuiUpdateConfigV1
+  terminal: TerminalSettingsV1
   codePromptPrefix: string
   /** User-disabled skill IDs. Disabled skills are hidden from command surfaces. */
   disabledSkillIds: string[]
 }
 
 export type AppSettingsPatch = Partial<
-  Omit<AppSettingsV1, 'provider' | 'agents' | 'log' | 'notifications' | 'appBehavior' | 'keyboardShortcuts' | 'write' | 'claw' | 'schedule' | 'design' | 'workflow' | 'guiUpdate'>
+  Omit<AppSettingsV1, 'provider' | 'agents' | 'log' | 'notifications' | 'appBehavior' | 'keyboardShortcuts' | 'write' | 'claw' | 'schedule' | 'design' | 'workflow' | 'guiUpdate' | 'terminal'>
 > & {
   provider?: ModelProviderSettingsPatchV1
   agents?: KunSettingsEnvelopePatchV1
@@ -1665,4 +1750,5 @@ export type AppSettingsPatch = Partial<
   workflow?: WorkflowSettingsPatchV1
   design?: DesignSettingsPatchV1
   guiUpdate?: Partial<GuiUpdateConfigV1>
+  terminal?: TerminalSettingsPatchV1
 }

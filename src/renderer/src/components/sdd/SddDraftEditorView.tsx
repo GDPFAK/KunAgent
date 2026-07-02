@@ -1065,7 +1065,11 @@ export function SddDraftEditorView({
       <div className={`ds-stage-inset shrink-0 -mr-3 sm:-mr-4 md:-mr-6 lg:-mr-8 ${leftSidebarCollapsed ? 'ds-window-controls-safe-inset' : '-ml-3 sm:-ml-4 md:-ml-6 lg:-ml-8'}`}>
         <header className="sdd-draft-topbar ds-topbar-surface relative z-10 mt-3 flex min-h-[56px] w-full items-stretch overflow-visible rounded-[18px]">
           <div className="grid w-full min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-3 px-3 py-2 sm:px-4 md:pl-5 md:pr-2">
-            <div className="flex min-w-0 items-center gap-2.5">
+            <div
+              className={`flex min-w-0 items-center gap-2.5 ${
+                leftSidebarCollapsed ? 'ds-window-controls-collapsed-titlebar-inset' : ''
+              }`}
+            >
               {leftSidebarCollapsed ? (
                 <SidebarTitlebarToggleButton
                   onClick={onToggleLeftSidebar}

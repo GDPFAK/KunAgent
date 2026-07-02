@@ -28,10 +28,12 @@ import {
   type WorkflowNodePresetV1,
   type WorkflowNodeRunStatus,
   type WorkflowNodeV1,
+  type WorkflowRunStatus,
   type WorkflowRunV1,
   type WorkflowScheduleV1,
   type WorkflowSwitchRuleV1,
   type WorkflowWebhookMethod,
+  MIN_KUN_LOCAL_PORT,
   type WorkflowSettingsPatchV1,
   type WorkflowSettingsV1,
   type WorkflowTriggerScheduleKind,
@@ -43,11 +45,11 @@ import {
   normalizePositiveInteger,
   normalizeRunMode,
   normalizeScheduleReasoningEffort,
-  normalizeStatus,
   normalizeTimeOfDay
 } from './app-settings-normalizers'
 
 export const MAX_WORKFLOW_RUNS = 20
+const PREVIOUS_WORKFLOW_WEBHOOK_PORT = 8799
 const MAX_WORKFLOW_CONNECTIONS = 512
 const MAX_WORKFLOW_HTTP_HEADERS = 50
 const MAX_WORKFLOW_PRESETS = 100
@@ -80,6 +82,11 @@ function asTrimmed(value: unknown, fallback = ''): string {
 
 function asText(value: unknown): string {
   return typeof value === 'string' ? value : ''
+}
+
+function normalizeWorkflowWebhookPort(value: unknown, fallback: number): number {
+  if (value === PREVIOUS_WORKFLOW_WEBHOOK_PORT) return fallback
+  return normalizePositiveInteger(value, fallback, MIN_KUN_LOCAL_PORT, 65_535)
 }
 
 function normalizeWorkflowScheduleKind(value: unknown): WorkflowTriggerScheduleKind {
@@ -620,6 +627,11 @@ function normalizeNodeRunStatus(value: unknown): WorkflowNodeRunStatus {
   return 'pending'
 }
 
+function normalizeWorkflowRunStatus(value: unknown): WorkflowRunStatus {
+  if (value === 'running' || value === 'success' || value === 'error') return value
+  return 'idle'
+}
+
 function normalizeNodeResult(value: unknown): WorkflowNodeRunResultV1 {
   const r = record(value)
   return {
@@ -641,7 +653,7 @@ function normalizeRun(value: unknown, index: number): WorkflowRunV1 {
   return {
     id: asTrimmed(r.id) || `run-${index + 1}`,
     trigger: asTrimmed(r.trigger) || 'manual',
-    status: normalizeStatus(r.status),
+    status: normalizeWorkflowRunStatus(r.status),
     startedAt: asTrimmed(r.startedAt),
     finishedAt: asTrimmed(r.finishedAt),
     message: asText(r.message),
@@ -673,7 +685,7 @@ export function normalizeWorkflow(workflow: Partial<WorkflowV1>, index: number, 
     updatedAt: asTrimmed(w.updatedAt) || now,
     lastRunAt: asTrimmed(w.lastRunAt),
     nextRunAt: asTrimmed(w.nextRunAt),
-    lastStatus: normalizeStatus(w.lastStatus),
+    lastStatus: normalizeWorkflowRunStatus(w.lastStatus),
     lastMessage: asText(w.lastMessage),
     runs
   }
@@ -687,7 +699,7 @@ export function defaultWorkflowSettings(): WorkflowSettingsV1 {
     model: '',
     mode: 'agent',
     keepAwake: false,
-    webhookPort: 8799,
+    webhookPort: 18799,
     webhookSecret: '',
     workflows: [],
     presets: [],
@@ -722,7 +734,7 @@ export function normalizeWorkflowSettings(input: WorkflowSettingsPatchV1 | undef
     model: asTrimmed(source.model),
     mode: normalizeRunMode(source.mode),
     keepAwake: normalizeBoolean(source.keepAwake, defaults.keepAwake),
-    webhookPort: normalizePositiveInteger(source.webhookPort, defaults.webhookPort, 1024, 65_535),
+    webhookPort: normalizeWorkflowWebhookPort(source.webhookPort, defaults.webhookPort),
     webhookSecret: asTrimmed(source.webhookSecret),
     workflows: Array.isArray(source.workflows)
       ? source.workflows.map((workflow, index) => normalizeWorkflow(workflow as Partial<WorkflowV1>, index, now))

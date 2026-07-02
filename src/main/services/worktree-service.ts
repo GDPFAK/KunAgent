@@ -140,8 +140,47 @@ export async function acquireWorktree(params: {
 export async function releaseWorktree(params: {
   projectPath: string
   poolIndex: number
+  /**
+   * Optional worktree root. When provided (or omitted, falling back to the
+   * default ~/.kun layout), the slot's working tree is reset+cleaned before
+   * the in-memory lease is dropped. This keeps the pool reusable for
+   * scheduled-agent runs that always leave changes behind.
+   *
+   * Cleanup is best-effort: any failure is swallowed so a release never gets
+   * stuck (an in-memory leak via taskMap is worse than a dirty disk slot,
+   * which `findAvailablePoolIndex` already skips).
+   */
+  worktreeRoot?: string
+  /**
+   * Skip the working-tree reset. Useful for callers that already cleaned the
+   * slot themselves (e.g. removeWorktree) or that hold pending changes they
+   * want to inspect later (the renderer-side "release lease" maintenance
+   * action). Default: false (always clean).
+   */
+  skipClean?: boolean
 }): Promise<void> {
-  setTaskId(params.projectPath, params.poolIndex, null)
+  const { projectPath, poolIndex, worktreeRoot, skipClean = false } = params
+  if (!skipClean) {
+    const poolDir = resolvePoolDir(projectPath, worktreeRoot)
+    const wtPath = worktreePath(poolDir, poolIndex)
+    const exists = (await pathExists(wtPath)) && (await pathExists(join(wtPath, '.git')))
+    if (exists) {
+      try {
+        // Reset to HEAD, then drop any untracked files. Order matches
+        // acquireWorktree so the slot is left in the exact state a fresh
+        // acquire would otherwise re-create.
+        await runGit(wtPath, ['reset', '--hard', 'HEAD'])
+      } catch {
+        // best-effort
+      }
+      try {
+        await runGit(wtPath, ['clean', '-fd'])
+      } catch {
+        // best-effort
+      }
+    }
+  }
+  setTaskId(projectPath, poolIndex, null)
 }
 
 export async function listWorktrees(params: {
@@ -480,7 +519,7 @@ export async function findAvailablePoolIndex(params: {
   const status = await listWorktrees(params)
   for (let i = 0; i < MAX_WORKTREE_POOL_SIZE; i++) {
     const wt = status.worktrees.find((w) => w.poolIndex === i)
-    if (!wt || !wt.inUse) return i
+    if (!wt || (!wt.inUse && wt.changesCount === 0)) return i
   }
   return null
 }

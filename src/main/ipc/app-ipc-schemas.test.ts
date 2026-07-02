@@ -1,11 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import {
   clawImInstallPollPayloadSchema,
+  clawTaskFromTextPayloadSchema,
   isSafeOpenExternalUrl,
   runtimeRequestPayloadSchema,
   scheduleTaskFromTextPayloadSchema,
   settingsPatchSchema,
   shellOpenExternalUrlSchema,
+  skillGithubImportPayloadSchema,
   skillListPayloadSchema,
   sseStartPayloadSchema,
   workspaceDirectoryCreatePayloadSchema,
@@ -77,6 +79,34 @@ describe('app-ipc-schemas', () => {
     }).path).toBe('/v1/memory/mem_1')
   })
 
+  it('accepts https GitHub skill import URLs and rejects other schemes', () => {
+    expect(skillGithubImportPayloadSchema.parse({
+      rootPath: '/tmp/skills',
+      url: 'https://github.com/acme/skills/tree/main/review'
+    })).toEqual({
+      rootPath: '/tmp/skills',
+      url: 'https://github.com/acme/skills/tree/main/review'
+    })
+    // Scheme-less input is allowed (the importer normalizes it to https).
+    expect(skillGithubImportPayloadSchema.parse({
+      rootPath: '/tmp/skills',
+      url: 'github.com/acme/skills'
+    }).url).toBe('github.com/acme/skills')
+    // Dangerous / non-https explicit schemes are rejected at the boundary.
+    expect(() => skillGithubImportPayloadSchema.parse({
+      rootPath: '/tmp/skills',
+      url: 'http://github.com/acme/skills'
+    })).toThrow()
+    expect(() => skillGithubImportPayloadSchema.parse({
+      rootPath: '/tmp/skills',
+      url: 'file:///etc/passwd'
+    })).toThrow()
+    expect(() => skillGithubImportPayloadSchema.parse({
+      rootPath: '/tmp/skills',
+      url: 'javascript:alert(1)'
+    })).toThrow()
+  })
+
   it('accepts skill list payloads with an optional workspace root', () => {
     expect(skillListPayloadSchema.parse({
       workspaceRoot: ' /tmp/workspace '
@@ -138,7 +168,7 @@ describe('app-ipc-schemas', () => {
       theme: 'dark',
       agents: {
         kun: {
-          port: 9000,
+          port: 19000,
           model: 'deepseek-chat',
           modelProfiles: {
             'custom-vision-model': {
@@ -180,7 +210,7 @@ describe('app-ipc-schemas', () => {
       disabledSkillIds: ['test-skill-08']
     })
 
-    expect(payload.agents?.kun?.port).toBe(9000)
+    expect(payload.agents?.kun?.port).toBe(19000)
     expect(payload.agents?.kun?.modelProfiles?.['custom-vision-model']?.inputModalities).toEqual(['text', 'image'])
     expect(payload.agents?.kun?.tokenEconomy?.enabled).toBe(true)
     expect(payload.agents?.kun?.tokenEconomy?.historyHygiene?.maxToolResultTokens).toBe(4000)
@@ -192,8 +222,25 @@ describe('app-ipc-schemas', () => {
     expect(payload.disabledSkillIds).toEqual(['test-skill-08'])
   })
 
+  it('rejects low local service ports', () => {
+    expect(() => settingsPatchSchema.parse({
+      agents: { kun: { port: 9999 } }
+    })).toThrow()
+    expect(() => settingsPatchSchema.parse({
+      claw: { im: { port: 9999 } }
+    })).toThrow()
+    expect(() => settingsPatchSchema.parse({
+      schedule: { internal: { port: 9999 } }
+    })).toThrow()
+    expect(() => settingsPatchSchema.parse({
+      workflow: { webhookPort: 9999 }
+    })).toThrow()
+  })
+
   it('accepts the cursor spotlight preference', () => {
     expect(settingsPatchSchema.parse({ cursorSpotlight: false }).cursorSpotlight).toBe(false)
+    expect(settingsPatchSchema.parse({ cursorSpotlightColor: ' #FF8800 ' }).cursorSpotlightColor).toBe('#FF8800')
+    expect(() => settingsPatchSchema.parse({ cursorSpotlightColor: 'blue' })).toThrow()
   })
 
   it('accepts media generation settings and provider capability patches', () => {
@@ -262,6 +309,60 @@ describe('app-ipc-schemas', () => {
     expect(payload.agents?.kun?.videoGeneration?.defaultResolution).toBe('1080P')
   })
 
+  it('accepts long provider model ids imported from upstream catalogs', () => {
+    const longModelId = `openrouter/${'provider-routed-model-id-'.repeat(6)}preview`
+
+    expect(longModelId.length).toBeGreaterThan(128)
+
+    const payload = settingsPatchSchema.parse({
+      provider: {
+        providers: [{
+          id: 'openrouter',
+          name: 'OpenRouter',
+          baseUrl: 'https://openrouter.ai/api/v1',
+          endpointFormat: 'chat_completions',
+          models: [longModelId],
+          modelProfiles: {
+            [longModelId]: {
+              aliases: [longModelId],
+              contextWindowTokens: 128000
+            }
+          },
+          image: {
+            protocol: 'openai-images',
+            baseUrl: 'https://openrouter.ai/api/v1',
+            models: [longModelId]
+          }
+        }]
+      },
+      agents: {
+        kun: {
+          model: longModelId,
+          modelProfiles: {
+            [longModelId]: {
+              aliases: [longModelId],
+              contextWindowTokens: 128000
+            }
+          },
+          imageGeneration: {
+            model: longModelId
+          }
+        }
+      },
+      schedule: {
+        model: longModelId
+      },
+      workflow: {
+        model: longModelId
+      }
+    })
+
+    expect(payload.provider?.providers?.[0]?.models).toEqual([longModelId])
+    expect(payload.agents?.kun?.model).toBe(longModelId)
+    expect(payload.schedule?.model).toBe(longModelId)
+    expect(payload.workflow?.model).toBe(longModelId)
+  })
+
   it('accepts schedule settings patches and task payloads', () => {
     const payload = settingsPatchSchema.parse({
       schedule: {
@@ -277,7 +378,7 @@ describe('app-ipc-schemas', () => {
           extraDirs: ['/tmp/skills']
         },
         internal: {
-          port: 9788,
+          port: 19788,
           secret: 'secret'
         },
         tasks: [{
@@ -302,7 +403,7 @@ describe('app-ipc-schemas', () => {
       }
     })
 
-    expect(payload.schedule?.internal?.port).toBe(9788)
+    expect(payload.schedule?.internal?.port).toBe(19788)
     expect(payload.schedule?.providerId).toBe('minimax-token-plan')
     expect(payload.schedule?.tasks?.[0]?.schedule?.kind).toBe('daily')
     expect(payload.schedule?.tasks?.[0]?.reasoningEffort).toBe('high')
@@ -322,6 +423,24 @@ describe('app-ipc-schemas', () => {
     expect(fromText.modelHint).toBe('deepseek-v4-pro')
   })
 
+  it('accepts long (>128 char) model ids in claw and schedule fromText modelHint', () => {
+    const longModelId = `vendor/${'a'.repeat(249)}`
+    expect(longModelId.length).toBe(256)
+
+    const clawParsed = clawTaskFromTextPayloadSchema.parse({
+      text: 'Run the long-name model please',
+      modelHint: longModelId
+    })
+    expect(clawParsed.modelHint).toBe(longModelId)
+
+    const scheduleParsed = scheduleTaskFromTextPayloadSchema.parse({
+      text: 'Schedule the long-name model please',
+      workspaceRoot: '/tmp/schedule',
+      modelHint: longModelId
+    })
+    expect(scheduleParsed.modelHint).toBe(longModelId)
+  })
+
   it('strips legacy settings keys while preserving current skill settings', () => {
     const payload = settingsPatchSchema.parse({
       locale: 'zh',
@@ -336,7 +455,7 @@ describe('app-ipc-schemas', () => {
       },
       agents: {
         kun: {
-          port: 9001,
+          port: 19001,
           imageRecognition: { enabled: true }
         },
         reasonix: {
@@ -350,7 +469,7 @@ describe('app-ipc-schemas', () => {
 
     expect(payload.locale).toBe('zh')
     expect(payload.provider?.providers?.[0]?.imageRecognition).toEqual({ enabled: true })
-    expect(payload.agents?.kun?.port).toBe(9001)
+    expect(payload.agents?.kun?.port).toBe(19001)
     expect(payload.agents?.kun?.imageRecognition).toEqual({ enabled: true })
     expect(payload.disabledSkillIds).toEqual(['legacy-skill'])
     expect('reasonix' in payload).toBe(false)

@@ -10,7 +10,7 @@ import {
   Download,
   ExternalLink,
   FileEdit,
-  Files,
+  Folders,
   FolderOpen,
   Globe2,
   ListTodo,
@@ -49,6 +49,8 @@ type Props = {
   onToggleFileTree?: () => void
   onOpenSideChat?: () => void
 }
+
+const TOPBAR_ICON_CLASS = 'h-4 w-4'
 
 export function WorkbenchSideRail({
   rightPanelMode,
@@ -254,18 +256,18 @@ export function WorkbenchSideRail({
 
   const renderGuiUpdateIcon = (): ReactElement => {
     if (guiUpdateState.status === 'downloading' || guiUpdateState.status === 'installing' || applyingGuiUpdate) {
-      return <Loader2 className="h-3.5 w-3.5 animate-spin" strokeWidth={2} />
+      return <Loader2 className="h-4 w-4 animate-spin" strokeWidth={2} />
     }
     if (guiUpdateAction?.downloaded || guiUpdateState.status === 'downloaded') {
-      return <RefreshCw className="h-3.5 w-3.5" strokeWidth={1.85} />
+      return <RefreshCw className="h-4 w-4" strokeWidth={1.85} />
     }
     if (guiUpdateAction?.manualOnly) {
-      return <ExternalLink className="h-3.5 w-3.5" strokeWidth={1.85} />
+      return <ExternalLink className="h-4 w-4" strokeWidth={1.85} />
     }
     if (guiUpdateAction) {
-      return <ArrowUpCircle className="h-3.5 w-3.5" strokeWidth={1.85} />
+      return <ArrowUpCircle className="h-4 w-4" strokeWidth={1.85} />
     }
-    return <Download className="h-3.5 w-3.5" strokeWidth={1.85} />
+    return <Download className="h-4 w-4" strokeWidth={1.85} />
   }
 
   return (
@@ -349,7 +351,7 @@ export function WorkbenchSideRail({
           aria-pressed={sideChatOpen}
           title={t('sidePanelOpen')}
         >
-          <MessageCircleMore className="h-4 w-4" strokeWidth={1.75} />
+          <MessageCircleMore className={TOPBAR_ICON_CLASS} strokeWidth={1.75} />
           {sideChatCount > 0 ? (
             <span className="absolute -left-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-accent px-1 text-[10px] font-semibold leading-none text-white">
               {Math.min(sideChatCount, 9)}
@@ -379,7 +381,7 @@ export function WorkbenchSideRail({
               aria-pressed={active}
               title={item.label}
             >
-              <Icon className="h-4 w-4" strokeWidth={1.75} />
+              <Icon className={TOPBAR_ICON_CLASS} strokeWidth={1.75} />
             </button>
             {isChanges && onToggleTerminal ? (
               <button
@@ -394,7 +396,7 @@ export function WorkbenchSideRail({
                 aria-pressed={terminalOpen}
                 title={t('rightPanelTerminal')}
               >
-                <Terminal className="h-4 w-4" strokeWidth={1.75} />
+                <Terminal className={TOPBAR_ICON_CLASS} strokeWidth={1.75} />
               </button>
             ) : null}
           </Fragment>
@@ -415,7 +417,7 @@ export function WorkbenchSideRail({
           aria-pressed={fileTreeOpen}
           title={t('rightPanelFiles')}
         >
-          <Files className="h-4 w-4" strokeWidth={1.75} />
+          <Folders className={TOPBAR_ICON_CLASS} strokeWidth={1.75} />
         </button>
       ) : null}
     </div>

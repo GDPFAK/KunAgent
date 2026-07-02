@@ -11,6 +11,7 @@ import {
   defaultScheduleSettings,
   defaultWorkflowSettings,
   defaultWriteSettings,
+  defaultTerminalSettings,
   type AppSettingsV1
 } from '../../shared/app-settings'
 import { guiSkillRootsForRuntime, listGuiSkillRoots, listGuiSkills } from './skill-service'
@@ -210,6 +211,48 @@ describe('skill-service', () => {
       .not.toContain(comparable(pluginRoot))
   })
 
+  it('rejects a skill.json whose entry escapes the package directory (path traversal)', async () => {
+    const workspaceRoot = join(tempRoot, 'ws-traversal')
+    const skillRoot = join(workspaceRoot, '.claude', 'skills', 'evil')
+    await mkdir(skillRoot, { recursive: true })
+    await writeFile(
+      join(skillRoot, 'skill.json'),
+      JSON.stringify({ id: 'evil', name: 'Evil', entry: '../../../../etc/passwd' }),
+      'utf8'
+    )
+
+    const result = await listGuiSkills(createSettings(workspaceRoot), workspaceRoot)
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    // The crafted skill is skipped, not surfaced.
+    expect(result.skills.some((skill) => skill.id === 'evil')).toBe(false)
+    // ...and the violation is recorded as a validation error against its root.
+    expect(result.validationErrors.some((error) => comparable(error.root) === comparable(skillRoot))).toBe(true)
+  })
+
+  it('imports a skill.json with a plain entry filename', async () => {
+    const workspaceRoot = join(tempRoot, 'ws-entry-ok')
+    const skillRoot = join(workspaceRoot, '.claude', 'skills', 'reader')
+    await mkdir(skillRoot, { recursive: true })
+    await writeFile(
+      join(skillRoot, 'skill.json'),
+      JSON.stringify({ id: 'reader', name: 'Reader', entry: 'GUIDE.md' }),
+      'utf8'
+    )
+    await writeFile(join(skillRoot, 'GUIDE.md'), '# Reader', 'utf8')
+
+    const result = await listGuiSkills(createSettings(workspaceRoot), workspaceRoot)
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.skills).toContainEqual(expect.objectContaining({
+      id: 'reader',
+      name: 'Reader',
+      entryPath: join(skillRoot, 'GUIDE.md')
+    }))
+  })
+
   function comparable(path: string): string {
     return path.replace(/\\/g, '/').replace(/\/+$/g, '').toLowerCase()
   }
@@ -232,6 +275,7 @@ describe('skill-service', () => {
       schedule: defaultScheduleSettings(),
       workflow: defaultWorkflowSettings(),
       design: defaultDesignSettings(),
+      terminal: defaultTerminalSettings(),
       guiUpdate: { channel: 'stable' },
       codePromptPrefix: '',
       disabledSkillIds: []

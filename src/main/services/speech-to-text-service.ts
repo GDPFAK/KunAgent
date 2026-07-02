@@ -9,6 +9,7 @@ import {
   type SpeechTranscriptionResult
 } from '../../shared/speech-to-text'
 import { describeNetworkError } from '../../../kun/src/adapters/tool/image-gen-tool-provider.js'
+import { transcribeViaLocalWhisper } from './local-whisper-service'
 
 const FILE_EXTENSION_BY_MIME: Record<string, string> = {
   'audio/wav': 'wav',
@@ -21,8 +22,11 @@ const FILE_EXTENSION_BY_MIME: Record<string, string> = {
 }
 
 export function isSpeechToTextConfigured(
-  speechToText: Pick<KunSpeechToTextSettingsV1, 'enabled' | 'baseUrl' | 'apiKey' | 'model'>
+  speechToText: Pick<KunSpeechToTextSettingsV1, 'enabled' | 'protocol' | 'baseUrl' | 'apiKey' | 'model'>
 ): boolean {
+  if (speechToText.protocol === 'local-whisper') {
+    return speechToText.enabled && Boolean(speechToText.model.trim())
+  }
   return (
     speechToText.enabled &&
     Boolean(speechToText.baseUrl.trim()) &&
@@ -34,7 +38,13 @@ export function isSpeechToTextConfigured(
 export async function requestSpeechTranscription(
   settings: AppSettingsV1,
   request: SpeechTranscriptionRequest,
-  options: { fetchImpl?: typeof fetch } = {}
+  options: {
+    fetchImpl?: typeof fetch
+    localWhisperTranscriber?: (
+      request: SpeechTranscriptionRequest,
+      speechToText: KunSpeechToTextSettingsV1
+    ) => Promise<string>
+  } = {}
 ): Promise<SpeechTranscriptionResult> {
   const speechToText = request.speechToText ?? resolveKunSpeechToTextSettings(settings)
   if (!isSpeechToTextConfigured(speechToText)) {
@@ -46,9 +56,11 @@ export async function requestSpeechTranscription(
 
   const fetchImpl = options.fetchImpl ?? fetch
   try {
-    const text = speechToText.protocol === 'mimo-asr'
-      ? await transcribeViaMimoAsr(speechToText, request, fetchImpl)
-      : await transcribeViaOpenAiTranscriptions(speechToText, request, fetchImpl)
+    const text = speechToText.protocol === 'local-whisper'
+      ? await (options.localWhisperTranscriber ?? transcribeViaLocalWhisper)(request, speechToText)
+      : speechToText.protocol === 'mimo-asr'
+        ? await transcribeViaMimoAsr(speechToText, request, fetchImpl)
+        : await transcribeViaOpenAiTranscriptions(speechToText, request, fetchImpl)
     const trimmed = text.trim()
     if (!trimmed) return { ok: false, message: 'transcription result is empty' }
     return { ok: true, text: trimmed }
