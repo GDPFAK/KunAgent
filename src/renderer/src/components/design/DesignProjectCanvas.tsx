@@ -1634,6 +1634,15 @@ export function DesignProjectCanvas({
     window.getSelection()?.removeAllRanges()
   }
 
+  const beginPan = (event: React.PointerEvent<HTMLElement>): void => {
+    panningRef.current = { clientX: event.clientX, clientY: event.clientY, x: pan.x, y: pan.y }
+    dragRef.current = null
+    resizeRef.current = null
+    setDraggingId(null)
+    setResizingId(null)
+    event.currentTarget.setPointerCapture(event.pointerId)
+  }
+
   useEffect(() => {
     if (!resizingId) return
 
@@ -1676,8 +1685,7 @@ export function DesignProjectCanvas({
       if (designIntentMode !== 'generate') setDesignIntentMode('generate')
       return
     }
-    panningRef.current = { clientX: event.clientX, clientY: event.clientY, x: pan.x, y: pan.y }
-    event.currentTarget.setPointerCapture(event.pointerId)
+    beginPan(event)
   }
 
   const onWorldPointerMove = (event: React.PointerEvent<HTMLDivElement>): void => {
@@ -2039,6 +2047,11 @@ export function DesignProjectCanvas({
                 onPointerDown={(event) => {
                   if (event.button !== 0) return
                   event.stopPropagation()
+                  if (projectTool === 'hand') {
+                    setMoreOpen(false)
+                    beginPan(event)
+                    return
+                  }
                   setActiveArtifact(artifact.id)
                   if (designIntentMode === 'generate') setDesignIntentMode('modify')
                   dragRef.current = {
@@ -2066,7 +2079,7 @@ export function DesignProjectCanvas({
                     artifact={artifact}
                     workspaceRoot={workspaceRoot}
                     enabled={previewEnabled}
-                    editable={active && cardView === 'preview'}
+                    editable={active && cardView === 'preview' && projectTool !== 'hand'}
                     viewMode={cardView}
                     devPreviewUrl={active ? devPreviewUrl : ''}
                     onError={setFileError}

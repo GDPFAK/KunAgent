@@ -34,6 +34,85 @@ export function centerRectInViewport(width: number, height: number, vbox: ViewBo
   }
 }
 
+function rectsOverlapWithGap(a: Rect, b: Rect, gap: number): boolean {
+  return !(
+    a.x + a.width + gap <= b.x ||
+    b.x + b.width + gap <= a.x ||
+    a.y + a.height + gap <= b.y ||
+    b.y + b.height + gap <= a.y
+  )
+}
+
+function collides(rect: Rect, occupied: readonly Rect[], gap: number): boolean {
+  return occupied.some((item) => rectsOverlapWithGap(rect, item, gap))
+}
+
+function candidateRect(centered: Rect, col: number, row: number, gap: number): Rect {
+  return {
+    ...centered,
+    x: round(centered.x + col * (centered.width + gap)),
+    y: round(centered.y + row * (centered.height + gap))
+  }
+}
+
+/**
+ * Place a single new screen near the viewport center, but avoid existing screen
+ * frames. This covers streaming `add_screen` calls where each block is applied
+ * independently; without this, every omitted x/y lands on the same center point.
+ */
+export function placeRectInViewportAvoiding(
+  size: { width: number; height: number },
+  vbox: ViewBox,
+  occupied: readonly Rect[],
+  gap = CANVAS_SCREEN_GAP
+): Rect {
+  const safeGap = Math.max(0, finite(gap))
+  const centered = centerRectInViewport(size.width, size.height, vbox)
+  if (!collides(centered, occupied, safeGap)) return centered
+
+  const seen = new Set<string>()
+  const maxRings = Math.max(12, occupied.length + 8)
+  const tryCandidate = (col: number, row: number): Rect | null => {
+    const key = `${col}:${row}`
+    if (seen.has(key)) return null
+    seen.add(key)
+    const rect = candidateRect(centered, col, row, safeGap)
+    return collides(rect, occupied, safeGap) ? null : rect
+  }
+
+  for (let ring = 1; ring <= maxRings; ring += 1) {
+    const preferred = [
+      [ring, 0],
+      [-ring, 0],
+      [0, ring],
+      [0, -ring]
+    ] as const
+    for (const [col, row] of preferred) {
+      const rect = tryCandidate(col, row)
+      if (rect) return rect
+    }
+
+    for (let row = -ring; row <= ring; row += 1) {
+      for (const col of [ring, -ring]) {
+        const rect = tryCandidate(col, row)
+        if (rect) return rect
+      }
+    }
+    for (let col = -ring + 1; col <= ring - 1; col += 1) {
+      for (const row of [ring, -ring]) {
+        const rect = tryCandidate(col, row)
+        if (rect) return rect
+      }
+    }
+  }
+
+  const rightmost = occupied.reduce(
+    (max, rect) => Math.max(max, rect.x + rect.width),
+    centered.x + centered.width
+  )
+  return { ...centered, x: round(rightmost + safeGap) }
+}
+
 type RowItem = { index: number; width: number; height: number }
 type Row = { items: RowItem[]; width: number; height: number }
 

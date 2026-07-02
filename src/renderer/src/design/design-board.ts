@@ -1,9 +1,18 @@
 import { artifactDesignMdPath } from './design-artifact-persistence'
-import { createEmptyDocument, createHtmlFrameShape, isHtmlFrame, type CanvasDocument, type CanvasShape, type Rect } from './canvas/canvas-types'
+import {
+  createEmptyDocument,
+  createHtmlFrameShape,
+  isHtmlFrame,
+  shapeBounds,
+  type CanvasDocument,
+  type CanvasShape,
+  type Rect
+} from './canvas/canvas-types'
 import {
   BOARD_HTML_FRAME_MIN_HEIGHT,
   BOARD_HTML_FRAME_MIN_WIDTH,
   layoutRectsInViewport,
+  placeRectInViewportAvoiding,
   rectsAlmostEqual
 } from './canvas/canvas-placement'
 import { useCanvasSelectionStore } from './canvas/canvas-selection-store'
@@ -115,6 +124,13 @@ export function syncHtmlArtifactsToBoardDocument(
     autoPlaceArtifacts.map(() => ({ width: 1280, height: 800 })),
     useCanvasViewportStore.getState().vbox
   )
+  const occupiedAutoRects: Rect[] = Array.from(framesByArtifactId.values()).map((shape) => ({
+    x: shape.x,
+    y: shape.y,
+    width: shape.width,
+    height: shape.height
+  }))
+  const placedAutoRects: Rect[] = []
   let autoIndex = 0
 
   htmlArtifacts.forEach((artifact, index) => {
@@ -139,11 +155,21 @@ export function syncHtmlArtifactsToBoardDocument(
     const nextRoot = next.objects[next.rootId]
     if (!nextRoot) return
 
-    const rect = customNode ? nodeRect(customNode) : autoRects[autoIndex++] ?? { x: 0, y: 0, width: 1280, height: 800 }
+    const rect = customNode
+      ? nodeRect(customNode)
+      : occupiedAutoRects.length === 0
+        ? autoRects[autoIndex++] ?? { x: 0, y: 0, width: 1280, height: 800 }
+        : placeRectInViewportAvoiding(
+            { width: 1280, height: 800 },
+            useCanvasViewportStore.getState().vbox,
+            [...occupiedAutoRects, ...placedAutoRects]
+          )
     const frame = createHtmlFrameShape(artifact.title || 'Screen', rect.x, rect.y, artifact.id, 'desktop')
     frame.width = rect.width
     frame.height = rect.height
     frame.name = artifact.title || frame.name
+    if (customNode) occupiedAutoRects.push({ x: frame.x, y: frame.y, width: frame.width, height: frame.height })
+    else placedAutoRects.push({ x: frame.x, y: frame.y, width: frame.width, height: frame.height })
 
     next.objects[frame.id] = frame
     next.objects[next.rootId] = {
@@ -244,8 +270,12 @@ export function createScreenFrameArtifact(options: {
   const width = Math.max(240, options.width ?? 1280)
   const height = Math.max(180, options.height ?? 800)
   const vbox = useCanvasViewportStore.getState().vbox
-  const x = options.x ?? Math.round(vbox.x + vbox.width / 2 - width / 2)
-  const y = options.y ?? Math.round(vbox.y + vbox.height / 2 - height / 2)
+  const occupied = Object.values(useCanvasShapeStore.getState().document.objects)
+    .filter((shape): shape is CanvasShape => Boolean(shape) && shape.visible !== false && isHtmlFrame(shape))
+    .map(shapeBounds)
+  const rect = placeRectInViewportAvoiding({ width, height }, vbox, occupied)
+  const x = options.x ?? rect.x
+  const y = options.y ?? rect.y
 
   state.upsertArtifact({
     id: artifactId,

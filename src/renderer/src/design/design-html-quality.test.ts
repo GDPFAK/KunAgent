@@ -5283,7 +5283,34 @@ describe('buildDesignHtmlQualityRepairPrompt', () => {
     expect(prompt).toContain('card-in-card')
     expect(prompt).toContain('Data tables')
     expect(prompt).toContain('skeleton rows')
+    expect(prompt).toContain('Resize 自适应硬性要求')
+    expect(prompt).toContain('live, resizable viewport')
     expect(prompt).toContain('同步更新 DESIGN.md')
+  })
+
+  it('includes resize-adaptive repair guidance for overflow and fixed desktop frames', () => {
+    const prompt = buildDesignHtmlQualityRepairPrompt(
+      [
+        {
+          code: 'runtime-horizontal-overflow',
+          severity: 'critical',
+          message: 'The rendered page is wider than the viewport.',
+          suggestion: 'Remove fixed-width wrappers.'
+        },
+        {
+          code: 'runtime-fixed-desktop-frame',
+          severity: 'warning',
+          message: 'The page is locked to a desktop canvas.',
+          suggestion: 'Use fluid max-widths.'
+        }
+      ],
+      'auto'
+    )
+
+    expect(prompt).toContain('Resize-adaptive layout')
+    expect(prompt).toContain('html/body/root fill the frame')
+    expect(prompt).toContain('HTML 必须跟随画布 frame/webview resize 自动适应')
+    expect(prompt).toContain('no horizontal scroll')
   })
 
   it('includes a color-system playbook for scattered palette colors', () => {

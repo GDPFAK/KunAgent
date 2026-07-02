@@ -120,6 +120,30 @@ describe('design board helpers', () => {
     })
   })
 
+  it('places a newly synced implicit screen beside existing board frames', () => {
+    useCanvasViewportStore.getState().setVbox({ x: 1000, y: 500, width: 1600, height: 1000 })
+    const doc = createEmptyDocument()
+    const root = doc.objects[doc.rootId]
+    const existing = createHtmlFrameShape('Home', 1160, 600, 'home', 'desktop')
+    doc.objects[existing.id] = { ...existing, parentId: doc.rootId }
+    doc.objects[doc.rootId] = { ...root, children: [existing.id] }
+
+    const synced = syncHtmlArtifactsToBoardDocument(doc, [
+      artifact('home', 'html'),
+      artifact('settings', 'html', { node: defaultDesignArtifactNode(1) })
+    ])
+
+    expect(synced.addedFrameIds).toHaveLength(1)
+    const frame = synced.document.objects[synced.addedFrameIds[0]]
+    expect(frame).toMatchObject({
+      htmlArtifactId: 'settings',
+      x: 2520,
+      y: 600,
+      width: 1280,
+      height: 800
+    })
+  })
+
   it('updates an existing linked frame only from a custom artifact node', () => {
     const doc = createEmptyDocument()
     const root = doc.objects[doc.rootId]

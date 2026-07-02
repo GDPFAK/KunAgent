@@ -1,5 +1,11 @@
 import { WRITE_PROTOTYPE_DEFAULT_PROMPT, WRITE_PROTOTYPE_MAX_TEXT_CHARS } from '@shared/write-prototype'
-import { DESIGN_CRAFT_LINES, DESIGN_DELIVERY_LINES, formatDesignContextLines, type DesignContext } from './design-context'
+import {
+  DESIGN_CRAFT_LINES,
+  DESIGN_DELIVERY_LINES,
+  DESIGN_RESIZE_RESPONSIVE_LINES,
+  formatDesignContextLines,
+  type DesignContext
+} from './design-context'
 import type { CanvasSnapshot } from './canvas/canvas-snapshot'
 import { snapshotToCompactJson } from './canvas/canvas-snapshot'
 import type { OpError } from './canvas/shape-ops'
@@ -314,6 +320,7 @@ export function buildDesignTurnPrompt(options: DesignTurnOptions): string {
     `- Modify ONLY ${editableFiles} during this turn. Do not create or modify any other file.`,
     `- Produce ONE complete standalone HTML document at \`${options.artifactRelativePath}\`; it has already been pre-created so the canvas can preview it while you work.`,
     '- Make the HTML responsive to arbitrary canvas frame sizes: use fluid layout, min/max constraints, media queries, and avoid fixed viewport wrappers unless the brief explicitly asks for one.',
+    ...DESIGN_RESIZE_RESPONSIVE_LINES,
     '- Build it INCREMENTALLY to stay inside your output limit: use focused `edit` calls or small `write` replacements and keep every tool call payload under ~4000 characters — oversized tool arguments get truncated and fail.',
     '- Write HTML ONLY through Write/Edit tool calls to the artifact file — never dump HTML into assistant text or into `design_canvas` blocks.',
     ...(options.designNotesPath
@@ -393,6 +400,7 @@ function buildScreenTurnPrompt(options: ScreenTurnOptions): string {
     `- Modify ONLY ${editableFiles} during this turn. Do not create or modify any other file.`,
     `- Produce ONE complete standalone HTML document at \`${options.artifactRelativePath}\`; it has already been pre-created so the canvas can preview it while you work.`,
     '- Make the HTML responsive to arbitrary selected frame sizes: use fluid layout, min/max constraints, media queries, and avoid fixed viewport wrappers unless the brief explicitly asks for one.',
+    ...DESIGN_RESIZE_RESPONSIVE_LINES,
     '- Build it INCREMENTALLY to stay inside your output limit: use focused `edit` calls or small `write` replacements and keep every tool call payload under ~4000 characters.',
     '- Write HTML ONLY through Write/Edit tool calls to the artifact file — never dump HTML into assistant text or into `design_canvas` blocks.',
     '- Wrap each major section (nav, hero, each card group, footer…) in a top-level element carrying `data-ds-section="<short label>"` — e.g. `<header data-ds-section="导航栏">` — and write sections top-to-bottom. The canvas reads these to show a live "AI is drawing here" cursor as the page builds; they are inert in the final design.',

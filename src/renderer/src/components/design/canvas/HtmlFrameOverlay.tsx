@@ -87,6 +87,7 @@ type ScreenOverlayProps = {
   screenHeight: number
   active: boolean
   interactive: boolean
+  panning: boolean
   /** Element-pick ("修改") mode is on for this frame: clicking selects text/elements. */
   editing: boolean
   onDoubleClick: (shapeId: string) => void
@@ -105,6 +106,7 @@ function ScreenOverlayInner({
   screenHeight,
   active,
   interactive,
+  panning,
   editing,
   onDoubleClick,
   onToggleModify,
@@ -488,7 +490,7 @@ function ScreenOverlayInner({
         top: screenY,
         width: screenWidth,
         height: screenHeight,
-        pointerEvents: active || interactive ? 'auto' : 'none',
+        pointerEvents: panning ? 'none' : active || interactive ? 'auto' : 'none',
         borderRadius: Math.min(8, screenWidth * 0.01)
       }}
       onDoubleClick={handleDoubleClick}
@@ -761,12 +763,14 @@ export function HtmlFrameOverlay({
   const vbox = useCanvasViewportStore((s) => s.vbox)
   const containerWidth = useCanvasViewportStore((s) => s.containerWidth)
   const containerHeight = useCanvasViewportStore((s) => s.containerHeight)
+  const activeTool = useCanvasViewportStore((s) => s.activeTool)
   const selectedIds = useCanvasSelectionStore((s) => s.selectedIds)
 
   const [interactiveId, setInteractiveId] = useState<string | null>(null)
   const [editingId, setEditingId] = useState<string | null>(null)
 
   const zoom = containerWidth / vbox.width
+  const panning = activeTool === 'hand'
 
   const htmlFrames = useMemo(() => {
     const frames: CanvasShape[] = []
@@ -845,6 +849,7 @@ export function HtmlFrameOverlay({
             screenHeight={screenHeight}
             active={active}
             interactive={interactiveId === shape.id}
+            panning={panning}
             editing={editingId === shape.id}
             onDoubleClick={onDoubleClick}
             onToggleModify={onToggleModify}

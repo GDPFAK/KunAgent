@@ -183,6 +183,22 @@ describe('add-screens', () => {
     setScreenArtifactFactory(null as unknown as (name: string) => string | null)
   })
 
+  it('places repeated single add-screen calls without stacking them', () => {
+    useCanvasViewportStore.getState().setVbox({ x: 1000, y: 500, width: 1600, height: 1000 })
+    setScreenArtifactFactory((name) => `art_${name}`)
+
+    const first = executeOps([{ op: 'add-screen', name: 'Home' }])
+    const second = executeOps([{ op: 'add-screen', name: 'Settings' }])
+
+    expect(first.ok).toBe(true)
+    expect(second.ok).toBe(true)
+    const a = getShape(first.affectedIds[0])
+    const b = getShape(second.affectedIds[0])
+    expect([a.x, a.y, a.width, a.height]).toEqual([1160, 600, 1280, 800])
+    expect([b.x, b.y, b.width, b.height]).toEqual([2520, 600, 1280, 800])
+    setScreenArtifactFactory(null as unknown as (name: string) => string | null)
+  })
+
   it('creates N HTML screens around the current viewport, wrapping when needed', () => {
     useCanvasViewportStore.getState().setVbox({ x: 1000, y: 500, width: 1600, height: 1000 })
     setScreenArtifactFactory((name) => `art_${name}`)

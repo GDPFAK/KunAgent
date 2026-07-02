@@ -1,3 +1,5 @@
+import { DESIGN_RESIZE_RESPONSIVE_LINES } from './design-context'
+
 export type DesignHtmlQualitySeverity = 'critical' | 'warning' | 'info'
 
 export type DesignHtmlQualityFinding = {
@@ -7233,7 +7235,7 @@ function designQualityRepairDirective(code: string): string | undefined {
     case 'horizontal-overflow':
     case 'clipped-text':
     case 'overlapping-text':
-      return 'Responsive layout: remove fixed desktop shells, let text wrap, use fluid max-widths/minmax grids, and verify mobile/tablet/desktop without clipped or overlapping text.'
+      return 'Resize-adaptive layout: remove fixed desktop shells, let text wrap, use fluid max-widths/minmax grids, make html/body/root fill the frame, and verify mobile/tablet/desktop plus arbitrary resized canvas frames without clipped or overlapping text.'
     case 'missing-layout-reset':
       return 'Layout resilience: add *, *::before, *::after { box-sizing: border-box; }, fluid img/video/iframe rules, and min-width:0 on grid/flex children so media cannot break responsive previews.'
     case 'center-everything-layout':
@@ -7450,7 +7452,10 @@ export function buildDesignHtmlQualityRepairPrompt(
       ? ['', '修复 playbook:', ...directives.slice(0, directiveLimit).map((directive) => `- ${directive}`)]
       : []),
     '',
-    '完成要求：保持页面响应式、无文本重叠、无横向溢出；补真实内容、可见状态和可用交互；同步更新 DESIGN.md 的相关说明。'
+    'Resize 自适应硬性要求:',
+    ...DESIGN_RESIZE_RESPONSIVE_LINES.slice(1).map((line) => `- ${line.replace(/^- /, '')}`),
+    '',
+    '完成要求：HTML 必须跟随画布 frame/webview resize 自动适应，无文本重叠、无横向溢出、无裁切；补真实内容、可见状态和可用交互；同步更新 DESIGN.md 的相关说明。'
   ].join('\n')
 }
 

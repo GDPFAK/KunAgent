@@ -92,6 +92,20 @@ export const DESIGN_CRAFT_LINES: string[] = [
 ]
 
 /**
+ * HTML artifacts live inside resizable canvas frames/webviews. This is stricter
+ * than normal responsive design: the frame may be dragged to arbitrary sizes
+ * after generation, so the document must react to container/viewport resize.
+ */
+export const DESIGN_RESIZE_RESPONSIVE_LINES: string[] = [
+  'Resize-adaptive HTML contract (mandatory for every final HTML artifact):',
+  '- Treat the canvas frame/webview as a live, resizable viewport. The design must adapt when the frame is resized after generation, not only at first load.',
+  '- Include `<meta name="viewport" content="width=device-width, initial-scale=1">` and CSS that lets `html`, `body`, and the top-level app/root fill the frame (`width:100%`, `min-height:100%`, no default body margin).',
+  '- Do not lock the page to a fixed desktop canvas: avoid `width`/`min-width` above the frame width, avoid `height:100vh` + `overflow:hidden`, and avoid absolute layouts that cannot reflow.',
+  '- Use fluid primitives: `%`, `min()`, `max()`, `clamp()`, `minmax()`, wrapping flex/grid, `max-width:100%`, `min-width:0`, and responsive media rules/container-aware sections.',
+  '- Verify mentally at mobile (~390px), tablet (~768px), desktop (~1280px), and arbitrary resized frame sizes: no horizontal scroll, clipped text, overlap, or tiny tap targets.'
+]
+
+/**
  * Delivery bar for generated design artifacts. The craft lines say what "good"
  * looks like visually; these lines say what a complete product-design handoff
  * must contain so Stitch-style multi-page generation lands as usable work.
@@ -218,7 +232,20 @@ export function formatDesignSystemMarkdown(ctx: DesignContext | undefined): stri
   } else {
     body.push(...lines)
   }
-  body.push('', '## Delivery Quality', '', ...DESIGN_DELIVERY_LINES, '', '## Craft', '', ...DESIGN_CRAFT_LINES)
+  body.push(
+    '',
+    '## Delivery Quality',
+    '',
+    ...DESIGN_DELIVERY_LINES,
+    '',
+    '## Resize-Adaptive HTML',
+    '',
+    ...DESIGN_RESIZE_RESPONSIVE_LINES,
+    '',
+    '## Craft',
+    '',
+    ...DESIGN_CRAFT_LINES
+  )
   return `${body.join('\n')}\n`
 }
 

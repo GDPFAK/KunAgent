@@ -8,11 +8,18 @@
  */
 import { z } from 'zod'
 import type { AutoLayout, CanvasShape, Point, Rect, ShapeType } from './canvas-types'
-import { createDefaultShape, createHtmlFrameShape, createShapeId, type DevicePreset } from './canvas-types'
+import {
+  createDefaultShape,
+  createHtmlFrameShape,
+  createShapeId,
+  isHtmlFrame,
+  shapeBounds,
+  type DevicePreset
+} from './canvas-types'
 import { collectDescendants, useCanvasShapeStore, withDescendants } from './canvas-shape-store'
 import { useCanvasViewportStore } from './canvas-viewport-store'
 import { useCanvasUndoStore } from './canvas-undo-store'
-import { centerRectInViewport, layoutRectsInViewport } from './canvas-placement'
+import { centerRectInViewport, layoutRectsInViewport, placeRectInViewportAvoiding } from './canvas-placement'
 import {
   alignShapes,
   collectiveBounds,
@@ -711,6 +718,13 @@ const DEVICE_DIMS: Record<DevicePreset, { width: number; height: number }> = {
   desktop: { width: 1280, height: 800 }
 }
 
+function htmlFrameRects(): Rect[] {
+  const doc = useCanvasShapeStore.getState().document
+  return Object.values(doc.objects)
+    .filter((shape): shape is CanvasShape => Boolean(shape) && shape.visible !== false && isHtmlFrame(shape))
+    .map(shapeBounds)
+}
+
 /** Deep-clone a LIVE subtree (root + descendants) to a translated position under `parentId`. */
 function cloneLiveSubtree(rootId: string, dx: number, dy: number, parentId: string): string {
   const store = useCanvasShapeStore.getState()
@@ -1051,7 +1065,11 @@ function executeOne(op: ShapeOp, affectedIds: Set<string>, errors: OpError[]): v
       const centered = createHtmlFrameShape(op.name, 0, 0, artifactId, preset)
       const width = op.width ?? centered.width
       const height = op.height ?? centered.height
-      const fallbackRect = centerRectInViewport(width, height, useCanvasViewportStore.getState().vbox)
+      const fallbackRect = placeRectInViewportAvoiding(
+        { width, height },
+        useCanvasViewportStore.getState().vbox,
+        htmlFrameRects()
+      )
       const shape = createHtmlFrameShape(
         op.name,
         op.x ?? fallbackRect.x,
@@ -1399,10 +1417,14 @@ function executeOne(op: ShapeOp, affectedIds: Set<string>, errors: OpError[]): v
           height: spec.height ?? base.height
         }
       })
-      const autoRects = layoutRectsInViewport(
+      const occupiedRects = htmlFrameRects()
+      const vbox = useCanvasViewportStore.getState().vbox
+      const hasExplicitPlacements = specs.some(({ spec }) => spec.x !== undefined || spec.y !== undefined)
+      const batchRects = layoutRectsInViewport(
         specs.map((spec) => ({ width: spec.width, height: spec.height })),
-        useCanvasViewportStore.getState().vbox
+        vbox
       )
+      const placedRects: Rect[] = []
       for (let i = 0; i < specs.length; i += 1) {
         const { spec, preset, width, height } = specs[i]
         const artifactId = factory(spec.name)
@@ -1410,13 +1432,18 @@ function executeOne(op: ShapeOp, affectedIds: Set<string>, errors: OpError[]): v
           errors.push({ code: 'INVALID_OP', message: `Cannot create screen artifact for "${spec.name}"` })
           continue
         }
-        const autoRect = autoRects[i] ?? centerRectInViewport(width, height, useCanvasViewportStore.getState().vbox)
+        const batchRect = batchRects[i] ?? centerRectInViewport(width, height, vbox)
+        const autoRect =
+          occupiedRects.length === 0 && !hasExplicitPlacements
+            ? batchRect
+            : placeRectInViewportAvoiding({ width, height }, vbox, [...occupiedRects, ...placedRects])
         const x = spec.x ?? autoRect.x
         const y = spec.y ?? autoRect.y
         const shape = createHtmlFrameShape(spec.name, x, y, artifactId, preset)
         shape.width = width
         shape.height = height
         store.addShape(shape)
+        placedRects.push(shapeBounds(shape))
         if (spec.brief) setScreenBrief(shape.id, spec.brief)
         affectedIds.add(shape.id)
       }
