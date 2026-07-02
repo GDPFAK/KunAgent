@@ -1841,6 +1841,15 @@ export function Workbench(): ReactElement {
       useDesignWorkspaceStore.getState().setActiveArtifact(boardArtifact.id)
 
       // Build screen manifest for cross-screen context
+      // Sibling cohesion fields extracted from a page's actual render (palette +
+      // type scale), so other pages can match the realized look, not just prose.
+      const siblingTokenFields = (relativePath: string): { accent?: string; fontFamily?: string } => {
+        const tokens = useDesignTokensStore.getState().byArtifact[relativePath]
+        if (!tokens) return {}
+        const accent = tokens.palette.primary?.base
+        const fontFamily = tokens.typeRows.find((row) => row.fontFamily)?.fontFamily?.split(',')[0]?.trim()
+        return { ...(accent ? { accent } : {}), ...(fontFamily ? { fontFamily } : {}) }
+      }
       const screenManifest: ScreenManifestEntry[] = []
       if (target === 'screen') {
         const manifestState = useDesignWorkspaceStore.getState()
@@ -1850,11 +1859,14 @@ export function Workbench(): ReactElement {
           if (shape && isHtmlFrame(shape) && shape.id !== selectedFrame?.id) {
             const linked = manifestState.artifacts.find((a) => a.id === shape.htmlArtifactId)
             if (linked) {
+              const summary = linked.versions[0]?.summary?.trim()
               screenManifest.push({
                 name: shape.name,
                 width: shape.width,
                 height: shape.height,
-                htmlPath: linked.relativePath
+                htmlPath: linked.relativePath,
+                ...(summary ? { summary } : {}),
+                ...siblingTokenFields(linked.relativePath)
               })
             }
           }
@@ -1916,7 +1928,10 @@ export function Workbench(): ReactElement {
       // project canvas so a generated/iterated HTML page stays consistent with them.
       const htmlSiblingManifest =
         target === 'html'
-          ? buildHtmlSiblingManifest(promptState.artifacts, htmlArtifactId || null)
+          ? buildHtmlSiblingManifest(promptState.artifacts, htmlArtifactId || null).map((entry) => ({
+              ...entry,
+              ...siblingTokenFields(entry.htmlPath)
+            }))
           : []
       // Lightweight path pointers for whatever the user selected on the canvas
       // (HTML page / SVG canvas / image): tell the agent WHERE it lives so it can

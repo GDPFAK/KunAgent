@@ -129,6 +129,28 @@ describe('design turn prompt', () => {
     expect(prompt).toContain('Hero [image] → `.deepseekgui-images/hero.png` (directory: `.deepseekgui-images`)')
   })
 
+  it('renders per-sibling accent + font + summary in the screen manifest', () => {
+    const prompt = buildDesignTurnPrompt({
+      target: 'html',
+      mode: 'text',
+      text: 'a settings page',
+      artifactRelativePath: '.kun-design/doc/p/v1.html',
+      workspaceRoot: '/ws',
+      screenManifest: [
+        {
+          name: 'Home',
+          htmlPath: '.kun-design/doc/home/v1.html',
+          summary: 'A teal landing page',
+          accent: '#3b82d8',
+          fontFamily: 'Inter'
+        }
+      ]
+    })
+    expect(prompt).toContain('accent #3b82d8')
+    expect(prompt).toContain('font Inter')
+    expect(prompt).toContain('— A teal landing page')
+  })
+
   it('injects extracted design tokens (palette + type scale) into HTML turns for cohesion', () => {
     const prompt = buildDesignTurnPrompt({
       target: 'html',

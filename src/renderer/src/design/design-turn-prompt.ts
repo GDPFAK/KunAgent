@@ -119,6 +119,10 @@ export type ScreenManifestEntry = {
   htmlPath: string
   /** One-line brief of what the page is, so the agent can align without reading it. */
   summary?: string
+  /** Sibling's actual accent color (hex), extracted from its render, for cohesion. */
+  accent?: string
+  /** Sibling's primary font family, extracted from its render, for cohesion. */
+  fontFamily?: string
 }
 
 /**
@@ -133,8 +137,13 @@ function formatScreenManifestLines(manifest: ScreenManifestEntry[] | undefined):
       const dims = typeof s.width === 'number' && typeof s.height === 'number'
         ? ` (${Math.round(s.width)}x${Math.round(s.height)})`
         : ''
+      const tokenParts = [
+        s.accent ? `accent ${s.accent}` : '',
+        s.fontFamily ? `font ${s.fontFamily}` : ''
+      ].filter(Boolean)
+      const tokens = tokenParts.length > 0 ? ` [${tokenParts.join(', ')}]` : ''
       const summary = s.summary?.trim() ? ` — ${s.summary.trim().slice(0, 160)}` : ''
-      return `- "${s.name}"${dims} → ${s.htmlPath}${summary}`
+      return `- "${s.name}"${dims}${tokens} → ${s.htmlPath}${summary}`
     }),
     'Read a relevant sibling page if you need to match its exact styling. Do NOT modify sibling files — only the reserved file for this turn.'
   ]
