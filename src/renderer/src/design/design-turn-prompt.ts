@@ -1,5 +1,7 @@
 import { WRITE_PROTOTYPE_DEFAULT_PROMPT, WRITE_PROTOTYPE_MAX_TEXT_CHARS } from '@shared/write-prototype'
 import { DESIGN_CRAFT_LINES, formatDesignContextLines, type DesignContext } from './design-context'
+import type { CanvasSnapshot } from './canvas/canvas-snapshot'
+import { snapshotToCompactJson } from './canvas/canvas-snapshot'
 
 export type DesignTurnTarget = 'html' | 'canvas'
 
@@ -16,6 +18,8 @@ export type DesignTurnOptions = {
   /** User override prompt; empty = built-in default. */
   customPrompt?: string
   designContext?: DesignContext
+  /** Canvas mode only: current snapshot of the shape document for AI reasoning. */
+  canvasSnapshot?: CanvasSnapshot
 }
 
 /**
@@ -29,6 +33,9 @@ export type DesignTurnOptions = {
  * `switch (options.target)` branch here without touching the HTML path.
  */
 export function buildDesignTurnPrompt(options: DesignTurnOptions): string {
+  if (options.target === 'canvas') {
+    return buildCanvasTurnPrompt(options)
+  }
   const requirements = options.customPrompt?.trim() || WRITE_PROTOTYPE_DEFAULT_PROMPT
   const lines = [
     options.basePath
@@ -68,6 +75,67 @@ export function buildDesignTurnPrompt(options: DesignTurnOptions): string {
   if (text) {
     lines.push('', 'Brief:', text.slice(0, WRITE_PROTOTYPE_MAX_TEXT_CHARS))
   }
+  return lines.join('\n')
+}
+
+/**
+ * Canvas-target turn prompt: teach the AI to emit ShapeOps inside a fenced
+ * `shapeops` code block. The renderer parses these blocks and runs them through
+ * `executeOps`, which atomically applies the batch with a single undo entry.
+ *
+ * Keep the schema documentation here in sync with `shape-ops.ts` ShapeOpSchema.
+ */
+function buildCanvasTurnPrompt(options: DesignTurnOptions): string {
+  const snapshot = options.canvasSnapshot
+  const snapshotJson = snapshot ? snapshotToCompactJson(snapshot) : '(empty canvas)'
+  const lines = [
+    'Kun is asking you to modify the SVG design canvas using structured ShapeOps.',
+    `Workspace: ${options.workspaceRoot}`,
+    '',
+    'How to respond:',
+    '- Reply with a short plain-text plan (1-3 sentences) describing what you will do.',
+    '- Emit one or more ` ```shapeops ` fenced code blocks containing a JSON ARRAY of operations.',
+    '- The renderer will validate the JSON, apply every op atomically (one undo entry per batch),',
+    '  and visually highlight the affected shapes for ~1s.',
+    '',
+    'ShapeOp vocabulary (each op is a JSON object inside the array):',
+    '- { "op": "add", "shape": { "type": "rect"|"ellipse"|"text"|"frame"|"group"|"image", "name"?, "x"?, "y"?, "width"?, "height"?, "rotation"?, "fills"?, "strokes"?, "cornerRadius"?, "textContent"?, "fontSize"?, "fontFamily"?, "fontColor"? }, "parentId"? }',
+    '- { "op": "update", "id": "<shape-id>", "patch": { ...same fields as shape (no type)... } }',
+    '- { "op": "delete", "id": "<shape-id>" }',
+    '- { "op": "reparent", "id": "<shape-id>", "newParentId": "<parent-id>", "index"? }',
+    '- { "op": "move", "ids": ["<id>",...], "dx": N, "dy": N }',
+    '- { "op": "resize", "id": "<shape-id>", "bounds": { "x": N, "y": N, "width": N, "height": N } }',
+    '- { "op": "align", "ids": ["<id>",...], "axis": "left|h-center|right|top|v-center|bottom" }  // ≥2 ids',
+    '- { "op": "distribute", "ids": ["<id>",...], "axis": "horizontal|vertical" }  // ≥3 ids',
+    '',
+    'Rules:',
+    '- Coordinates are in CANVAS pixels (not screen pixels); 1 unit ≈ 1px at 100% zoom.',
+    '- Refer to shapes by their `id` from the snapshot below. New shapes you add get auto-named uniquely per parent.',
+    '- Prefer composing larger features as a frame containing children (use add for the frame, then add children with `parentId`).',
+    '- Keep batches focused — one batch per logical change so undo granularity stays useful.',
+    '',
+    'Current canvas snapshot (shape ids, names, positions; rendering details omitted):',
+    '```json',
+    snapshotJson,
+    '```'
+  ]
+  const designContextLines = formatDesignContextLines(options.designContext)
+  if (designContextLines.length > 0) {
+    lines.push('', ...designContextLines)
+  }
+  const text = options.text?.trim()
+  if (text) {
+    lines.push('', 'Brief:', text.slice(0, WRITE_PROTOTYPE_MAX_TEXT_CHARS))
+  }
+  lines.push('', 'Example response shape:')
+  lines.push('```')
+  lines.push('I will add a 300×200 frame with a heading inside.')
+  lines.push('```shapeops')
+  lines.push('[')
+  lines.push('  { "op": "add", "shape": { "type": "frame", "name": "Card", "x": 100, "y": 100, "width": 300, "height": 200 } }')
+  lines.push(']')
+  lines.push('```')
+  lines.push('```')
   return lines.join('\n')
 }
 

@@ -1,5 +1,6 @@
-import { memo, useCallback, useRef } from 'react'
+import { memo, useCallback, useEffect, useRef, useState } from 'react'
 import type { CanvasShape, Rect } from '../../../design/canvas/canvas-types'
+import { shapeGeometry } from '../../../design/canvas/canvas-types'
 import { getSelectionBounds } from '../../../design/canvas/canvas-hit-test'
 import {
   computeResizedBounds,
@@ -11,6 +12,7 @@ import { angleFromPivot, computeRotation } from '../../../design/canvas/canvas-r
 import type { SnapGuide } from '../../../design/canvas/canvas-snap'
 import { useCanvasShapeStore } from '../../../design/canvas/canvas-shape-store'
 import { useCanvasUndoStore } from '../../../design/canvas/canvas-undo-store'
+import { useDesignAssistantStore } from '../../../design/design-assistant-store'
 
 const HANDLE_SIZE = 8
 const ROTATE_HANDLE_SIZE = 20
@@ -59,6 +61,21 @@ function SelectionOverlayInner({
 
   const resizeStateRef = useRef<ResizeDragState | null>(null)
   const rotateStateRef = useRef<RotateDragState | null>(null)
+
+  // AI-affected glow: render a transient cyan outline around shapes the most
+  // recent AI message touched, fades after ~800ms.
+  const aiAffectedIds = useDesignAssistantStore((s) => s.lastAiAffectedIds)
+  const aiActionAt = useDesignAssistantStore((s) => s.lastAiActionAt)
+  const [aiGlowVisible, setAiGlowVisible] = useState(false)
+  useEffect(() => {
+    if (!aiActionAt || aiAffectedIds.length === 0) {
+      setAiGlowVisible(false)
+      return
+    }
+    setAiGlowVisible(true)
+    const timer = setTimeout(() => setAiGlowVisible(false), 900)
+    return () => clearTimeout(timer)
+  }, [aiActionAt, aiAffectedIds])
 
   const hoverShape = hoverTargetId && !selectedIds.has(hoverTargetId) ? objects[hoverTargetId] : null
   const bounds = selectedIds.size > 0 ? getSelectionBounds(objects, selectedIds) : null
@@ -323,6 +340,29 @@ function SelectionOverlayInner({
           pointerEvents="none"
         />
       )}
+
+      {aiGlowVisible &&
+        aiAffectedIds.map((id) => {
+          const shape = objects[id]
+          if (!shape) return null
+          const sel = shapeGeometry(shape).selrect
+          return (
+            <rect
+              key={`ai-glow-${id}`}
+              x={sel.x - 4 / zoom}
+              y={sel.y - 4 / zoom}
+              width={sel.width + 8 / zoom}
+              height={sel.height + 8 / zoom}
+              fill="none"
+              stroke="#06b6d4"
+              strokeWidth={3 / zoom}
+              strokeOpacity={0.8}
+              pointerEvents="none"
+            >
+              <animate attributeName="stroke-opacity" from="0.8" to="0" dur="0.9s" fill="freeze" />
+            </rect>
+          )
+        })}
 
       {snapGuides.map((g, i) => {
         const color = g.source === 'grid' ? '#94a3b8' : '#ec4899'

@@ -7,6 +7,8 @@ import {
 } from '../../design/design-assistant-store'
 import { useDesignWorkspaceStore } from '../../design/design-workspace-store'
 import { buildDesignTurnPrompt } from '../../design/design-turn-prompt'
+import { useCanvasShapeStore } from '../../design/canvas/canvas-shape-store'
+import { snapshotCanvas } from '../../design/canvas/canvas-snapshot'
 import { useChatStore } from '../../store/chat-store'
 import { FloatingComposerModelPicker } from '../chat/FloatingComposerModelPicker'
 
@@ -46,15 +48,19 @@ function DesignAIRailInner({ onOpenSettings }: Props) {
 
     const store = useDesignWorkspaceStore.getState()
     const active = store.artifacts.find((a) => a.id === store.activeArtifactId) ?? null
+    const isCanvas = active?.kind === 'canvas'
 
     const prompt = buildDesignTurnPrompt({
-      target: active?.kind === 'canvas' ? 'canvas' : 'html',
+      target: isCanvas ? 'canvas' : 'html',
       mode: 'text',
       text,
       artifactRelativePath: active?.relativePath ?? '',
       workspaceRoot,
       customPrompt: store.generationPrompt || undefined,
-      designContext: store.designContext
+      designContext: store.designContext,
+      ...(isCanvas
+        ? { canvasSnapshot: snapshotCanvas(useCanvasShapeStore.getState().document) }
+        : {})
     })
 
     void sendMessage(text, prompt, workspaceRoot)
