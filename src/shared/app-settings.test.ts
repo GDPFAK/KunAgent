@@ -962,6 +962,15 @@ describe('legacy Kun defaults migration', () => {
     }))
   })
 
+  it('drops legacy top-level instructions during normalization', () => {
+    const normalized = normalizeAppSettings({
+      ...settings(),
+      instructions: { enabled: true }
+    } as unknown as AppSettingsV1)
+
+    expect('instructions' in normalized).toBe(false)
+  })
+
   it('moves the legacy local HTTP default port to the Kun default port', () => {
     const migrated = migrateLegacyAppSettings({
       version: 1,
