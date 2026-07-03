@@ -161,6 +161,649 @@ function mutableSettingsStore(initialSettings: AppSettingsV1): {
 }
 
 describe('ClawRuntime', () => {
+  it('returns help and starts a new topic for IM commands', async () => {
+    const settings = buildSettings()
+    settings.claw.im.provider = 'weixin'
+    settings.claw.channels = [
+      buildChannel({
+        provider: 'weixin',
+        label: 'WeChat',
+        threadId: 'thr_old',
+        conversations: [buildConversation({ localThreadId: 'thr_old' })]
+      })
+    ]
+    const { current, store } = mutableSettingsStore(settings)
+    const runtime = createClawRuntime({
+      store: store as never,
+      runtimeRequest: vi.fn() as never,
+      logError: () => undefined
+    })
+    const handle = (runtime as unknown as {
+      handleIncomingImCommand: (
+        settingsArg: AppSettingsV1,
+        input: {
+          text: string
+          channel: ClawImChannelV1
+          conversation: ClawImConversationV1
+        }
+      ) => Promise<string | null>
+    }).handleIncomingImCommand.bind(runtime)
+
+    const help = await handle(settings, {
+      text: '/help',
+      channel: settings.claw.channels[0],
+      conversation: settings.claw.channels[0].conversations[0]
+    })
+    expect(help).toContain('/list-skills')
+    expect(help).toContain('/list-mcp')
+    expect(help).toContain('/list-goal')
+    expect(help).toContain('/goal')
+    expect(help).toContain('/stop')
+    expect(help).toContain('/new')
+
+    const reply = await handle(settings, {
+      text: '/new',
+      channel: settings.claw.channels[0],
+      conversation: settings.claw.channels[0].conversations[0]
+    })
+    expect(reply).toContain('new topic')
+    expect(current().claw.channels[0].threadId).toBe('')
+    expect(current().claw.channels[0].conversations[0].localThreadId).toBe('')
+  })
+
+  it('lists available Kun skills for an incoming IM command', async () => {
+    const settings = buildSettings()
+    const { store } = mutableSettingsStore(settings)
+    const runtimeRequest = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      body: JSON.stringify({
+        enabled: true,
+        skills: [
+          {
+            id: 'documents',
+            name: 'Documents',
+            description: 'Create and edit documents',
+            source: 'global'
+          }
+        ]
+      })
+    }))
+    const runtime = createClawRuntime({
+      store: store as never,
+      runtimeRequest: runtimeRequest as never,
+      logError: () => undefined
+    })
+
+    const reply = await (runtime as unknown as {
+      handleIncomingImCommand: (
+        settingsArg: AppSettingsV1,
+        input: { text: string }
+      ) => Promise<string | null>
+    }).handleIncomingImCommand(settings, { text: '/list-skills' })
+
+    expect(runtimeRequest).toHaveBeenCalledWith(settings, '/v1/skills', { method: 'GET' })
+    expect(reply).toContain('documents')
+    expect(reply).toContain('Documents')
+  })
+
+  it('lists Kun MCP servers for an incoming IM command', async () => {
+    const settings = buildSettings()
+    const { store } = mutableSettingsStore(settings)
+    const runtimeRequest = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      body: JSON.stringify({
+        mcpServers: [
+          {
+            id: 'github',
+            enabled: true,
+            available: true,
+            status: 'connected',
+            transport: 'stdio',
+            toolCount: 12
+          },
+          {
+            id: 'docs',
+            enabled: true,
+            available: false,
+            status: 'error',
+            transport: 'http',
+            toolCount: 0,
+            lastError: 'connect failed'
+          }
+        ]
+      })
+    }))
+    const runtime = createClawRuntime({
+      store: store as never,
+      runtimeRequest: runtimeRequest as never,
+      logError: () => undefined
+    })
+
+    const reply = await (runtime as unknown as {
+      handleIncomingImCommand: (
+        settingsArg: AppSettingsV1,
+        input: { text: string }
+      ) => Promise<string | null>
+    }).handleIncomingImCommand(settings, { text: '/list-mcp' })
+
+    expect(runtimeRequest).toHaveBeenCalledWith(settings, '/v1/runtime/tools', { method: 'GET' })
+    expect(reply).toContain('github')
+    expect(reply).toContain('12 tools')
+    expect(reply).toContain('docs')
+    expect(reply).toContain('connect failed')
+  })
+
+  it('returns a Kun-prefixed concrete error when an IM runtime command fails', async () => {
+    const settings = buildSettings()
+    const { store } = mutableSettingsStore(settings)
+    const runtimeRequest = vi.fn(async () => ({
+      ok: false,
+      status: 503,
+      body: JSON.stringify({ message: 'runtime is offline' })
+    }))
+    const runtime = createClawRuntime({
+      store: store as never,
+      runtimeRequest: runtimeRequest as never,
+      logError: () => undefined
+    })
+
+    const reply = await (runtime as unknown as {
+      handleIncomingImCommandSafely: (
+        settingsArg: AppSettingsV1,
+        input: { text: string }
+      ) => Promise<string | null>
+    }).handleIncomingImCommandSafely(settings, { text: '/threads' })
+
+    expect(reply).toBe('Kun: runtime is offline')
+  })
+
+  it('shows the current Kun thread goal for an IM list-goal command', async () => {
+    const settings = buildSettings()
+    settings.claw.channels = [
+      buildChannel({
+        threadId: 'thr_goal',
+        conversations: [buildConversation({ localThreadId: 'thr_goal' })]
+      })
+    ]
+    const { store } = mutableSettingsStore(settings)
+    const runtimeRequest = vi.fn(async (_settingsArg: AppSettingsV1, path: string, init: { method?: string; body?: string }) => {
+      if (path === '/v1/threads/thr_goal/goal' && init.method === 'GET') {
+        return {
+          ok: true,
+          status: 200,
+          body: JSON.stringify({
+            goal: {
+              threadId: 'thr_goal',
+              objective: 'Read document A',
+              status: 'active',
+              tokensUsed: 12
+            }
+          })
+        }
+      }
+      if (path === '/v1/threads/thr_goal/goal' && init.method === 'POST') {
+        return {
+          ok: true,
+          status: 200,
+          body: JSON.stringify({
+            goal: {
+              threadId: 'thr_goal',
+              objective: JSON.parse(init.body ?? '{}').objective,
+              status: 'active',
+              tokensUsed: 0
+            }
+          })
+        }
+      }
+      return { ok: false, status: 404, body: '{}' }
+    })
+    const runtime = createClawRuntime({
+      store: store as never,
+      runtimeRequest: runtimeRequest as never,
+      logError: () => undefined
+    })
+    const handle = (runtime as unknown as {
+      handleIncomingImCommand: (
+        settingsArg: AppSettingsV1,
+        input: {
+          text: string
+          channel: ClawImChannelV1
+          conversation: ClawImConversationV1
+        }
+      ) => Promise<string | null>
+    }).handleIncomingImCommand.bind(runtime)
+
+    const shown = await handle(settings, {
+      text: '/list-goal',
+      channel: settings.claw.channels[0],
+      conversation: settings.claw.channels[0].conversations[0]
+    })
+    expect(shown).toContain('Read document A')
+  })
+
+  it('rejects empty and duplicate Kun thread goals for IM commands', async () => {
+    const settings = buildSettings()
+    settings.claw.channels = [
+      buildChannel({
+        threadId: 'thr_goal',
+        conversations: [buildConversation({ localThreadId: 'thr_goal' })]
+      })
+    ]
+    const { store } = mutableSettingsStore(settings)
+    const runtimeRequest = vi.fn(async (_settingsArg: AppSettingsV1, path: string, init: { method?: string; body?: string }) => {
+      if (path === '/v1/threads/thr_goal/goal' && init.method === 'GET') {
+        return {
+          ok: true,
+          status: 200,
+          body: JSON.stringify({
+            goal: {
+              threadId: 'thr_goal',
+              objective: 'Read document A',
+              status: 'active',
+              tokensUsed: 12
+            }
+          })
+        }
+      }
+      if (path === '/v1/threads/thr_goal/goal' && init.method === 'POST') {
+        return {
+          ok: true,
+          status: 200,
+          body: JSON.stringify({
+            goal: {
+              threadId: 'thr_goal',
+              objective: JSON.parse(init.body ?? '{}').objective,
+              status: 'active',
+              tokensUsed: 0
+            }
+          })
+        }
+      }
+      return { ok: false, status: 404, body: '{}' }
+    })
+    const runtime = createClawRuntime({
+      store: store as never,
+      runtimeRequest: runtimeRequest as never,
+      logError: () => undefined
+    })
+    const handle = (runtime as unknown as {
+      handleIncomingImCommand: (
+        settingsArg: AppSettingsV1,
+        input: {
+          text: string
+          channel: ClawImChannelV1
+          conversation: ClawImConversationV1
+        }
+      ) => Promise<string | null>
+    }).handleIncomingImCommand.bind(runtime)
+
+    const empty = await handle(settings, {
+      text: '/goal   ',
+      channel: settings.claw.channels[0],
+      conversation: settings.claw.channels[0].conversations[0]
+    })
+    expect(empty).toContain('Kun:')
+    expect(empty).toContain('requires an objective')
+
+    const changed = await handle(settings, {
+      text: '/goal Finish document B',
+      channel: settings.claw.channels[0],
+      conversation: settings.claw.channels[0].conversations[0]
+    })
+    expect(changed).toContain('already has a goal')
+    expect(changed).toContain('Kun:')
+    expect(changed).toContain('Read document A')
+    expect(runtimeRequest.mock.calls.some(([, path, init]) =>
+      path === '/v1/threads/thr_goal/goal' && init.method === 'POST'
+    )).toBe(false)
+  })
+
+  it('sets a Kun thread goal when the current IM thread has none', async () => {
+    const settings = buildSettings()
+    settings.claw.channels = [
+      buildChannel({
+        threadId: 'thr_goal',
+        conversations: [buildConversation({ localThreadId: 'thr_goal' })]
+      })
+    ]
+    const { store } = mutableSettingsStore(settings)
+    const runtimeRequest = vi.fn(async (_settingsArg: AppSettingsV1, path: string, init: { method?: string; body?: string }) => {
+      if (path === '/v1/threads/thr_goal/goal' && init.method === 'GET') {
+        return {
+          ok: true,
+          status: 200,
+          body: JSON.stringify({ goal: null })
+        }
+      }
+      if (path === '/v1/threads/thr_goal/goal' && init.method === 'POST') {
+        return {
+          ok: true,
+          status: 200,
+          body: JSON.stringify({
+            goal: {
+              threadId: 'thr_goal',
+              objective: JSON.parse(init.body ?? '{}').objective,
+              status: 'active',
+              tokensUsed: 0
+            }
+          })
+        }
+      }
+      return { ok: false, status: 404, body: '{}' }
+    })
+    const runtime = createClawRuntime({
+      store: store as never,
+      runtimeRequest: runtimeRequest as never,
+      logError: () => undefined
+    })
+
+    const changed = await (runtime as unknown as {
+      handleIncomingImCommand: (
+        settingsArg: AppSettingsV1,
+        input: {
+          text: string
+          channel: ClawImChannelV1
+          conversation: ClawImConversationV1
+        }
+      ) => Promise<string | null>
+    }).handleIncomingImCommand(settings, {
+      text: '/goal Finish document B',
+      channel: settings.claw.channels[0],
+      conversation: settings.claw.channels[0].conversations[0]
+    })
+
+    expect(changed).toContain('Finish document B')
+    expect(runtimeRequest).toHaveBeenCalledWith(
+      settings,
+      '/v1/threads/thr_goal/goal',
+      {
+        method: 'POST',
+        body: JSON.stringify({ objective: 'Finish document B' })
+      }
+    )
+  })
+
+  it('stops the running turn in the current IM thread', async () => {
+    const settings = buildSettings()
+    settings.claw.channels = [
+      buildChannel({
+        threadId: 'thr_stop',
+        conversations: [buildConversation({ localThreadId: 'thr_stop' })]
+      })
+    ]
+    const { store } = mutableSettingsStore(settings)
+    const runtimeRequest = vi.fn(async (_settingsArg: AppSettingsV1, path: string, init: { method?: string; body?: string }) => {
+      if (path === '/v1/threads/thr_stop' && init.method === 'GET') {
+        return {
+          ok: true,
+          status: 200,
+          body: JSON.stringify({
+            id: 'thr_stop',
+            turns: [
+              { id: 'turn_done', status: 'completed' },
+              { id: 'turn_running', status: 'running' }
+            ]
+          })
+        }
+      }
+      if (path === '/v1/threads/thr_stop/turns/turn_running/interrupt' && init.method === 'POST') {
+        return {
+          ok: true,
+          status: 200,
+          body: JSON.stringify({ threadId: 'thr_stop', turnId: 'turn_running', status: 'aborted' })
+        }
+      }
+      return { ok: false, status: 404, body: '{}' }
+    })
+    const runtime = createClawRuntime({
+      store: store as never,
+      runtimeRequest: runtimeRequest as never,
+      logError: () => undefined
+    })
+
+    const reply = await (runtime as unknown as {
+      handleIncomingImCommand: (
+        settingsArg: AppSettingsV1,
+        input: {
+          text: string
+          channel: ClawImChannelV1
+          conversation: ClawImConversationV1
+        }
+      ) => Promise<string | null>
+    }).handleIncomingImCommand(settings, {
+      text: '/stop',
+      channel: settings.claw.channels[0],
+      conversation: settings.claw.channels[0].conversations[0]
+    })
+
+    expect(reply).toContain('turn_running')
+    expect(runtimeRequest).toHaveBeenCalledWith(
+      settings,
+      '/v1/threads/thr_stop/turns/turn_running/interrupt',
+      {
+        method: 'POST',
+        body: JSON.stringify({ discard: false })
+      }
+    )
+  })
+
+  it('returns a Kun-prefixed error when there is no running IM turn to stop', async () => {
+    const settings = buildSettings()
+    settings.claw.channels = [
+      buildChannel({
+        threadId: 'thr_stop',
+        conversations: [buildConversation({ localThreadId: 'thr_stop' })]
+      })
+    ]
+    const { store } = mutableSettingsStore(settings)
+    const runtimeRequest = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      body: JSON.stringify({
+        id: 'thr_stop',
+        turns: [{ id: 'turn_done', status: 'completed' }]
+      })
+    }))
+    const runtime = createClawRuntime({
+      store: store as never,
+      runtimeRequest: runtimeRequest as never,
+      logError: () => undefined
+    })
+
+    const reply = await (runtime as unknown as {
+      handleIncomingImCommand: (
+        settingsArg: AppSettingsV1,
+        input: {
+          text: string
+          channel: ClawImChannelV1
+          conversation: ClawImConversationV1
+        }
+      ) => Promise<string | null>
+    }).handleIncomingImCommand(settings, {
+      text: '/stop',
+      channel: settings.claw.channels[0],
+      conversation: settings.claw.channels[0].conversations[0]
+    })
+
+    expect(reply).toContain('Kun:')
+    expect(reply).toContain('no running task')
+  })
+
+  it('lists recent Kun threads for an incoming WeChat command', async () => {
+    const settings = buildSettings()
+    settings.claw.im.provider = 'weixin'
+    settings.claw.channels = [
+      buildChannel({
+        provider: 'weixin',
+        label: 'WeChat',
+        threadId: 'thr_old',
+        conversations: [buildConversation({ localThreadId: 'thr_old' })]
+      })
+    ]
+    const { store } = mutableSettingsStore(settings)
+    const runtimeRequest = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      body: JSON.stringify({
+        threads: [
+          {
+            id: 'thr_new',
+            title: '[Claw IM:WeChat] Document B',
+            status: 'idle',
+            updatedAt: '2026-06-03T00:00:00.000Z'
+          },
+          {
+            id: 'thr_old',
+            title: '[Claw IM:WeChat] Document A',
+            status: 'idle',
+            updatedAt: '2026-06-02T00:00:00.000Z'
+          },
+          {
+            id: 'thr_other',
+            title: 'Desktop chat',
+            status: 'idle',
+            updatedAt: '2026-06-04T00:00:00.000Z'
+          }
+        ]
+      })
+    }))
+    const runtime = createClawRuntime({
+      store: store as never,
+      runtimeRequest: runtimeRequest as never,
+      logError: () => undefined
+    })
+
+    const reply = await (runtime as unknown as {
+      handleIncomingImCommand: (
+        settingsArg: AppSettingsV1,
+        input: {
+          text: string
+          channel: ClawImChannelV1
+          conversation: ClawImConversationV1
+        }
+      ) => Promise<string | null>
+    }).handleIncomingImCommand(settings, {
+      text: '/threads',
+      channel: settings.claw.channels[0],
+      conversation: settings.claw.channels[0].conversations[0]
+    })
+
+    expect(runtimeRequest).toHaveBeenCalledWith(settings, '/v1/threads?limit=50', { method: 'GET' })
+    expect(reply).toContain('Document B')
+    expect(reply).toContain('Document A')
+    expect(reply).not.toContain('Desktop chat')
+  })
+
+  it('switches the current WeChat conversation to a selected Kun thread', async () => {
+    const settings = buildSettings()
+    settings.claw.im.provider = 'weixin'
+    settings.claw.channels = [
+      buildChannel({
+        provider: 'weixin',
+        label: 'WeChat',
+        threadId: 'thr_old',
+        conversations: [buildConversation({ localThreadId: 'thr_old' })]
+      })
+    ]
+    const { current, store } = mutableSettingsStore(settings)
+    const runtimeRequest = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      body: JSON.stringify({
+        threads: [
+          {
+            id: 'thr_old',
+            title: '[Claw IM:WeChat] Document A',
+            status: 'idle',
+            updatedAt: '2026-06-02T00:00:00.000Z'
+          },
+          {
+            id: 'thr_new',
+            title: '[Claw IM:WeChat] Document B',
+            status: 'idle',
+            updatedAt: '2026-06-03T00:00:00.000Z'
+          }
+        ]
+      })
+    }))
+    const notifyChannelActivity = vi.fn()
+    const runtime = createClawRuntime({
+      store: store as never,
+      runtimeRequest: runtimeRequest as never,
+      logError: () => undefined,
+      notifyChannelActivity
+    })
+
+    const reply = await (runtime as unknown as {
+      handleIncomingImCommand: (
+        settingsArg: AppSettingsV1,
+        input: {
+          text: string
+          channel: ClawImChannelV1
+          conversation: ClawImConversationV1
+          remoteSession: Pick<ClawImConversationV1, 'chatId' | 'senderId' | 'senderName'> & {
+            messageId: string
+            threadId: string
+          }
+        }
+      ) => Promise<string | null>
+    }).handleIncomingImCommand(settings, {
+      text: '/switch 1',
+      channel: settings.claw.channels[0],
+      conversation: settings.claw.channels[0].conversations[0],
+      remoteSession: {
+        chatId: 'oc_chat_a',
+        messageId: 'om_switch',
+        threadId: '',
+        senderId: 'ou_1',
+        senderName: 'Alice'
+      }
+    })
+
+    expect(reply).toContain('thr_new')
+    expect(current().claw.channels[0].threadId).toBe('thr_new')
+    expect(current().claw.channels[0].conversations[0].localThreadId).toBe('thr_new')
+    expect(current().claw.channels[0].conversations[0].latestMessageId).toBe('om_switch')
+    expect(notifyChannelActivity).toHaveBeenCalledWith({ channelId: 'channel_1', threadId: 'thr_new' })
+  })
+
+  it('does not report switch success when no IM channel can persist the selection', async () => {
+    const settings = buildSettings()
+    const { store } = mutableSettingsStore(settings)
+    const runtimeRequest = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      body: JSON.stringify({
+        threads: [
+          {
+            id: 'thr_new',
+            title: 'Document B',
+            status: 'idle',
+            updatedAt: '2026-06-03T00:00:00.000Z'
+          }
+        ]
+      })
+    }))
+    const runtime = createClawRuntime({
+      store: store as never,
+      runtimeRequest: runtimeRequest as never,
+      logError: () => undefined
+    })
+
+    const reply = await (runtime as unknown as {
+      handleIncomingImCommand: (
+        settingsArg: AppSettingsV1,
+        input: { text: string }
+      ) => Promise<string | null>
+    }).handleIncomingImCommand(settings, { text: '/switch 1' })
+
+    expect(reply).toContain('Kun:')
+    expect(reply).not.toContain('Switched')
+    expect(store.patch).not.toHaveBeenCalled()
+  })
+
   it('bases Feishu conversation workspaces on the configured Claw workspace', () => {
     const settings = buildSettings()
     settings.claw.im.workspaceRoot = '/tmp/claw-default'

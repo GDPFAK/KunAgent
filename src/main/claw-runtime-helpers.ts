@@ -52,7 +52,11 @@ export type ClawRuntimeDeps = {
 
 export type ThreadRecordJson = {
   id: string
+  title?: string
   status?: string
+  workspace?: string
+  createdAt?: string
+  updatedAt?: string
 }
 
 export type TurnRecordJson = {

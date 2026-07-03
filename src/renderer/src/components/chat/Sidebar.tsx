@@ -159,13 +159,6 @@ export function Sidebar({
               ariaLabel={t('focusModeToggleLabel')}
             />
           </div>
-          <SidebarCommandRow
-            icon={<Smartphone className="h-4 w-4" strokeWidth={1.75} />}
-            label={t('claw')}
-            onClick={onToggleConnectPhone}
-            active={connectPhoneSidebarOpen}
-            variant="footer"
-          />
           <div className="flex items-center gap-1">
             <div className="min-w-0 flex-1">
               <SidebarCommandRow
@@ -175,6 +168,14 @@ export function Sidebar({
                 variant="footer"
               />
             </div>
+            <SidebarIconButton
+              title={t('claw')}
+              ariaLabel={t('claw')}
+              onClick={onToggleConnectPhone}
+              active={connectPhoneSidebarOpen}
+            >
+              <Smartphone className="h-4 w-4" strokeWidth={1.75} />
+            </SidebarIconButton>
             <SidebarIconButton
               title={isDarkMode ? t('switchToLight') : t('switchToDark')}
               ariaLabel={t('toggleTheme')}

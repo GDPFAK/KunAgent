@@ -280,22 +280,38 @@ function imCommandHelpText(settings: AppSettingsV1): string {
       'Claw IM 命令：',
       '- `/help`：查看命令帮助',
       '- `/new`：当前 IM 连接开启新话题',
+      '- `/stop`：停止当前 Kun 会话里正在运行的任务',
+      '- `/list-skills`：查看当前 Kun 可用技能',
+      '- `/list-mcp`：查看当前 Kun MCP 服务器',
+      '- `/list-goal`：查看当前 Kun 会话目标',
+      '- `/goal <目标>`：设置当前 Kun 会话目标',
+      '- `/threads`：列出最近的 Kun 会话',
+      '- `/current`：查看当前 IM 会话连接的 Kun 会话',
+      '- `/switch <序号|标题|thread id>`：切换当前 IM 会话到指定 Kun 会话',
       '- `/provider`：查看已加载的模型供应商',
       '- `/provider <id>`：切换当前 IM 连接供应商',
       '- `/model`：查看当前供应商可用模型',
       '- `/model <id>`：切换当前 IM 连接模型',
-      '也支持 `-new`、`-help`、`-provider minimax`、`-model MiniMax-M3` 这种写法。'
+      '也支持 `-new`、`-threads`、`-switch 2`、`-provider minimax` 这种写法。'
     ].join('\n')
   }
   return [
     'Claw IM commands:',
     '- `/help`: show command help',
     '- `/new`: start a new topic for this IM connection',
+    '- `/stop`: stop the running task in the current Kun conversation',
+    '- `/list-skills`: list available Kun skills',
+    '- `/list-mcp`: list Kun MCP servers',
+    '- `/list-goal`: show the current Kun conversation goal',
+    '- `/goal <objective>`: set the current Kun conversation goal',
+    '- `/threads`: list recent Kun conversations',
+    '- `/current`: show the Kun conversation connected to this IM chat',
+    '- `/switch <number|title|thread id>`: switch this IM chat to a Kun conversation',
     '- `/provider`: list loaded model providers',
     '- `/provider <id>`: switch the provider for this IM connection',
     '- `/model`: list models for the current provider',
     '- `/model <id>`: switch the model for this IM connection',
-    '`-new`, `-help`, `-provider minimax`, and `-model MiniMax-M3` are supported too.'
+    '`-new`, `-threads`, `-switch 2`, and `-provider minimax` are supported too.'
   ].join('\n')
 }
 
@@ -327,9 +343,9 @@ function imProviderListText(settings: AppSettingsV1, channel?: ClawImChannelV1):
 }
 
 function imProviderCommandHint(settings: AppSettingsV1, value: string): string {
-  return isChineseLocale(settings)
+  return imKunErrorText(settings, isChineseLocale(settings)
     ? `没有找到供应商 \`${value}\`。发送 \`/provider\` 查看已加载供应商。`
-    : `Provider \`${value}\` was not found. Send \`/provider\` to list loaded providers.`
+    : `Provider \`${value}\` was not found. Send \`/provider\` to list loaded providers.`)
 }
 
 function imProviderChangedText(
@@ -368,9 +384,9 @@ function imModelListText(settings: AppSettingsV1, channel?: ClawImChannelV1): st
 function imModelCommandHint(settings: AppSettingsV1, provider: ModelProviderProfileV1, value: string): string {
   const models = providerTextModels(settings, provider)
   const ids = models.map((model) => `\`${model}\``).join(', ')
-  return isChineseLocale(settings)
+  return imKunErrorText(settings, isChineseLocale(settings)
     ? `供应商 \`${provider.id}\` 下没有找到模型 \`${value}\`。${ids ? `可用模型：${ids}。` : '这个供应商还没有可用的文本模型。'}`
-    : `Model \`${value}\` was not found for provider \`${provider.id}\`. ${ids ? `Available models: ${ids}.` : 'This provider has no usable text models yet.'}`
+    : `Model \`${value}\` was not found for provider \`${provider.id}\`. ${ids ? `Available models: ${ids}.` : 'This provider has no usable text models yet.'}`)
 }
 
 function imModelChangedText(settings: AppSettingsV1, model: string): string {
@@ -383,6 +399,312 @@ function imNewTopicText(settings: AppSettingsV1): string {
   return isChineseLocale(settings)
     ? '新话题已开启。下一条消息会创建新的本地会话。'
     : 'Started a new topic. The next message will create a fresh local conversation.'
+}
+
+function imKunErrorText(_settings: AppSettingsV1, message: string): string {
+  const trimmed = message.trim()
+  return trimmed.startsWith('Kun:') ? trimmed : `Kun: ${trimmed}`
+}
+
+type ImSkillSummary = {
+  id: string
+  name: string
+  description?: string
+  source?: string
+}
+
+type ImMcpServerSummary = {
+  id: string
+  enabled: boolean
+  available: boolean
+  status: string
+  transport?: string
+  toolCount?: number
+  lastError?: string
+}
+
+type ImGoalSummary = {
+  objective: string
+  status?: string
+  tokensUsed?: number
+}
+
+function parseSkillsResponse(body: string): { enabled: boolean; skills: ImSkillSummary[] } {
+  const parsed = parseJsonObject(body)
+  const skills = Array.isArray(parsed?.skills) ? parsed.skills : []
+  return {
+    enabled: parsed?.enabled === true,
+    skills: skills
+      .filter((item): item is Record<string, unknown> => typeof item === 'object' && item !== null && !Array.isArray(item))
+      .map((item): ImSkillSummary => ({
+        id: asString(item.id),
+        name: asString(item.name),
+        description: asString(item.description),
+        source: asString(item.source)
+      }))
+      .filter((skill) => skill.id || skill.name)
+  }
+}
+
+function imSkillListText(settings: AppSettingsV1, enabled: boolean, skills: readonly ImSkillSummary[]): string {
+  if (!enabled) {
+    return isChineseLocale(settings)
+      ? 'Kun 技能当前未启用。'
+      : 'Kun skills are currently disabled.'
+  }
+  if (skills.length === 0) {
+    return isChineseLocale(settings)
+      ? '当前没有发现可用技能。'
+      : 'No available skills were discovered.'
+  }
+  const rows = skills.slice(0, 30).map((skill, index) => {
+    const name = skill.name || skill.id
+    const source = skill.source ? ` · ${skill.source}` : ''
+    const description = skill.description ? `：${skill.description}` : ''
+    return `- ${index + 1}. \`${skill.id || name}\` ${name}${source}${description}`
+  })
+  const extra = skills.length > rows.length
+    ? (isChineseLocale(settings) ? `还有 ${skills.length - rows.length} 个技能未显示。` : `${skills.length - rows.length} more skills not shown.`)
+    : ''
+  return [
+    isChineseLocale(settings) ? '可用 Kun 技能：' : 'Available Kun skills:',
+    ...rows,
+    ...(extra ? [extra] : [])
+  ].join('\n')
+}
+
+function parseMcpResponse(body: string): ImMcpServerSummary[] {
+  const parsed = parseJsonObject(body)
+  const servers = Array.isArray(parsed?.mcpServers) ? parsed.mcpServers : []
+  return servers
+    .filter((item): item is Record<string, unknown> => typeof item === 'object' && item !== null && !Array.isArray(item))
+    .map((item): ImMcpServerSummary => ({
+      id: asString(item.id),
+      enabled: item.enabled === true,
+      available: item.available === true,
+      status: asString(item.status),
+      transport: asString(item.transport),
+      toolCount: typeof item.toolCount === 'number' && Number.isFinite(item.toolCount)
+        ? item.toolCount
+        : undefined,
+      lastError: asString(item.lastError)
+    }))
+    .filter((server) => server.id)
+}
+
+function imMcpListText(settings: AppSettingsV1, servers: readonly ImMcpServerSummary[]): string {
+  if (servers.length === 0) {
+    return isChineseLocale(settings)
+      ? '当前没有配置 Kun MCP 服务器。'
+      : 'No Kun MCP servers are configured.'
+  }
+  const rows = servers.map((server, index) => {
+    const state = server.available
+      ? (isChineseLocale(settings) ? '可用' : 'available')
+      : server.enabled
+        ? (server.status || (isChineseLocale(settings) ? '不可用' : 'unavailable'))
+        : (isChineseLocale(settings) ? '已禁用' : 'disabled')
+    const transport = server.transport ? ` · ${server.transport}` : ''
+    const tools = typeof server.toolCount === 'number' ? ` · ${server.toolCount} tools` : ''
+    const error = server.lastError ? ` · ${server.lastError}` : ''
+    return `- ${index + 1}. \`${server.id}\` ${state}${transport}${tools}${error}`
+  })
+  return [
+    isChineseLocale(settings) ? 'Kun MCP 服务器：' : 'Kun MCP servers:',
+    ...rows
+  ].join('\n')
+}
+
+function parseGoalResponse(body: string): ImGoalSummary | null {
+  const parsed = parseJsonObject(body)
+  const goal = typeof parsed?.goal === 'object' && parsed.goal !== null && !Array.isArray(parsed.goal)
+    ? parsed.goal as Record<string, unknown>
+    : null
+  if (!goal) return null
+  const objective = asString(goal.objective)
+  if (!objective) return null
+  const tokensUsed = typeof goal.tokensUsed === 'number' && Number.isFinite(goal.tokensUsed)
+    ? goal.tokensUsed
+    : undefined
+  return {
+    objective,
+    status: asString(goal.status),
+    tokensUsed
+  }
+}
+
+function imNoCurrentThreadText(settings: AppSettingsV1): string {
+  return imKunErrorText(settings, isChineseLocale(settings)
+    ? '当前 IM 会话还没有绑定 Kun 会话。先发送普通消息创建会话，或用 `/threads` 和 `/switch` 切换到已有会话。'
+    : 'This IM chat is not connected to a Kun conversation yet. Send a normal message to create one, or use `/threads` and `/switch` to pick one.')
+}
+
+function imGoalText(settings: AppSettingsV1, goal: ImGoalSummary | null): string {
+  if (!goal) {
+    return isChineseLocale(settings)
+      ? '当前 Kun 会话还没有设置目标。使用 `/goal <目标>` 设置。'
+      : 'The current Kun conversation has no goal yet. Set one with `/goal <objective>`.'
+  }
+  const status = goal.status ? ` · ${goal.status}` : ''
+  const tokens = typeof goal.tokensUsed === 'number' ? ` · ${goal.tokensUsed} tokens` : ''
+  return isChineseLocale(settings)
+    ? `当前目标${status}${tokens}：\n${goal.objective}`
+    : `Current goal${status}${tokens}:\n${goal.objective}`
+}
+
+function imGoalMissingObjectiveText(settings: AppSettingsV1): string {
+  return imKunErrorText(settings, isChineseLocale(settings)
+    ? '`/goal` 后面必须带目标内容，例如：`/goal 阅读并总结文档 A`。查看当前目标请用 `/list-goal`。'
+    : '`/goal` requires an objective, for example: `/goal Read and summarize document A`. Use `/list-goal` to view the current goal.')
+}
+
+function imGoalAlreadyExistsText(settings: AppSettingsV1, goal: ImGoalSummary): string {
+  return imKunErrorText(settings, isChineseLocale(settings)
+    ? `当前会话已经有目标，不能重复设置：\n${goal.objective}`
+    : `This conversation already has a goal, so a new one was not set:\n${goal.objective}`)
+}
+
+function imGoalChangedText(settings: AppSettingsV1, goal: ImGoalSummary | null): string {
+  if (!goal) {
+    return isChineseLocale(settings)
+      ? '目标已更新。'
+      : 'Goal updated.'
+  }
+  return isChineseLocale(settings)
+    ? `目标已设置：\n${goal.objective}`
+    : `Goal set:\n${goal.objective}`
+}
+
+function imThreadTitle(thread: ThreadRecordJson): string {
+  const title = thread.title?.trim()
+  return title || thread.id
+}
+
+function imThreadTimestamp(thread: ThreadRecordJson): number {
+  const value = Date.parse(thread.updatedAt ?? thread.createdAt ?? '')
+  return Number.isFinite(value) ? value : 0
+}
+
+function isImThreadCandidate(
+  thread: ThreadRecordJson,
+  channel: ClawImChannelV1 | undefined,
+  knownThreadIds: Set<string>
+): boolean {
+  if (knownThreadIds.has(thread.id)) return true
+  if (!channel) return true
+  const title = thread.title?.trim() ?? ''
+  const prefix = `[Claw IM:${channel.label}]`
+  return title.startsWith(prefix)
+}
+
+function parseListThreadsResponse(body: string): ThreadRecordJson[] {
+  const parsed = parseJsonObject(body)
+  const threads = Array.isArray(parsed?.threads) ? parsed.threads : []
+  return threads
+    .filter((item): item is Record<string, unknown> => typeof item === 'object' && item !== null && !Array.isArray(item))
+    .map((item): ThreadRecordJson => ({
+      id: asString(item.id),
+      title: asString(item.title),
+      status: asString(item.status),
+      workspace: asString(item.workspace),
+      createdAt: asString(item.createdAt),
+      updatedAt: asString(item.updatedAt)
+    }))
+    .filter((thread) => thread.id.trim())
+}
+
+function imThreadListText(
+  settings: AppSettingsV1,
+  threads: readonly ThreadRecordJson[],
+  currentThreadId: string
+): string {
+  if (threads.length === 0) {
+    return isChineseLocale(settings)
+      ? '还没有找到可切换的 Kun 会话。先发送普通消息创建会话，或发送 `/new` 开启新话题。'
+      : 'No switchable Kun conversations were found yet. Send a normal message to create one, or send `/new` to start a new topic.'
+  }
+  const rows = threads.map((thread, index) => {
+    const marker = thread.id === currentThreadId ? '*' : '-'
+    const status = thread.status?.trim() ? ` · ${thread.status.trim()}` : ''
+    return `${marker} ${index + 1}. \`${thread.id}\` ${imThreadTitle(thread)}${status}`
+  })
+  if (isChineseLocale(settings)) {
+    return [
+      currentThreadId ? `当前会话：\`${currentThreadId}\`。` : '当前还没有绑定 Kun 会话。',
+      '最近 Kun 会话：',
+      ...rows,
+      '切换会话：`/switch <序号|标题|thread id>`。新话题：`/new`。'
+    ].join('\n')
+  }
+  return [
+    currentThreadId ? `Current conversation: \`${currentThreadId}\`.` : 'No Kun conversation is connected yet.',
+    'Recent Kun conversations:',
+    ...rows,
+    'Switch with `/switch <number|title|thread id>`. Start fresh with `/new`.'
+  ].join('\n')
+}
+
+function imCurrentThreadText(
+  settings: AppSettingsV1,
+  thread: ThreadRecordJson | undefined,
+  currentThreadId: string
+): string {
+  if (!currentThreadId) {
+    return imKunErrorText(settings, isChineseLocale(settings)
+      ? '当前 IM 会话还没有绑定 Kun 会话。发送普通消息会创建一个新会话。'
+      : 'This IM chat is not connected to a Kun conversation yet. Send a normal message to create one.')
+  }
+  if (!thread) {
+    return imKunErrorText(settings, isChineseLocale(settings)
+      ? `当前绑定的 Kun 会话是 \`${currentThreadId}\`，但线程列表里暂时没有读取到它。`
+      : `This IM chat is connected to \`${currentThreadId}\`, but it was not found in the thread list.`)
+  }
+  const status = thread.status?.trim() ? ` · ${thread.status.trim()}` : ''
+  return isChineseLocale(settings)
+    ? `当前 Kun 会话：\`${thread.id}\` ${imThreadTitle(thread)}${status}。`
+    : `Current Kun conversation: \`${thread.id}\` ${imThreadTitle(thread)}${status}.`
+}
+
+function resolveImThreadSwitchTarget(
+  threads: readonly ThreadRecordJson[],
+  target: string
+): ThreadRecordJson | null {
+  const query = target.trim()
+  if (!query) return null
+  const index = Number.parseInt(query, 10)
+  if (String(index) === query && index >= 1 && index <= threads.length) {
+    return threads[index - 1]
+  }
+  const lowered = query.toLowerCase()
+  return threads.find((thread) => thread.id === query) ??
+    threads.find((thread) => thread.id.toLowerCase() === lowered) ??
+    threads.find((thread) => imThreadTitle(thread).toLowerCase() === lowered) ??
+    threads.find((thread) => imThreadTitle(thread).toLowerCase().includes(lowered)) ??
+    null
+}
+
+function imThreadSwitchNotFoundText(settings: AppSettingsV1, target: string): string {
+  return imKunErrorText(settings, isChineseLocale(settings)
+    ? `没有找到可切换的会话 \`${target}\`。发送 \`/threads\` 查看最近会话。`
+    : `Could not find a switchable conversation for \`${target}\`. Send \`/threads\` to list recent conversations.`)
+}
+
+function imThreadSwitchedText(settings: AppSettingsV1, thread: ThreadRecordJson): string {
+  return isChineseLocale(settings)
+    ? `已切换到 Kun 会话 \`${thread.id}\`：${imThreadTitle(thread)}。后续消息会继续这个上下文。`
+    : `Switched to Kun conversation \`${thread.id}\`: ${imThreadTitle(thread)}. Future messages will continue that context.`
+}
+
+function imStopNoRunningTurnText(settings: AppSettingsV1): string {
+  return imKunErrorText(settings, isChineseLocale(settings)
+    ? '当前 Kun 会话没有正在运行的任务。'
+    : 'The current Kun conversation has no running task.')
+}
+
+function imStopSucceededText(settings: AppSettingsV1, turnId: string): string {
+  return isChineseLocale(settings)
+    ? `Kun 已停止当前任务：\`${turnId}\`。`
+    : `Kun stopped the current task: \`${turnId}\`.`
 }
 
 /**
@@ -1098,6 +1420,197 @@ export class ClawRuntime {
     })
   }
 
+  private currentIncomingImThreadId(
+    channel: ClawImChannelV1 | undefined,
+    conversation: ClawImConversationV1 | undefined
+  ): string {
+    return conversation?.localThreadId.trim() ||
+      channel?.threadId.trim() ||
+      ''
+  }
+
+  private async listIncomingImThreads(
+    settings: AppSettingsV1,
+    channel: ClawImChannelV1 | undefined
+  ): Promise<ThreadRecordJson[]> {
+    const response = await this.deps.runtimeRequest(
+      settings,
+      '/v1/threads?limit=50',
+      { method: 'GET' }
+    )
+    if (!response.ok) {
+      throw new Error(runtimeErrorMessage(response, 'Failed to list threads.'))
+    }
+    const knownThreadIds = new Set<string>()
+    if (channel?.threadId.trim()) knownThreadIds.add(channel.threadId.trim())
+    for (const conversation of channel?.conversations ?? []) {
+      if (conversation.localThreadId.trim()) knownThreadIds.add(conversation.localThreadId.trim())
+    }
+    return parseListThreadsResponse(response.body)
+      .filter((thread) => isImThreadCandidate(thread, channel, knownThreadIds))
+      .sort((a, b) => imThreadTimestamp(b) - imThreadTimestamp(a))
+  }
+
+  private async listIncomingImSkills(settings: AppSettingsV1): Promise<{ enabled: boolean; skills: ImSkillSummary[] }> {
+    const response = await this.deps.runtimeRequest(
+      settings,
+      '/v1/skills',
+      { method: 'GET' }
+    )
+    if (!response.ok) {
+      throw new Error(runtimeErrorMessage(response, 'Failed to list skills.'))
+    }
+    return parseSkillsResponse(response.body)
+  }
+
+  private async listIncomingImMcpServers(settings: AppSettingsV1): Promise<ImMcpServerSummary[]> {
+    const response = await this.deps.runtimeRequest(
+      settings,
+      '/v1/runtime/tools',
+      { method: 'GET' }
+    )
+    if (!response.ok) {
+      throw new Error(runtimeErrorMessage(response, 'Failed to list MCP servers.'))
+    }
+    return parseMcpResponse(response.body)
+  }
+
+  private async getIncomingImGoal(settings: AppSettingsV1, threadId: string): Promise<ImGoalSummary | null> {
+    const response = await this.deps.runtimeRequest(
+      settings,
+      `/v1/threads/${encodeURIComponent(threadId)}/goal`,
+      { method: 'GET' }
+    )
+    if (!response.ok) {
+      throw new Error(runtimeErrorMessage(response, 'Failed to read goal.'))
+    }
+    return parseGoalResponse(response.body)
+  }
+
+  private async setIncomingImGoal(
+    settings: AppSettingsV1,
+    threadId: string,
+    objective: string
+  ): Promise<ImGoalSummary | null> {
+    const response = await this.deps.runtimeRequest(
+      settings,
+      `/v1/threads/${encodeURIComponent(threadId)}/goal`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ objective })
+      }
+    )
+    if (!response.ok) {
+      throw new Error(runtimeErrorMessage(response, 'Failed to set goal.'))
+    }
+    return parseGoalResponse(response.body)
+  }
+
+  private async getIncomingImThreadDetail(settings: AppSettingsV1, threadId: string): Promise<ThreadDetailJson> {
+    const response = await this.deps.runtimeRequest(
+      settings,
+      `/v1/threads/${encodeURIComponent(threadId)}`,
+      { method: 'GET' }
+    )
+    if (!response.ok) {
+      throw new Error(runtimeErrorMessage(response, 'Failed to read thread.'))
+    }
+    return JSON.parse(response.body) as ThreadDetailJson
+  }
+
+  private runningTurnId(detail: ThreadDetailJson): string {
+    const turns = Array.isArray(detail.turns) ? detail.turns : []
+    for (let index = turns.length - 1; index >= 0; index -= 1) {
+      const turn = turns[index]
+      if (turn.id.trim() && isRunningStatus(turn.status)) return turn.id.trim()
+    }
+    return ''
+  }
+
+  private async stopIncomingImTurn(settings: AppSettingsV1, threadId: string): Promise<string | null> {
+    const detail = await this.getIncomingImThreadDetail(settings, threadId)
+    const turnId = this.runningTurnId(detail)
+    if (!turnId) return null
+    const response = await this.deps.runtimeRequest(
+      settings,
+      `/v1/threads/${encodeURIComponent(threadId)}/turns/${encodeURIComponent(turnId)}/interrupt`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ discard: false })
+      }
+    )
+    if (!response.ok) {
+      throw new Error(runtimeErrorMessage(response, 'Failed to stop turn.'))
+    }
+    return turnId
+  }
+
+  private async switchIncomingImThread(
+    settings: AppSettingsV1,
+    input: {
+      channel?: ClawImChannelV1
+      conversation?: ClawImConversationV1
+      remoteSession?: Pick<ClawImRemoteSessionV1, 'chatId' | 'messageId' | 'threadId' | 'senderId' | 'senderName'>
+      threadId: string
+    }
+  ): Promise<boolean> {
+    if (!input.channel) return false
+    const currentSettings = await this.deps.store.load()
+    const currentChannel = currentSettings.claw.channels.find((item) => item.id === input.channel?.id)
+    if (!currentChannel) return false
+    const session = input.remoteSession
+    const currentConversation = session
+      ? this.findChannelConversation(currentChannel, session)
+      : input.conversation
+        ? currentChannel.conversations.find((item) => item.id === input.conversation?.id)
+        : undefined
+    const now = new Date().toISOString()
+    const nextConversation: ClawImConversationV1 | null = session && !currentConversation
+      ? {
+          id: randomUUID(),
+          chatId: session.chatId,
+          remoteThreadId: session.threadId,
+          latestMessageId: session.messageId,
+          senderId: session.senderId,
+          senderName: session.senderName,
+          localThreadId: input.threadId,
+          workspaceRoot: this.resolveConversationWorkspaceRoot(settings, currentChannel, session),
+          createdAt: now,
+          updatedAt: now
+        }
+      : null
+    await this.deps.store.patch({
+      claw: {
+        channels: currentSettings.claw.channels.map((item) => {
+          if (item.id !== currentChannel.id) return item
+          return {
+            ...item,
+            threadId: input.threadId,
+            conversations: currentConversation
+              ? item.conversations.map((conversation) =>
+                  conversation.id === currentConversation.id
+                    ? {
+                        ...conversation,
+                        latestMessageId: session?.messageId || conversation.latestMessageId,
+                        senderId: session?.senderId || conversation.senderId,
+                        senderName: session?.senderName || conversation.senderName,
+                        localThreadId: input.threadId,
+                        updatedAt: now
+                      }
+                    : conversation
+                )
+              : nextConversation
+                ? [...item.conversations, nextConversation]
+                : item.conversations,
+            updatedAt: now
+          }
+        })
+      }
+    })
+    this.deps.notifyChannelActivity?.({ channelId: currentChannel.id, threadId: input.threadId })
+    return true
+  }
+
   private async handleIncomingImCommand(
     settings: AppSettingsV1,
     input: {
@@ -1110,6 +1623,68 @@ export class ClawRuntime {
     const command = parseClawCommand(input.text)
     if (!command) return null
     if (command.kind === 'help') return imCommandHelpText(settings)
+    if (command.kind === 'stop') {
+      const currentThreadId = this.currentIncomingImThreadId(input.channel, input.conversation)
+      if (!currentThreadId) return imNoCurrentThreadText(settings)
+      const stoppedTurnId = await this.stopIncomingImTurn(settings, currentThreadId)
+      return stoppedTurnId
+        ? imStopSucceededText(settings, stoppedTurnId)
+        : imStopNoRunningTurnText(settings)
+    }
+    if (command.kind === 'showSkills') {
+      const result = await this.listIncomingImSkills(settings)
+      return imSkillListText(settings, result.enabled, result.skills)
+    }
+    if (command.kind === 'showMcp') {
+      return imMcpListText(settings, await this.listIncomingImMcpServers(settings))
+    }
+    if (command.kind === 'showGoal') {
+      const currentThreadId = this.currentIncomingImThreadId(input.channel, input.conversation)
+      if (!currentThreadId) return imNoCurrentThreadText(settings)
+      return imGoalText(settings, await this.getIncomingImGoal(settings, currentThreadId))
+    }
+    if (command.kind === 'invalidGoal') return imGoalMissingObjectiveText(settings)
+    if (command.kind === 'setGoal') {
+      const currentThreadId = this.currentIncomingImThreadId(input.channel, input.conversation)
+      if (!currentThreadId) return imNoCurrentThreadText(settings)
+      const existingGoal = await this.getIncomingImGoal(settings, currentThreadId)
+      if (existingGoal) return imGoalAlreadyExistsText(settings, existingGoal)
+      return imGoalChangedText(
+        settings,
+        await this.setIncomingImGoal(settings, currentThreadId, command.objective)
+      )
+    }
+    if (command.kind === 'showThreads') {
+      const currentThreadId = this.currentIncomingImThreadId(input.channel, input.conversation)
+      const threads = await this.listIncomingImThreads(settings, input.channel)
+      return imThreadListText(settings, threads, currentThreadId)
+    }
+    if (command.kind === 'showCurrentThread') {
+      const currentThreadId = this.currentIncomingImThreadId(input.channel, input.conversation)
+      const threads = await this.listIncomingImThreads(settings, input.channel)
+      return imCurrentThreadText(
+        settings,
+        threads.find((thread) => thread.id === currentThreadId),
+        currentThreadId
+      )
+    }
+    if (command.kind === 'switchThread') {
+      const threads = await this.listIncomingImThreads(settings, input.channel)
+      const target = resolveImThreadSwitchTarget(threads, command.target)
+      if (!target) return imThreadSwitchNotFoundText(settings, command.target)
+      const switched = await this.switchIncomingImThread(settings, {
+        channel: input.channel,
+        conversation: input.conversation,
+        remoteSession: input.remoteSession,
+        threadId: target.id
+      })
+      if (!switched) {
+        return imKunErrorText(settings, isChineseLocale(settings)
+          ? '当前消息没有匹配到可保存切换状态的 IM 通道，无法切换会话。'
+          : 'This message did not match an IM channel that can persist thread switching.')
+      }
+      return imThreadSwitchedText(settings, target)
+    }
     if (command.kind === 'showProvider') return imProviderListText(settings, input.channel)
     if (command.kind === 'provider') {
       const provider = findImProvider(settings, command.providerId)
@@ -1140,6 +1715,28 @@ export class ClawRuntime {
       return imNewTopicText(settings)
     }
     return null
+  }
+
+  private async handleIncomingImCommandSafely(
+    settings: AppSettingsV1,
+    input: {
+      text: string
+      channel?: ClawImChannelV1
+      conversation?: ClawImConversationV1
+      remoteSession?: Pick<ClawImRemoteSessionV1, 'chatId' | 'messageId' | 'threadId' | 'senderId' | 'senderName'>
+    }
+  ): Promise<string | null> {
+    try {
+      return await this.handleIncomingImCommand(settings, input)
+    } catch (error) {
+      const message = errorMessage(error)
+      this.deps.logError('claw-im-command', 'IM command failed', {
+        command: input.text.trim().slice(0, 80),
+        channelId: input.channel?.id,
+        message
+      })
+      return imKunErrorText(settings, message || 'IM command failed.')
+    }
   }
 
   private async processIncomingImPrompt(
@@ -1654,7 +2251,7 @@ export class ClawRuntime {
       }
     }
 
-    const commandReply = await this.handleIncomingImCommand(settings, {
+    const commandReply = await this.handleIncomingImCommandSafely(settings, {
       text,
       channel,
       conversation,
@@ -1677,7 +2274,11 @@ export class ClawRuntime {
       return
     }
     if (taskCreation.kind === 'error') {
-      await this.deps.telegramRuntime!.sendMessage(channel.id, remoteSession.chatId, `Failed to create the scheduled task: ${taskCreation.message}`)
+      await this.deps.telegramRuntime!.sendMessage(
+        channel.id,
+        remoteSession.chatId,
+        imKunErrorText(settings, `Failed to create the scheduled task: ${taskCreation.message}`)
+      )
       return
     }
 
@@ -1709,7 +2310,11 @@ export class ClawRuntime {
         chatId: remoteSession.chatId,
         message: result.message
       })
-      await this.deps.telegramRuntime!.sendMessage(channel.id, remoteSession.chatId, `❌ 处理失败：${result.message}`)
+      await this.deps.telegramRuntime!.sendMessage(
+        channel.id,
+        remoteSession.chatId,
+        imKunErrorText(settings, `处理失败：${result.message}`)
+      )
       return
     }
     if (result.completed === false) {
@@ -1797,7 +2402,7 @@ export class ClawRuntime {
       }
     }
 
-    const commandReply = await this.handleIncomingImCommand(settings, {
+    const commandReply = await this.handleIncomingImCommandSafely(settings, {
       text: message.content,
       channel,
       conversation,
@@ -1846,7 +2451,7 @@ export class ClawRuntime {
       await this.sendFeishuMessage(
         bridge,
         message.chatId,
-        { markdown: `Failed to create the scheduled task: ${taskCreation.message}` },
+        { markdown: imKunErrorText(settings, `Failed to create the scheduled task: ${taskCreation.message}`) },
         { replyTo: message.messageId, replyInThread: Boolean(message.threadId) },
         {
           purpose: 'schedule-error',
@@ -1862,7 +2467,7 @@ export class ClawRuntime {
         await this.sendFeishuMessage(
           bridge,
           message.chatId,
-          { markdown: 'Only text messages are supported right now.' },
+          { markdown: imKunErrorText(settings, 'Only text messages are supported right now.') },
           { replyTo: message.messageId, replyInThread: Boolean(message.threadId) },
           {
             purpose: 'unsupported-message',
@@ -2073,7 +2678,7 @@ export class ClawRuntime {
         await this.sendFeishuMessage(
           bridge,
           message.chatId,
-          { markdown: 'Sorry, I could not process your message right now.' },
+          { markdown: imKunErrorText(settings, 'Sorry, I could not process your message right now.') },
           { replyTo: message.messageId, replyInThread: Boolean(message.threadId) },
           {
             purpose: 'processing-error',
@@ -2113,7 +2718,7 @@ export class ClawRuntime {
       : []
     const replyText = result.ok
       ? replyTextForGeneratedFiles(result.text?.trim() || result.message?.trim() || 'Completed.', filesToSend)
-      : (result.message.trim() || 'Sorry, something went wrong while handling your message.')
+      : imKunErrorText(settings, result.message.trim() || 'Sorry, something went wrong while handling your message.')
     const resultThreadId = result.ok ? result.threadId : undefined
     const resultTurnId = result.ok ? result.turnId : undefined
     // The streaming path already delivered the text (either as a live
@@ -2360,16 +2965,16 @@ export class ClawRuntime {
           ok: false,
           code: 'gui_plan_create_retired',
           message:
-            'The /claw/internal/gui-plan/create endpoint is no longer active. Use the Kun create_plan tool.'
+            'Kun: The /claw/internal/gui-plan/create endpoint is no longer active. Use the Kun create_plan tool.'
         })
         return
       }
       if (req.method !== 'POST' || url.pathname !== im.path) {
-        writeJson(res, 404, { ok: false, message: 'Not found.' })
+        writeJson(res, 404, { ok: false, message: 'Kun: Not found.' })
         return
       }
       if (!settings.claw.enabled || !im.enabled) {
-        writeJson(res, 503, { ok: false, message: 'Claw IM webhook is disabled.' })
+        writeJson(res, 503, { ok: false, message: 'Kun: Claw IM webhook is disabled.' })
         return
       }
       if (im.secret) {
@@ -2379,7 +2984,7 @@ export class ClawRuntime {
         const rawHeaderSecret = req.headers['x-kun-secret'] ?? req.headers['x-deepseek-gui-secret']
         const headerSecret = Array.isArray(rawHeaderSecret) ? rawHeaderSecret[0] : rawHeaderSecret
         if (auth !== `Bearer ${im.secret}` && headerSecret !== im.secret) {
-          writeJson(res, 401, { ok: false, message: 'Unauthorized.' })
+          writeJson(res, 401, { ok: false, message: 'Kun: Unauthorized.' })
           return
         }
       }
@@ -2387,12 +2992,12 @@ export class ClawRuntime {
       const body = await readRequestBody(req)
       const payload = parseJsonObject(body)
       if (!payload) {
-        writeJson(res, 400, { ok: false, message: 'Expected a JSON object.' })
+        writeJson(res, 400, { ok: false, message: 'Kun: Expected a JSON object.' })
         return
       }
       const prompt = extractIncomingPrompt(payload)
       if (!prompt) {
-        writeJson(res, 400, { ok: false, message: 'No message text found.' })
+        writeJson(res, 400, { ok: false, message: 'Kun: No message text found.' })
         return
       }
       const sender = extractSenderLabel(payload)
@@ -2436,7 +3041,7 @@ export class ClawRuntime {
           this.welcomeInFlight.delete(channel.id)
         }
       }
-      const commandReply = await this.handleIncomingImCommand(settings, {
+      const commandReply = await this.handleIncomingImCommandSafely(settings, {
         text: prompt,
         channel,
         conversation,
@@ -2458,7 +3063,8 @@ export class ClawRuntime {
         return
       }
       if (taskCreation.kind === 'error') {
-        writeJson(res, 500, { ok: false, message: taskCreation.message })
+        const reply = imKunErrorText(settings, taskCreation.message)
+        writeJson(res, 500, { ok: false, message: reply, reply })
         return
       }
       const result = await this.processIncomingImPrompt(settings, {
@@ -2470,7 +3076,11 @@ export class ClawRuntime {
         remoteSession: remoteSession ?? undefined
       })
       if (!result.ok) {
-        writeJson(res, 500, result)
+        writeJson(res, 500, {
+          ...result,
+          message: imKunErrorText(settings, result.message),
+          reply: imKunErrorText(settings, result.message)
+        })
         return
       }
       if (result.completed === false) {
@@ -2515,7 +3125,7 @@ export class ClawRuntime {
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       this.deps.logError('claw-webhook', 'Claw IM webhook request failed', { message })
-      writeJson(res, 500, { ok: false, message: 'Internal server error.' })
+      writeJson(res, 500, { ok: false, message: 'Kun: Internal server error.' })
     }
   }
 }

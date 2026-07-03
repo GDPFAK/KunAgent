@@ -260,20 +260,23 @@ export function WriteSidebar({
     <SidebarFrame
       title={t('appName')}
       footer={
-        <div className="space-y-1">
-          <SidebarCommandRow
-            icon={<Smartphone className="h-4 w-4" strokeWidth={1.75} />}
-            label={t('claw')}
+        <div className="flex items-center gap-1">
+          <div className="min-w-0 flex-1">
+            <SidebarCommandRow
+              icon={<Settings className="h-4 w-4" strokeWidth={1.75} />}
+              label={t('settings')}
+              onClick={() => onOpenSettings('write')}
+              variant="footer"
+            />
+          </div>
+          <SidebarIconButton
+            title={t('claw')}
+            ariaLabel={t('claw')}
             onClick={onToggleConnectPhone}
             active={connectPhoneSidebarOpen}
-            variant="footer"
-          />
-          <SidebarCommandRow
-            icon={<Settings className="h-4 w-4" strokeWidth={1.75} />}
-            label={t('settings')}
-            onClick={() => onOpenSettings('write')}
-            variant="footer"
-          />
+          >
+            <Smartphone className="h-4 w-4" strokeWidth={1.75} />
+          </SidebarIconButton>
         </div>
       }
     >

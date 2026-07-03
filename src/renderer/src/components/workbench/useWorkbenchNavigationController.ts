@@ -1,4 +1,4 @@
-import { useCallback, useMemo, type Dispatch, type SetStateAction } from 'react'
+import { useCallback, useEffect, useMemo, useRef, type Dispatch, type SetStateAction } from 'react'
 import type { WorkspaceFileTarget } from '@shared/workspace-file'
 import type { NormalizedThread, RuntimeConnectionStatus } from '../../agent/types'
 import { useChatStore } from '../../store/chat-store'
@@ -110,6 +110,12 @@ export function useWorkbenchNavigationController({
   setUseWorktreePool,
   setWriteAssistantOpen
 }: UseWorkbenchNavigationControllerParams): WorkbenchNavigationController {
+  const connectPhoneReturnRouteRef = useRef<ChatState['route']>('chat')
+
+  useEffect(() => {
+    if (route !== 'claw') connectPhoneReturnRouteRef.current = route
+  }, [route])
+
   const sidebarView: WorkbenchSidebarView = useMemo(() => {
     if (route === 'claw' || (route === 'plugins' && pluginHostRoute === 'claw')) return 'claw'
     if (route === 'schedule') return 'schedule'
@@ -218,9 +224,15 @@ export function useWorkbenchNavigationController({
 
   const toggleConnectPhone = useCallback((): void => {
     if (activeSddDraft) dismissActiveSddDraft({ closeAssistant: true })
+    if (route === 'claw') {
+      setConnectPhoneSidebarOpen(false)
+      setRoute(connectPhoneReturnRouteRef.current === 'claw' ? 'chat' : connectPhoneReturnRouteRef.current)
+      return
+    }
+    connectPhoneReturnRouteRef.current = route
     openClaw()
-    setConnectPhoneSidebarOpen((open) => !open)
-  }, [activeSddDraft, dismissActiveSddDraft, openClaw, setConnectPhoneSidebarOpen])
+    setConnectPhoneSidebarOpen(true)
+  }, [activeSddDraft, dismissActiveSddDraft, openClaw, route, setConnectPhoneSidebarOpen, setRoute])
 
   const closeRightPanel = useCallback((): void => {
     if (route === 'write') {

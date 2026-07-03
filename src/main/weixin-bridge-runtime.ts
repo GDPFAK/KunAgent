@@ -914,6 +914,8 @@ async function postToDeepSeekGuiWebhook(message: WeixinMessage, accountId: strin
     signal: AbortSignal.timeout(650_000)
   })
   const data = await readJsonResponse(res)
+  const reply = recordString(data, 'reply') || recordString(data, 'text')
+  if (reply) return data
   if (!res.ok || data.ok === false) {
     throw new Error(recordString(data, 'message') || `Kun webhook HTTP ${res.status}`)
   }
@@ -1258,5 +1260,6 @@ export function stopWeixinBridgeRuntime(): void {
 export const weixinBridgeRuntimeInternals = {
   buildBaseInfo,
   normalizeAccountId,
+  postToDeepSeekGuiWebhook,
   webhookGeneratedFiles
 }
