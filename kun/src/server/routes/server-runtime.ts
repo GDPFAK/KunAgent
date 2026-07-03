@@ -118,6 +118,7 @@ export type ServerRuntime = {
     reviewItemId: string
     target: ReviewTarget
     model?: string
+    providerId?: string
   }): Promise<'completed' | 'failed' | 'aborted'> | void
   runtimeToken: string
   insecure: boolean

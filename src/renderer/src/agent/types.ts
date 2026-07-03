@@ -480,6 +480,7 @@ export interface AgentProvider {
     options?: {
       mode?: string
       model?: string
+      providerId?: string
       reasoningEffort?: string
       displayText?: string
       guiPlan?: {
@@ -500,7 +501,7 @@ export interface AgentProvider {
   reviewThread?(
     threadId: string,
     target: ReviewTarget,
-    options?: { model?: string }
+    options?: { model?: string; providerId?: string }
   ): Promise<{ turnId: string; threadId: string; userMessageItemId?: string; reviewItemId?: string }>
   getRuntimeInfo?(): Promise<CoreRuntimeInfoJson>
   getToolDiagnostics?(): Promise<CoreRuntimeToolDiagnosticsJson>

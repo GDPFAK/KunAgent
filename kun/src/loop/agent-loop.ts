@@ -849,7 +849,9 @@ export class AgentLoop {
     // fall through to kun's native loop below.
     const sdkRuntime = this.opts.sdkRuntime
     if (sdkRuntime) {
-      const providerId = (await this.opts.threadStore.get(threadId))?.providerId
+      const thread = await this.opts.threadStore.get(threadId)
+      const turn = thread?.turns.find((candidate) => candidate.id === turnId)
+      const providerId = turn?.providerId?.trim() || thread?.providerId?.trim()
       if (sdkRuntime.handlesProvider(providerId)) {
         return sdkRuntime.runTurn(threadId, turnId, signal)
       }
@@ -1599,11 +1601,12 @@ export class AgentLoop {
       contextInstructionCount: contextInstructions.length
     })
     const tokenEconomy = normalizeTokenEconomyConfig(this.opts.tokenEconomy)
+    const providerId = turn?.providerId?.trim() || thread?.providerId?.trim()
     const baseRequest: ModelRequest = {
       threadId,
       turnId,
       model,
-      ...(thread?.providerId?.trim() ? { providerId: thread.providerId.trim() } : {}),
+      ...(providerId ? { providerId } : {}),
       // Thread-level systemPrompt (primary-agent persona snapshot) is
       // appended to the runtime base — same augment strategy as child agents
       // (child-agent-executor) — so the agent keeps kun's tool/safety

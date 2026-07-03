@@ -420,6 +420,7 @@ export type CoreTurnJson = {
   status: CoreTurnStatus
   prompt: string
   model?: string
+  providerId?: string
   createdAt: string
   startedAt?: string
   finishedAt?: string

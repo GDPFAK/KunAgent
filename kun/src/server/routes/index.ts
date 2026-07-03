@@ -278,8 +278,8 @@ export function buildRouter(runtime: ServerRuntime): Router {
       runtime.turnService,
       ctx.params.id,
       request,
-      ({ threadId, turnId, reviewItemId }, target, model) => {
-        runtime.runReview?.({ threadId, turnId, reviewItemId, target, model })
+      ({ threadId, turnId, reviewItemId }, target, model, providerId) => {
+        runtime.runReview?.({ threadId, turnId, reviewItemId, target, model, providerId })
       }
     )
   })

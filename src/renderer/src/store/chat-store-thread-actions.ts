@@ -98,7 +98,6 @@ import {
 } from './chat-store-runtime'
 import {
   composerSelectionForThread,
-  ensureRuntimeProviderForSend,
   fallbackComposerProviderIdForSend,
   subscribeThreadEventsWithRecovery
 } from './chat-store-thread-action-helpers'
@@ -853,12 +852,6 @@ export function createThreadActions(
       if (!channel && composerModel) {
         rememberThreadComposerSelection(activeThreadId, composerModel, composerProviderId)
       }
-      await ensureRuntimeProviderForSend({
-        providerId: channel ? undefined : composerProviderId,
-        model: composerModel,
-        set,
-        get
-      })
       const settings = await rendererRuntimeClient.getSettings()
       let workspaceCheckpointId: string | undefined
       const checkpointThread = get().threads.find((thread) => thread.id === activeThreadId)
@@ -906,6 +899,7 @@ export function createThreadActions(
       const { turnId, userMessageItemId } = await p.sendUserMessage(activeThreadId, runtimeText, {
         mode,
         ...(composerModel ? { model: composerModel } : {}),
+        ...(!channel && composerProviderId ? { providerId: composerProviderId } : {}),
         ...(reasoningEffort ? { reasoningEffort } : {}),
         ...(runtimeDisplayText ? { displayText: runtimeDisplayText } : {}),
         ...((queued?.guiPlan ?? overrides?.guiPlan) ? { guiPlan: queued?.guiPlan ?? overrides?.guiPlan } : {}),
@@ -1121,14 +1115,9 @@ export function createThreadActions(
         currentTurnId: null,
         currentTurnUserId: null
       })
-      await ensureRuntimeProviderForSend({
-        providerId: composerProviderId,
-        model: composerModel,
-        set,
-        get
-      })
       const { turnId, userMessageItemId } = await p.reviewThread(activeThreadId, target, {
-        ...(composerModel ? { model: composerModel } : {})
+        ...(composerModel ? { model: composerModel } : {}),
+        ...(composerProviderId ? { providerId: composerProviderId } : {})
       })
       if (userMessageItemId && userModelChip) {
         rememberTurnModel(activeThreadId, userMessageItemId, userModelChip)

@@ -1,11 +1,5 @@
 import type { AgentProvider, NormalizedThread, ThreadEventSink } from '../agent/types'
-import { getProvider } from '../agent/registry'
-import { rendererRuntimeClient } from '../agent/runtime-client'
-import {
-  DEFAULT_MODEL_PROVIDER_ID,
-  getKunRuntimeSettings
-} from '@shared/app-settings'
-import type { ChatState, ChatStoreGet, ChatStoreSet } from './chat-store-types'
+import type { ChatState, ChatStoreGet } from './chat-store-types'
 import {
   composerModelSelectable,
   providerIdForComposerModel,
@@ -15,31 +9,6 @@ import {
 
 export function fallbackComposerProviderIdForSend(state: ChatState): string {
   return state.route === 'claw' ? '' : state.composerProviderId.trim()
-}
-
-export async function ensureRuntimeProviderForSend(input: {
-  providerId?: string
-  model?: string
-  set: ChatStoreSet
-  get: ChatStoreGet
-}): Promise<void> {
-  const providerId = input.providerId?.trim()
-  const model = input.model?.trim()
-  if (!providerId || !model || model.toLowerCase() === 'auto') return
-  const settings = await rendererRuntimeClient.getSettings({ forceRefresh: true })
-  const runtime = getKunRuntimeSettings(settings)
-  const activeProviderId = runtime.providerId?.trim() || DEFAULT_MODEL_PROVIDER_ID
-  if (activeProviderId === providerId) return
-  input.set({ runtimeConnection: 'checking', error: null, runtimeErrorDetail: null })
-  try {
-    await rendererRuntimeClient.setSettings({ agents: { kun: { providerId, model } } })
-    await getProvider().connect()
-    input.set({ runtimeConnection: 'ready', error: null, runtimeErrorDetail: null })
-    void input.get().loadComposerModels()
-  } catch (error) {
-    input.set({ runtimeConnection: 'offline' })
-    throw error
-  }
 }
 
 export function composerSelectionForThread(

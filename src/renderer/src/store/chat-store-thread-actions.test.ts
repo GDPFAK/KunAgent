@@ -153,7 +153,7 @@ describe('chat-store-thread-actions queued messages', () => {
     })
   })
 
-  it('applies the selected composer provider before sending a turn', async () => {
+  it('sends the selected composer provider as a turn override without changing global settings', async () => {
     const provider = {
       connect: vi.fn(async () => undefined),
       sendUserMessage: vi.fn(async () => ({
@@ -187,15 +187,13 @@ describe('chat-store-thread-actions queued messages', () => {
 
     await expect(actions.sendMessage('hello', 'agent')).resolves.toBe(true)
 
-    expect(setSettings).toHaveBeenCalledWith({
-      agents: { kun: { providerId: 'xiaomi-token-plan', model: 'mimo-v2.5' } }
-    })
+    expect(setSettings).not.toHaveBeenCalled()
     expect(restartRuntime).not.toHaveBeenCalled()
-    expect(provider.connect).toHaveBeenCalledTimes(1)
+    expect(provider.connect).not.toHaveBeenCalled()
     expect(provider.sendUserMessage).toHaveBeenCalledWith(
       'thr_existing',
       'hello',
-      expect.objectContaining({ model: 'mimo-v2.5' })
+      expect.objectContaining({ model: 'mimo-v2.5', providerId: 'xiaomi-token-plan' })
     )
   })
 
@@ -233,7 +231,7 @@ describe('chat-store-thread-actions queued messages', () => {
     )
   })
 
-  it('applies an override provider before sending from the write route', async () => {
+  it('sends an override provider from the write route without changing global settings', async () => {
     const provider = {
       connect: vi.fn(async () => undefined),
       sendUserMessage: vi.fn(async () => ({
@@ -270,15 +268,13 @@ describe('chat-store-thread-actions queued messages', () => {
       providerId: 'minimax-token-plan'
     })).resolves.toBe(true)
 
-    expect(setSettings).toHaveBeenCalledWith({
-      agents: { kun: { providerId: 'minimax-token-plan', model: 'MiniMax-M3' } }
-    })
+    expect(setSettings).not.toHaveBeenCalled()
     expect(restartRuntime).not.toHaveBeenCalled()
-    expect(provider.connect).toHaveBeenCalledTimes(1)
+    expect(provider.connect).not.toHaveBeenCalled()
     expect(provider.sendUserMessage).toHaveBeenCalledWith(
       'thr_existing',
       'make a prototype',
-      expect.objectContaining({ model: 'MiniMax-M3' })
+      expect.objectContaining({ model: 'MiniMax-M3', providerId: 'minimax-token-plan' })
     )
   })
 })

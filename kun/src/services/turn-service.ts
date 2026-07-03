@@ -82,6 +82,7 @@ export class TurnService {
       threadId: input.threadId,
       prompt: input.request.prompt,
       model: input.request.model,
+      providerId: input.request.providerId,
       reasoningEffort: input.request.reasoningEffort,
       attachmentIds: input.request.attachmentIds ?? [],
       guiPlan: input.request.guiPlan,

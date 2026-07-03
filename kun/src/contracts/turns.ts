@@ -70,6 +70,7 @@ export const TurnSchema = z.object({
   status: TurnStatus,
   prompt: z.string(),
   model: z.string().optional(),
+  providerId: z.string().optional(),
   reasoningEffort: TurnReasoningEffortSchema.optional(),
   /** Steered text queued by the user mid-turn. Cleared on completion. */
   steering: z.array(z.string()).default([]),
@@ -116,6 +117,7 @@ export const StartTurnRequest = z.object({
   displayText: z.string().optional(),
   messageSource: UserMessageSource.optional(),
   model: z.string().optional(),
+  providerId: z.string().optional(),
   reasoningEffort: TurnReasoningEffortSchema.optional(),
   approvalPolicy: ApprovalPolicySchema.optional(),
   sandboxMode: SandboxModeSchema.optional(),
