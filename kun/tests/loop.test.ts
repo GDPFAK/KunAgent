@@ -508,6 +508,13 @@ describe('AgentLoop', () => {
 
   it('keeps running past the legacy eight-step ceiling until the model stops', async () => {
     let calls = 0
+    const noop = LocalToolHost.defineTool({
+      name: 'noop',
+      description: 'Complete without side effects.',
+      inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+      policy: 'auto',
+      execute: async () => ({ output: { ok: true } })
+    })
     const h = makeHarness(
       {
         provider: 'long-runner',
@@ -517,9 +524,9 @@ describe('AgentLoop', () => {
           if (calls <= 9) {
             yield {
               kind: 'tool_call_complete',
-              callId: `call_ls_${calls}`,
-              toolName: 'ls',
-              arguments: { path: '.' }
+              callId: `call_noop_${calls}`,
+              toolName: 'noop',
+              arguments: {}
             }
             yield { kind: 'completed', stopReason: 'tool_calls' }
             return
@@ -528,7 +535,7 @@ describe('AgentLoop', () => {
           yield { kind: 'completed', stopReason: 'stop' }
         }
       },
-      { tools: buildDefaultLocalTools(), toolStorm: { enabled: false } }
+      { tools: [noop], toolStorm: { enabled: false } }
     )
     await bootstrapThread(h)
 
