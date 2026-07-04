@@ -39,8 +39,8 @@ async function resolveImAttachmentPath(
     realpath(root),
     realpath(lexicalPath)
   ])
-  const relativePath = relative(realRoot, realFile)
-  if (relativePath === '..' || relativePath.startsWith(`..${sep}`) || isAbsolute(relativePath)) {
+  const nativeRelativePath = relative(realRoot, realFile)
+  if (nativeRelativePath === '..' || nativeRelativePath.startsWith(`..${sep}`) || isAbsolute(nativeRelativePath)) {
     throw new Error(`path escapes the workspace root: ${inputPath}`)
   }
   const fileStat = await stat(realFile)
@@ -52,7 +52,7 @@ async function resolveImAttachmentPath(
   }
   return {
     absolutePath: realFile,
-    relativePath,
+    relativePath: nativeRelativePath.replaceAll(sep, '/'),
     fileName: basename(realFile),
     bytes: fileStat.size
   }
