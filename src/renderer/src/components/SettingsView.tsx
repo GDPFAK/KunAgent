@@ -794,8 +794,12 @@ export function SettingsView(): ReactElement {
   }
 
   const flushPendingSave = async (): Promise<void> => {
+    // 先取待保存快照再清空，避免先清空后读到的form还是旧值导致修改丢失（#601/#602）。
+    const snapshot = pendingSnapshotRef.current
     pendingSnapshotRef.current = null
-    if (!form || !hasValidPort(form)) return
+
+    const toSave = snapshot ?? form
+    if (!toSave || !hasValidPort(toSave)) return
     draftVersion.current += 1
     const version = draftVersion.current
 
@@ -808,7 +812,11 @@ export function SettingsView(): ReactElement {
       statusTimer.current = null
     }
 
-    await persistSettings(form, version)
+    if (snapshot) {
+      // 如果快照存在，先同步本地form避免UI回退后显示旧值
+      setForm(snapshot)
+    }
+    await persistSettings(toSave, version)
   }
 
   // Recomputed every render so the unmount cleanup always sees current values.
@@ -1072,6 +1080,9 @@ export function SettingsView(): ReactElement {
     setShowApiKey,
     showRuntimeToken,
     setShowRuntimeToken,
+    saveStatus,
+    saveError,
+    flushPendingSave: () => void flushPendingSave(),
     portError,
     selectControlClass,
     openOnboardingPreview,

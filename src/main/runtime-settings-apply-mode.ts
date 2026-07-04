@@ -2,7 +2,8 @@ import type { AppSettingsV1 } from '../shared/app-settings-types'
 import {
   getKunRuntimeSettings,
   getModelProviderProfile,
-  resolveKunRuntimeSettings
+  resolveKunRuntimeSettings,
+  resolveModelProviderProxyUrl
 } from '../shared/app-settings'
 import { clawScheduleMcpSettingsChanged } from './claw-schedule-mcp-config'
 
@@ -20,6 +21,10 @@ export function kunRuntimeConfigChanged(prev: AppSettingsV1, next: AppSettingsV1
   for (const key of keys) {
     if (!stableSettingsValueEqual(a[key], b[key])) return true
   }
+  // Proxy URL 不在 KunRuntimeSettingsV1 中,但在进程启动时通过 CLI 参数
+  // --model-proxy-url 传入,热更新时也通过 config apply body 下发。
+  // 单独比较确保代理变更触发 runtime 配置更新。
+  if (resolveModelProviderProxyUrl(prev) !== resolveModelProviderProxyUrl(next)) return true
   return false
 }
 

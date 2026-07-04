@@ -54,6 +54,7 @@ import {
   Music2,
   PlugZap,
   Plus,
+  Save,
   Trash2,
   X
 } from 'lucide-react'
@@ -2121,6 +2122,39 @@ export function ProvidersSettingsSection({ ctx }: { ctx: Record<string, any> }):
           </div>
         }
       />
+      <div className="mt-2 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-ds-border-muted bg-ds-main/20 p-3">
+        <div className="flex items-center gap-2">
+          {ctx.saveStatus === 'saving' ? (
+            <Loader2 className="h-4 w-4 animate-spin text-ds-muted" strokeWidth={1.9} />
+          ) : ctx.saveStatus === 'saved' ? (
+            <svg className="h-4 w-4 text-emerald-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+              <path d="M20 6L9 17l-5-5" />
+            </svg>
+          ) : ctx.saveStatus === 'error' ? (
+            <span className="h-4 w-4 text-red-500 text-[14px] leading-4">!</span>
+          ) : null}
+          <span className={`text-[12.5px] ${
+            ctx.saveStatus === 'error' ? 'text-red-600 dark:text-red-300' : 'text-ds-muted'
+          }`}>
+            {ctx.saveStatus === 'saving'
+              ? t('saving')
+              : ctx.saveStatus === 'saved'
+                ? t('saved')
+                : ctx.saveStatus === 'error'
+                  ? `${t('saveFailed')}${ctx.saveError ? `: ${ctx.saveError}` : ''}`
+                  : t('saveSettingsHint')}
+          </span>
+        </div>
+        <button
+          type="button"
+          disabled={ctx.saveStatus === 'saving'}
+          onClick={() => void ctx.flushPendingSave?.()}
+          className="inline-flex h-8 items-center gap-1.5 rounded-full bg-accent px-3.5 text-[12px] font-semibold text-white shadow-sm transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          <Save className="h-3.5 w-3.5" strokeWidth={1.9} />
+          {t('saveSettings')}
+        </button>
+      </div>
     </SettingsCard>
     {pendingImport && pendingImportProvider ? (
       <ProviderModelImportDialog
