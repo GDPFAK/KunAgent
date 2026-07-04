@@ -3087,6 +3087,67 @@ pre {
   flex: 0 0 auto;
 }
 
+.ds-side-rail-button {
+  position: relative;
+}
+
+.ds-side-rail-button::before,
+.ds-side-rail-button::after {
+  pointer-events: none;
+  position: absolute;
+  right: calc(100% + 8px);
+  top: 50%;
+  z-index: 70;
+  opacity: 0;
+  transform: translateY(-50%) translateX(4px);
+  transition:
+    opacity 120ms ease,
+    transform 120ms ease;
+}
+
+.ds-side-rail-button::before {
+  content: '';
+  border: 5px solid transparent;
+  border-left-color: rgba(15, 23, 42, 0.9);
+}
+
+.ds-side-rail-button::after {
+  content: attr(data-tooltip);
+  margin-right: 9px;
+  max-width: min(220px, calc(100vw - 6rem));
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.94);
+  box-shadow: 0 10px 28px rgba(15, 23, 42, 0.22);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1;
+  padding: 7px 9px;
+}
+
+.ds-side-rail-button:hover::before,
+.ds-side-rail-button:hover::after,
+.ds-side-rail-button:focus-visible::before,
+.ds-side-rail-button:focus-visible::after {
+  opacity: 1;
+  transform: translateY(-50%) translateX(0);
+}
+
+[data-theme='dark'] .ds-side-rail-button::before {
+  border-left-color: rgba(248, 250, 252, 0.92);
+}
+
+[data-theme='dark'] .ds-side-rail-button::after {
+  border-color: rgba(15, 23, 42, 0.14);
+  background: rgba(248, 250, 252, 0.95);
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.4);
+  color: #111827;
+}
+
 .session-header-compact-meta {
   overflow: hidden;
 }
