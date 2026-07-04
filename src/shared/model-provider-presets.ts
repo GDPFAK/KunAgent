@@ -420,14 +420,12 @@ export const MODEL_PROVIDER_PRESETS: ModelProviderPreset[] = [
     baseUrl: 'https://api.xiaomimimo.com/v1',
     endpointFormat: 'chat_completions',
     models: [
-      'mimo-v2.5-pro-ultraspeed',
       'mimo-v2.5-pro',
       'mimo-v2.5',
       'mimo-v2-pro',
       'mimo-v2-omni'
     ],
     modelProfiles: {
-      'mimo-v2.5-pro-ultraspeed': xiaomiTextChatProfile(1_000_000),
       'mimo-v2.5-pro': xiaomiTextChatProfile(1_000_000),
       'mimo-v2.5': xiaomiVisionChatProfile(1_000_000),
       'mimo-v2-pro': xiaomiTextChatProfile(1_000_000),
@@ -452,14 +450,12 @@ export const MODEL_PROVIDER_PRESETS: ModelProviderPreset[] = [
       ],
       endpointFormat: 'chat_completions',
       models: [
-        'mimo-v2.5-pro-ultraspeed',
         'mimo-v2.5-pro',
         'mimo-v2.5',
         'mimo-v2-pro',
         'mimo-v2-omni'
       ],
       modelProfiles: {
-        'mimo-v2.5-pro-ultraspeed': xiaomiTextChatProfile(1_000_000),
         'mimo-v2.5-pro': xiaomiTextChatProfile(1_000_000),
         'mimo-v2.5': xiaomiVisionChatProfile(1_000_000),
         'mimo-v2-pro': xiaomiTextChatProfile(1_000_000),

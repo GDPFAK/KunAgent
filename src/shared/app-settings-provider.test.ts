@@ -295,8 +295,7 @@ describe('model provider settings', () => {
         })
       }
     })
-    expect(xiaomi && modelProviderPresetProfile(xiaomi).models.slice(0, 3)).toEqual([
-      'mimo-v2.5-pro-ultraspeed',
+    expect(xiaomi && modelProviderPresetProfile(xiaomi).models.slice(0, 2)).toEqual([
       'mimo-v2.5-pro',
       'mimo-v2.5'
     ])

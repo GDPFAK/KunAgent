@@ -283,6 +283,41 @@ describe('chat-store app actions composer model loading', () => {
     expect(state.composerProviderId).toBe('')
   })
 
+  it('falls back to the first configured provider model when a thread selection was removed', async () => {
+    localStorage.setItem(
+      THREAD_COMPOSER_SELECTION_STORAGE_KEY,
+      JSON.stringify({ 'thread-a': { model: 'deleted-model', providerId: 'old-provider' } })
+    )
+    const { actions, state } = buildHarness({
+      ok: true,
+      modelIds: ['MiniMax-M3', 'MiniMax-M2'],
+      defaultModelId: 'deepseek-v4-pro',
+      modelGroups: [{
+        providerId: 'minimax',
+        label: 'MiniMax',
+        modelIds: ['MiniMax-M3', 'MiniMax-M2']
+      }]
+    })
+    state.activeThreadId = 'thread-a'
+    state.threads = [{
+      id: 'thread-a',
+      title: 'Thread A',
+      workspace: '/tmp/project',
+      model: 'deleted-model',
+      status: 'idle',
+      mode: 'agent',
+      updatedAt: '2026-06-01T00:00:00.000Z'
+    }]
+
+    await actions.loadComposerModels()
+
+    expect(state.composerModel).toBe('MiniMax-M3')
+    expect(state.composerProviderId).toBe('minimax')
+    expect(JSON.parse(localStorage.getItem(THREAD_COMPOSER_SELECTION_STORAGE_KEY) ?? '{}')).toEqual({
+      'thread-a': { model: 'MiniMax-M3', providerId: 'minimax' }
+    })
+  })
+
   it('blocks switching a chat with image attachments from vision to text-only', () => {
     const { actions, state } = buildHarness({
       ok: true,
