@@ -1,6 +1,7 @@
 import { mkdir } from 'node:fs/promises'
 import { randomBytes } from 'node:crypto'
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
+import { isAbsolute, relative, resolve, sep } from 'node:path'
 import { LocalToolHost, type LocalTool } from './local-tool-host.js'
 import { OutputAccumulator } from './output-accumulator.js'
 import { DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, formatSize } from './truncate.js'
@@ -20,6 +21,7 @@ import {
   withToolBoundary,
   workspaceRoot
 } from './builtin-tool-utils.js'
+import { effectiveSandboxMode } from './sandbox-policy.js'
 
 const DEFAULT_BASH_YIELD_SECONDS = 10
 const MAX_BASH_YIELD_SECONDS = 60
@@ -79,12 +81,25 @@ type BashPayload = {
 
 const bashSessions = new Map<string, BashSession>()
 
+/**
+ * 验证 shell CWD 在工作区边界内，防止通过 cd ../ 或绝对路径逃逸沙箱。
+ */
+function validateCwdWithinWorkspace(cwd: string, workspace: string, sandboxMode: string): boolean {
+  if (sandboxMode === 'danger-full-access') return true
+  const resolvedCwd = resolve(cwd)
+  const resolvedWorkspace = resolve(workspace)
+  const rel = relative(resolvedWorkspace, resolvedCwd)
+  return rel === '' || (rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel))
+}
+
 async function bashExecute(
   command: string,
   cwd: string,
   signal: AbortSignal,
   timeoutSeconds: number,
   outputLimits: { maxLines: number; maxBytes: number },
+  workspace: string,
+  sandboxMode: string,
   onUpdate?: (update: { output: unknown; isError?: boolean }) => Promise<void> | void,
   execOperation?: (
     command: string,
@@ -98,6 +113,10 @@ async function bashExecute(
   truncated: TextSlice
   fullOutputPath?: string
 }> {
+  // 安全校验：验证 CWD 在工作区边界内
+  if (!validateCwdWithinWorkspace(cwd, workspace, sandboxMode)) {
+    throw new Error(`Shell CWD escapes workspace boundary: ${cwd} (workspace: ${workspace})`)
+  }
   await mkdir(cwd, { recursive: true })
   const shellRuntime = shellRuntimeInfo()
   let resultShell = shellRuntime.name
@@ -717,6 +736,7 @@ export function createBashLocalTool(options: BashLocalToolOptions = {}): LocalTo
       )
       const background = args.background === true
       const cwd = workspaceRoot(context.workspace)
+      const sandboxMode = effectiveSandboxMode(context)
       try {
         if (background) {
           if (bashOps?.exec) {
@@ -751,6 +771,8 @@ export function createBashLocalTool(options: BashLocalToolOptions = {}): LocalTo
           context.abortSignal,
           timeout,
           outputLimits,
+          context.workspace,
+          sandboxMode,
           onUpdate,
           bashOps?.exec
         )

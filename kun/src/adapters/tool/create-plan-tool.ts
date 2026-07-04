@@ -291,7 +291,7 @@ export async function executeCreatePlanTool(
     ? normalize(join(resolvedWorkspace, resolved.relativePath))
     : normalize(join(planDirectory(resolvedWorkspace), basename(resolved.relativePath)))
   assertWithinWorkspace(absolutePath, resolvedWorkspace)
-  const writePermission = canWritePath(absolutePath, context)
+  const writePermission = await canWritePath(absolutePath, context)
   if (!writePermission.ok) {
     return {
       output: {

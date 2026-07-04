@@ -324,7 +324,7 @@ export class OutputAccumulator {
   private ensureTempFile(): void {
     if (this.tempFilePath) return
     this.tempFilePath = defaultTempFilePath(this.tempFilePrefix)
-    this.tempFileStream = createWriteStream(this.tempFilePath)
+    this.tempFileStream = createWriteStream(this.tempFilePath, { mode: 0o600 })
     for (const chunk of this.rawChunks) {
       this.tempFileStream.write(chunk)
     }

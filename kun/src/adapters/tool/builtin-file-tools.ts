@@ -61,7 +61,7 @@ export function createWriteLocalTool(_options: WriteLocalToolOptions = {}): Loca
         return { output: { error: 'path and content are required' }, isError: true }
       }
       const { absolutePath, relativePath } = await resolveWorkspacePath(rawPath, context)
-      assertCanWritePath(absolutePath, context)
+      await assertCanWritePath(absolutePath, context)
       return withFileMutationQueue(absolutePath, async () => {
         await mkdirOp(dirname(absolutePath))
         await writeFileOp(absolutePath, content)
@@ -119,7 +119,7 @@ export function createEditLocalTool(_options: EditLocalToolOptions = {}): LocalT
         return { output: { error: 'path and at least one edit are required' }, isError: true }
       }
       const { absolutePath, relativePath } = await resolveWorkspacePath(rawPath, context)
-      assertCanWritePath(absolutePath, context)
+      await assertCanWritePath(absolutePath, context)
       return withFileMutationQueue(absolutePath, async () => {
         const rawSource = await readFileOp(absolutePath)
         const { bom, text: source } = stripBom(rawSource)
