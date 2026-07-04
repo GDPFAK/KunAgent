@@ -263,6 +263,12 @@ function firstProviderModel(settings: AppSettingsV1, providerId: string): string
   return provider ? providerTextModels(settings, provider)[0] ?? DEFAULT_CLAW_MODEL : DEFAULT_CLAW_MODEL
 }
 
+function validProviderModel(settings: AppSettingsV1, provider: ModelProviderProfileV1, model: string): string | undefined {
+  const trimmed = model.trim()
+  if (!trimmed || trimmed === DEFAULT_CLAW_MODEL) return undefined
+  return providerTextModels(settings, provider).find((item) => item === trimmed)
+}
+
 function settingsWithImModelProvider(
   settings: AppSettingsV1,
   providerId: string | undefined,
@@ -270,8 +276,12 @@ function settingsWithImModelProvider(
 ): AppSettingsV1 {
   const trimmedProviderId = providerId?.trim()
   if (!trimmedProviderId) return settings
-  const resolvedModel = model.trim() && model.trim() !== DEFAULT_CLAW_MODEL
-    ? model.trim()
+  const provider = findImProvider(settings, trimmedProviderId)
+  const requestedModel = model.trim()
+  const resolvedModel = requestedModel && requestedModel !== DEFAULT_CLAW_MODEL
+    ? provider
+      ? validProviderModel(settings, provider, requestedModel) ?? firstProviderModel(settings, trimmedProviderId)
+      : requestedModel
     : firstProviderModel(settings, trimmedProviderId)
   return {
     ...settings,
@@ -338,8 +348,9 @@ function imModelListText(
   channel?: ClawImChannelV1,
   conversation?: ClawImConversationV1
 ): string {
-  const currentProviderId = currentImProvider(settings, channel, conversation)?.id
-  const currentModel = currentImModel(settings, channel, conversation)
+  const current = currentImModelResolution(settings, channel, conversation)
+  const currentProviderId = current.provider.id
+  const currentModel = current.model
   const rows = listImModelOptions(settings).map((option, index) => {
     const { provider, model } = option
     const marker = provider.id === currentProviderId && model === currentModel ? '*' : '-'
@@ -402,9 +413,7 @@ function currentImModelResolution(
 ): ImModelResolution {
   const provider = currentImProvider(settings, channel, conversation)
   const requestedModel = currentImModel(settings, channel, conversation)
-  const model = requestedModel.trim() && requestedModel.trim() !== DEFAULT_CLAW_MODEL
-    ? requestedModel.trim()
-    : firstProviderModel(settings, provider.id)
+  const model = validProviderModel(settings, provider, requestedModel) ?? firstProviderModel(settings, provider.id)
   return { provider, model }
 }
 
@@ -1780,6 +1789,7 @@ export class ClawRuntime {
         ? currentChannel.conversations.find((item) => item.id === input.conversation?.id)
         : undefined
     const now = new Date().toISOString()
+    const modelResolution = currentImModelResolution(settings, currentChannel, input.conversation)
     const nextConversation: ClawImConversationV1 | null = session && !currentConversation
       ? {
           id: randomUUID(),
@@ -1790,8 +1800,8 @@ export class ClawRuntime {
           senderName: session.senderName,
           localThreadId: input.threadId,
           workspaceRoot: this.resolveConversationWorkspaceRoot(settings, currentChannel, session),
-          providerId: currentImProviderId(settings, currentChannel, input.conversation),
-          model: currentImModel(settings, currentChannel, input.conversation),
+          providerId: modelResolution.provider.id,
+          model: modelResolution.model,
           createdAt: now,
           updatedAt: now
         }

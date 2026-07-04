@@ -1306,6 +1306,7 @@
   "clawSessionCleared": "Claw 会话已清空。",
   "clawModelChanged": "Claw 模型已切换到 {{model}}。",
   "clawModelCurrent": "当前 Claw 模型是 `{{model}}`。",
+  "clawModelNumberOnlyInIm": "按序号切换模型只在 IM 内可用。请在 IM 里发送 `/list-model`，再发送 `/model <序号>`。",
   "clawNoActiveIm": "请先添加或选择一个飞书 / Lark 连接，再发送 Claw 消息。",
   "clawModelCommandHint": "可使用 /model auto、/model pro 或 /model flash。",
   "clawNewSessionStarted": "已清空当前飞书 / Lark 连接的 Claw 对话。",

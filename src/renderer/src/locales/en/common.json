@@ -1306,6 +1306,7 @@
   "clawSessionCleared": "Claw session cleared.",
   "clawModelChanged": "Claw model switched to {{model}}.",
   "clawModelCurrent": "Current Claw model: `{{model}}`.",
+  "clawModelNumberOnlyInIm": "Numbered model switching is only available inside IM. Use `/list-model` in IM, then `/model <number>`.",
   "clawNoActiveIm": "Add or select a Feishu / Lark connection before sending a Claw message.",
   "clawModelCommandHint": "Use /model auto, /model pro, or /model flash.",
   "clawNewSessionStarted": "Cleared the current Claw conversation for this Feishu / Lark connection.",

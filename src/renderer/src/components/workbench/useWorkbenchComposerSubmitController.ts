@@ -418,6 +418,12 @@ export function useWorkbenchComposerSubmitController({
             return
           }
           setInput('')
+          if (/^\d+$/.test(command.model.trim())) {
+            const replyText = t('clawModelNumberOnlyInIm')
+            appendLocalClawTurn(v, replyText)
+            void mirrorClawCommand(v, replyText)
+            return
+          }
           void (async () => {
             await setClawChannelModel(activeClawChannelId, command.model)
             const replyText = t('clawModelChanged', { model: command.model })

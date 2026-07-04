@@ -500,7 +500,7 @@ describe('ClawRuntime', () => {
         settingsArg: AppSettingsV1,
         input: { text: string }
       ) => Promise<string | null>
-    }).handleIncomingImCommandSafely(settings, { text: '/threads' })
+    }).handleIncomingImCommandSafely(settings, { text: '/list-threads' })
 
     expect(reply).toBe('[Kun] runtime is offline')
   })
@@ -2126,6 +2126,91 @@ describe('ClawRuntime', () => {
     expect(send).toHaveBeenCalledWith(
       'oc_chat_a',
       { markdown: 'hello from minimax' },
+      { replyTo: 'om_inbound', replyInThread: false }
+    )
+  })
+
+  it('falls back to the first provider model when the stored IM model was removed', async () => {
+    const settings = buildSettings()
+    settings.claw.im.enabled = true
+    settings.claw.im.responseTimeoutMs = 2_000
+    settings.provider.providers = [
+      ...settings.provider.providers,
+      buildModelProvider({ models: ['MiniMax-M2.7'] })
+    ]
+    settings.claw.channels = [buildChannel({
+      providerId: 'minimax',
+      model: 'MiniMax-M3',
+      threadId: 'thr_minimax',
+      conversations: [buildConversation({ localThreadId: 'thr_minimax' })]
+    })]
+    const { store } = mutableSettingsStore(settings)
+    const runtimeRequest = vi.fn(async (requestSettings: AppSettingsV1, path, init) => {
+      expect(requestSettings.agents.kun.providerId).toBe('minimax')
+      expect(requestSettings.agents.kun.model).toBe('MiniMax-M2.7')
+      if (path === '/v1/threads/thr_minimax/turns' && init?.method === 'POST') {
+        const body = JSON.parse(init?.body ?? '{}') as { model?: string }
+        expect(body.model).toBe('MiniMax-M2.7')
+        return { ok: true, status: 202, body: JSON.stringify({ threadId: 'thr_minimax', turnId: 'turn_minimax' }) }
+      }
+      if (path === '/v1/threads/thr_minimax' && init?.method === 'GET') {
+        return {
+          ok: true,
+          status: 200,
+          body: JSON.stringify({
+            id: 'thr_minimax',
+            status: 'idle',
+            turns: [
+              {
+                id: 'turn_minimax',
+                status: 'completed',
+                items: [{ kind: 'assistant_text', text: 'hello from fallback model' }]
+              }
+            ]
+          })
+        }
+      }
+      throw new Error(`unexpected path ${path}`)
+    })
+    const send = vi.fn(async () => ({ messageId: 'om_sent' }))
+    const runtime = createClawRuntime({
+      store: store as never,
+      runtimeRequest: runtimeRequest as never,
+      logError: () => undefined
+    })
+    ;(runtime as unknown as { feishuChannels: Map<string, { send: typeof send }> })
+      .feishuChannels
+      .set('channel_1', { send })
+
+    await (runtime as unknown as {
+      handleFeishuMessage: (channelId: string, message: {
+        chatId: string
+        messageId: string
+        senderId: string
+        senderName?: string
+        chatType: 'p2p' | 'group'
+        mentionedBot: boolean
+        mentionAll: boolean
+        content: string
+        rawContentType: string
+        mentions: unknown[]
+      }) => Promise<void>
+    }).handleFeishuMessage('channel_1', {
+      chatId: 'oc_chat_a',
+      messageId: 'om_inbound',
+      senderId: 'ou_1',
+      senderName: 'Alice',
+      chatType: 'p2p',
+      mentionedBot: false,
+      mentionAll: false,
+      content: 'hello',
+      rawContentType: 'text',
+      mentions: []
+    })
+
+    expect(send).toHaveBeenCalledWith(
+      'oc_chat_a',
+      { markdown: 'hello from fallback model' },
       { replyTo: 'om_inbound', replyInThread: false }
     )
   })
