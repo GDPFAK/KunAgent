@@ -115,8 +115,10 @@ export function FloatingComposerModelPicker({
   const pickerRef = useRef<HTMLElement | null>(null)
   const menuRef = useRef<HTMLDivElement | null>(null)
   const submenuRef = useRef<HTMLDivElement | null>(null)
+  const reasoningRowRef = useRef<HTMLButtonElement | null>(null)
   const providerRowRefs = useRef<Map<string, HTMLButtonElement>>(new Map())
   const [menuOpen, setMenuOpen] = useState(false)
+  const [reasoningPanelOpen, setReasoningPanelOpen] = useState(false)
   const [activeProviderId, setActiveProviderId] = useState<string | null>(null)
   const [modelFilter, setModelFilter] = useState('')
   const [menuPlacement, setMenuPlacement] = useState<FloatingMenuPlacement | null>(null)
@@ -200,6 +202,7 @@ export function FloatingComposerModelPicker({
     if (!menuOpen) {
       setMenuPlacement(null)
       setSubmenuPlacement(null)
+      setReasoningPanelOpen(false)
       setModelFilter('')
       return
     }
@@ -231,6 +234,7 @@ export function FloatingComposerModelPicker({
   useEffect(() => {
     if (!menuOpen) {
       setActiveProviderId(null)
+      setReasoningPanelOpen(false)
       return
     }
     if (providerMenuGroups.length === 0) {
@@ -244,13 +248,17 @@ export function FloatingComposerModelPicker({
   }, [menuOpen, providerMenuGroups])
 
   useEffect(() => {
-    if (!menuOpen || !activeProviderGroup) {
+    if (!menuOpen || (!reasoningPanelOpen && !activeProviderGroup)) {
       setSubmenuPlacement(null)
       return
     }
 
     const updatePlacement = (): void => {
-      const row = providerRowRefs.current.get(activeProviderGroup.providerId)
+      const row = reasoningPanelOpen
+        ? reasoningRowRef.current
+        : activeProviderGroup
+          ? providerRowRefs.current.get(activeProviderGroup.providerId)
+          : null
       if (!row) return
 
       setSubmenuPlacement(
@@ -258,7 +266,9 @@ export function FloatingComposerModelPicker({
           anchorRect: row.getBoundingClientRect(),
           submenuHeight:
             submenuRef.current?.offsetHeight
-            || estimatedModelSubmenuHeight(activeProviderModelIds.length),
+            || (reasoningPanelOpen
+              ? estimatedReasoningSubmenuHeight(reasoningOptions.length)
+              : estimatedModelSubmenuHeight(activeProviderModelIds.length)),
           viewportHeight: window.innerHeight,
           viewportWidth: window.innerWidth,
           coordinateScale: currentBodyZoom()
@@ -276,7 +286,7 @@ export function FloatingComposerModelPicker({
       window.removeEventListener('resize', updatePlacement)
       window.removeEventListener('scroll', updatePlacement, true)
     }
-  }, [activeProviderGroup, activeProviderModelIds.length, menuOpen])
+  }, [activeProviderGroup, activeProviderModelIds.length, menuOpen, reasoningOptions.length, reasoningPanelOpen])
 
   const menuStyle: CSSProperties = menuPlacement
     ? {
@@ -320,22 +330,24 @@ export function FloatingComposerModelPicker({
         >
           {reasoningEnabled && !needsProviderSetup ? (
             <>
-              <MenuSectionTitle icon={<Brain className="h-3.5 w-3.5" strokeWidth={1.9} />}>
-                {t('composerReasoning')}
-              </MenuSectionTitle>
-              <div className="flex flex-col gap-1">
-                {reasoningOptions.map((option) => (
-                  <PickerRow
-                    key={option.id}
-                    selected={currentReasoning === option.id}
-                    title={t(option.labelKey)}
-                    onClick={() => {
-                      onComposerReasoningEffortChange?.(option.id)
-                      setMenuOpen(false)
-                    }}
-                  />
-                ))}
-              </div>
+              <SubmenuRow
+                refNode={(node) => {
+                  reasoningRowRef.current = node
+                }}
+                active={reasoningPanelOpen}
+                selected={false}
+                icon={<Brain className="h-4 w-4 shrink-0 text-ds-faint" strokeWidth={1.9} />}
+                title={t('composerReasoning')}
+                subtitle={currentReasoningLabel}
+                onClick={() => {
+                  setActiveProviderId(null)
+                  setReasoningPanelOpen((open) => !open)
+                }}
+                onMouseEnter={() => {
+                  setActiveProviderId(null)
+                  setReasoningPanelOpen(true)
+                }}
+              />
               <MenuSeparator />
             </>
           ) : null}
@@ -383,15 +395,46 @@ export function FloatingComposerModelPicker({
                     selected={selectedProviderId === group.providerId}
                     title={group.label}
                     subtitle={selectedModel}
-                    onClick={() => setActiveProviderId(group.providerId)}
-                    onMouseEnter={() => setActiveProviderId(group.providerId)}
+                    onClick={() => {
+                      setReasoningPanelOpen(false)
+                      setActiveProviderId(group.providerId)
+                    }}
+                    onMouseEnter={() => {
+                      setReasoningPanelOpen(false)
+                      setActiveProviderId(group.providerId)
+                    }}
                   />
                 )
               })
             )}
           </div>
         </div>
-        {activeProviderGroup ? (
+        {reasoningPanelOpen && reasoningEnabled ? (
+          <div
+            ref={submenuRef}
+            role="menu"
+            aria-label={t('composerReasoning')}
+            style={submenuStyle}
+            className="fixed z-[1001] overflow-y-auto rounded-xl border border-ds-border bg-white p-1.5 text-[13px] text-ds-muted shadow-[0_18px_48px_rgba(20,47,95,0.16)] dark:bg-ds-card"
+          >
+            <div className="px-2.5 pb-1 pt-1 text-[11px] font-bold uppercase tracking-[0.08em] text-ds-faint">
+              {t('composerReasoning')}
+            </div>
+            <div className="flex flex-col gap-1">
+              {reasoningOptions.map((option) => (
+                <PickerRow
+                  key={option.id}
+                  selected={currentReasoning === option.id}
+                  title={t(option.labelKey)}
+                  onClick={() => {
+                    onComposerReasoningEffortChange?.(option.id)
+                    setMenuOpen(false)
+                  }}
+                />
+              ))}
+            </div>
+          </div>
+        ) : activeProviderGroup ? (
           <div
             ref={submenuRef}
             role="menu"
@@ -788,6 +831,10 @@ function estimatedModelSubmenuHeight(modelCount: number): number {
   return 34 + Math.max(1, modelCount) * 36 + 12
 }
 
+function estimatedReasoningSubmenuHeight(optionCount: number): number {
+  return 34 + Math.max(1, optionCount) * 36 + 12
+}
+
 function normalizeModelCapabilityKey(modelId: string): string {
   return modelId.trim().toLowerCase()
 }
@@ -982,6 +1029,38 @@ function ProviderRow({
   onMouseEnter: () => void
 }): ReactElement {
   return (
+    <SubmenuRow
+      refNode={refNode}
+      active={active}
+      selected={selected}
+      title={title}
+      subtitle={subtitle}
+      onClick={onClick}
+      onMouseEnter={onMouseEnter}
+    />
+  )
+}
+
+function SubmenuRow({
+  active,
+  selected,
+  icon,
+  title,
+  subtitle,
+  refNode,
+  onClick,
+  onMouseEnter
+}: {
+  active: boolean
+  selected: boolean
+  icon?: ReactElement | null
+  title: string
+  subtitle: string
+  refNode: (node: HTMLButtonElement | null) => void
+  onClick: () => void
+  onMouseEnter: () => void
+}): ReactElement {
+  return (
     <button
       ref={refNode}
       type="button"
@@ -1001,6 +1080,7 @@ function ProviderRow({
             : 'text-ds-muted hover:bg-ds-hover hover:text-ds-ink'
       }`}
     >
+      {icon}
       <span className="min-w-0 flex-1">
         <span className="block truncate text-[13px] font-semibold">{title}</span>
         {subtitle ? (
