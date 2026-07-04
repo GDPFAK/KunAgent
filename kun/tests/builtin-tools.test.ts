@@ -514,7 +514,9 @@ describe('Kun built-in tools', () => {
     expect(String(output.output)).toContain('hello local bash')
   })
 
-  it('prefers the fd backend path when an fd executable candidate is provided', async () => {
+  it.skipIf(process.platform === 'win32')(
+    'prefers the fd backend path when a POSIX executable candidate is provided',
+    async () => {
     await mkdir(join(workspace, 'notes'), { recursive: true })
     await writeFile(join(workspace, 'notes', 'demo.txt'), 'demo\n', 'utf8')
     const fdHost = new LocalToolHost({
@@ -531,7 +533,8 @@ describe('Kun built-in tools', () => {
     })
     expect(output.backend).toBe('fd')
     expect(output.matches).toHaveLength(1)
-  })
+    }
+  )
 
   it('writes, reads, edits, and searches workspace files', async () => {
     const writeOutput = await executeTool(host, workspace, 'write', {
