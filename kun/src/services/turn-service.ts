@@ -89,6 +89,7 @@ export class TurnService {
       guiDesignCanvas: input.request.guiDesignCanvas,
       mode: input.request.mode,
       disableUserInput: input.request.disableUserInput,
+      imContext: input.request.imContext,
       workspaceCheckpointId: input.request.workspaceCheckpointId
     })
     const userItem = makeUserItem({

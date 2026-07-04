@@ -1015,6 +1015,8 @@
   "clawMasterSwitchHint": "开启后会运行定时任务、飞书 / Lark 桥接和本地 IM webhook；不会影响 GUI 内的普通聊天",
   "clawDefaultWorkspace": "默认工作区",
   "clawDefaultWorkspaceHint": "来自 GUI 当前工作目录",
+  "clawRecentThreadListLimit": "最近会话显示数量",
+  "clawRecentThreadListLimitDesc": "IM 里 /list-threads 返回的最近 Kun 会话数量。",
   "clawPromptPrefix": "手机连接提示",
   "clawPromptPrefixHint": "附加到 IM 和定时任务 prompt 前面",
   "clawPromptPrefixPlaceholder": "例如：你是我的个人自动化助手，回答前先确认任务来源和当前上下文。",

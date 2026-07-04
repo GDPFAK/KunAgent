@@ -98,6 +98,7 @@ export type VideoGenerationProtocol = (typeof VIDEO_GENERATION_PROTOCOLS)[number
 export const DEFAULT_VIDEO_GENERATION_PROTOCOL: VideoGenerationProtocol = 'minimax-video'
 export const DEFAULT_CLAW_MODEL = 'auto'
 export const CLAW_MODEL_IDS = ['auto', 'deepseek-v4-pro', 'deepseek-v4-flash'] as const
+export const DEFAULT_CLAW_RECENT_THREAD_LIST_LIMIT = 5
 export const DEFAULT_SCHEDULE_MODEL = 'deepseek-v4-flash'
 export const SCHEDULE_MODEL_IDS = ['deepseek-v4-pro', 'deepseek-v4-flash'] as const
 export const DEFAULT_SCHEDULE_REASONING_EFFORT = 'medium'
@@ -1461,6 +1462,7 @@ export type ClawImSettingsV1 = {
   model: string
   mode: ClawRunMode
   responseTimeoutMs: number
+  recentThreadListLimit: number
 }
 
 export type ClawTaskScheduleV1 = {
@@ -1533,6 +1535,10 @@ export type ClawImConversationV1 = {
   /** Kun thread id this conversation maps to. */
   localThreadId: string
   workspaceRoot: string
+  /** Model provider used by this IM conversation. Empty inherits channel/IM/global provider. */
+  providerId?: string
+  /** Model used by this IM conversation. Empty inherits channel/IM model. */
+  model?: string
   createdAt: string
   updatedAt: string
 }

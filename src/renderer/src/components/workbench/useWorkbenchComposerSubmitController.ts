@@ -439,10 +439,6 @@ export function useWorkbenchComposerSubmitController({
           void mirrorClawCommand(v, replyText)
           return
         }
-        if (command?.kind === 'showProvider' || command?.kind === 'provider') {
-          setError('Provider commands are available in IM chats.')
-          return
-        }
         if (!activeClawChannelId) {
           setError(t('clawNoActiveIm'))
           return

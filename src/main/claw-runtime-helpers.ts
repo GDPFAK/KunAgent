@@ -303,7 +303,8 @@ function generatedFilesFromToolResult(
     (item.toolName === 'generate_image' ||
       item.toolName === 'generate_speech' ||
       item.toolName === 'generate_music' ||
-      item.toolName === 'generate_video') &&
+      item.toolName === 'generate_video' ||
+      item.toolName === 'send_im_attachment') &&
     Array.isArray(output.files)
   ) {
     return output.files

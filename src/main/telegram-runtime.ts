@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto'
-import { mkdir, writeFile, realpath } from 'node:fs/promises'
+import { mkdir, readFile, realpath, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 import { net } from 'electron'
 import type { AppSettingsV1, ClawImChannelV1 } from '../shared/app-settings'
 import type { ClawImTelegramConnectErrorCode } from '../shared/kun-gui-api'
@@ -190,6 +190,30 @@ class TelegramChannel {
       lastMessageId = result.result?.message_id
     }
     return { ok: true, messageId: lastMessageId }
+  }
+
+  async sendFile(
+    chatId: string,
+    filePath: string,
+    fileName?: string
+  ): Promise<{ ok: true; messageId?: number } | { ok: false; message: string }> {
+    try {
+      const buffer = await readFile(filePath)
+      const form = new FormData()
+      form.append('chat_id', chatId)
+      form.append('document', new Blob([new Uint8Array(buffer)]), fileName?.trim() || basename(filePath) || 'attachment')
+      const res = await telegramFetch(`${TELEGRAM_API_BASE}/bot${this.token}/sendDocument`, {
+        method: 'POST',
+        body: form,
+        signal: this.abort?.signal
+      })
+      const data = (await res.json().catch(() => null)) as TelegramApiResponse<{ message_id: number }> | null
+      if (!data) return { ok: false, message: `HTTP ${res.status}: empty body` }
+      if (!data.ok) return { ok: false, message: data.description || `HTTP ${res.status}` }
+      return { ok: true, messageId: data.result?.message_id }
+    } catch (error) {
+      return { ok: false, message: error instanceof Error ? error.message : String(error) }
+    }
   }
 
   private async pollLoop(): Promise<void> {
@@ -425,6 +449,8 @@ export type TelegramRuntime = {
   has(channelId: string): boolean
   /** Sends a text reply through the channel owning this bot. */
   sendMessage(channelId: string, chatId: string, text: string): Promise<{ ok: true } | { ok: false; message: string }>
+  /** Sends a local file through the channel owning this bot. */
+  sendFile(channelId: string, chatId: string, filePath: string, fileName?: string): Promise<{ ok: true } | { ok: false; message: string }>
 }
 
 /**
@@ -575,6 +601,22 @@ export function createTelegramRuntime(deps: TelegramRuntimeDeps): TelegramRuntim
         deps.logError('claw-telegram', 'Failed to send a Telegram reply.', {
           channelId,
           chatId,
+          message: result.message
+        })
+      }
+      return result
+    },
+
+    async sendFile(channelId, chatId, filePath, fileName): Promise<{ ok: true } | { ok: false; message: string }> {
+      const channel = channels.get(channelId)
+      if (!channel) return { ok: false, message: 'Telegram channel is not connected.' }
+      const result = await channel.sendFile(chatId, filePath, fileName)
+      if (!result.ok) {
+        deps.logError('claw-telegram', 'Failed to send a Telegram file attachment.', {
+          channelId,
+          chatId,
+          filePath,
+          fileName,
           message: result.message
         })
       }

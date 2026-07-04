@@ -4,6 +4,8 @@ export type ClawCommand =
   | { kind: 'showSkills' }
   | { kind: 'showMcp' }
   | { kind: 'showGoal' }
+  | { kind: 'showWorkspace' }
+  | { kind: 'showUsage' }
   | { kind: 'invalidGoal' }
   | { kind: 'setGoal'; objective: string }
   | { kind: 'stop' }
@@ -12,8 +14,6 @@ export type ClawCommand =
   | { kind: 'switchThread'; target: string }
   | { kind: 'showModel' }
   | { kind: 'model'; model: string }
-  | { kind: 'showProvider' }
-  | { kind: 'provider'; providerId: string }
 
 export function parseClawCommand(text: string): ClawCommand | null {
   const raw = text.trim().replace(/^／/, '/')
@@ -47,12 +47,18 @@ export function parseClawCommand(text: string): ClawCommand | null {
   if (/^[/-](?:list-goal|goals|目标列表)$/.test(lower)) {
     return { kind: 'showGoal' }
   }
+  if (/^[/-](?:pwd|cwd|workspace|工作目录|当前目录)$/.test(lower)) {
+    return { kind: 'showWorkspace' }
+  }
+  if (/^[/-](?:usage|tokens|token|token-usage|用量|token用量|消耗)$/.test(lower)) {
+    return { kind: 'showUsage' }
+  }
   const goalMatch = raw.match(/^[/-](?:goal|目标)(?:\s*(.*))?$/i)
   if (goalMatch) {
     const objective = (goalMatch[1] ?? '').trim()
     return objective ? { kind: 'setGoal', objective } : { kind: 'invalidGoal' }
   }
-  if (/^[/-](?:threads|thread|list|sessions|tasks|会话|线程|任务|列表)$/.test(lower)) {
+  if (/^[/-](?:list-threads|threads|thread|list|sessions|tasks|会话|线程|任务|列表)$/.test(lower)) {
     return { kind: 'showThreads' }
   }
   if (/^[/-](?:current|当前|当前会话|当前线程|当前任务)$/.test(lower)) {
@@ -63,13 +69,13 @@ export function parseClawCommand(text: string): ClawCommand | null {
     const target = (switchMatch[1] ?? '').trim()
     return target ? { kind: 'switchThread', target } : { kind: 'showThreads' }
   }
+  if (/^[/-](?:list-model|list-models|models|model-list|模型列表|可用模型)$/.test(lower)) {
+    return { kind: 'showModel' }
+  }
   const match = raw.match(/^[/-](?:model|模型)(?:\s+(.+))?$/i)
   if (match) {
     const value = (match[1] ?? '').trim()
     return value ? { kind: 'model', model: value } : { kind: 'showModel' }
   }
-  const providerMatch = raw.match(/^[/-](?:provider|供应商|提供商)(?:\s+(.+))?$/i)
-  if (!providerMatch) return null
-  const providerId = (providerMatch[1] ?? '').trim()
-  return providerId ? { kind: 'provider', providerId } : { kind: 'showProvider' }
+  return null
 }

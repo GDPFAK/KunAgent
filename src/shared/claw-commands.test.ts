@@ -24,6 +24,7 @@ describe('parseClawCommand', () => {
   })
 
   it('parses IM thread list commands', () => {
+    expect(parseClawCommand('/list-threads')).toEqual({ kind: 'showThreads' })
     expect(parseClawCommand('/threads')).toEqual({ kind: 'showThreads' })
     expect(parseClawCommand('-列表')).toEqual({ kind: 'showThreads' })
     expect(parseClawCommand('任务列表')).toEqual({ kind: 'showThreads' })
@@ -39,5 +40,29 @@ describe('parseClawCommand', () => {
     expect(parseClawCommand('/switch 2')).toEqual({ kind: 'switchThread', target: '2' })
     expect(parseClawCommand('-切换到 文档阅读')).toEqual({ kind: 'switchThread', target: '文档阅读' })
     expect(parseClawCommand('切换到 文档阅读')).toEqual({ kind: 'switchThread', target: '文档阅读' })
+  })
+
+  it('parses IM model commands', () => {
+    expect(parseClawCommand('/list-model')).toEqual({ kind: 'showModel' })
+    expect(parseClawCommand('/list-models')).toEqual({ kind: 'showModel' })
+    expect(parseClawCommand('/model')).toEqual({ kind: 'showModel' })
+    expect(parseClawCommand('/模型列表')).toEqual({ kind: 'showModel' })
+    expect(parseClawCommand('/model 3')).toEqual({ kind: 'model', model: '3' })
+  })
+
+  it('parses IM workspace and usage commands', () => {
+    expect(parseClawCommand('/pwd')).toEqual({ kind: 'showWorkspace' })
+    expect(parseClawCommand('/cwd')).toEqual({ kind: 'showWorkspace' })
+    expect(parseClawCommand('/workspace')).toEqual({ kind: 'showWorkspace' })
+    expect(parseClawCommand('/usage')).toEqual({ kind: 'showUsage' })
+    expect(parseClawCommand('/tokens')).toEqual({ kind: 'showUsage' })
+  })
+
+  it('leaves unknown slash commands for normal AI handling', () => {
+    expect(parseClawCommand('/wat')).toBeNull()
+    expect(parseClawCommand('/provider')).toBeNull()
+    expect(parseClawCommand('/provider minimax')).toBeNull()
+    expect(parseClawCommand('／wat')).toBeNull()
+    expect(parseClawCommand('-wat')).toBeNull()
   })
 })

@@ -434,6 +434,24 @@ describe('claw settings', () => {
     expect(normalized.claw.im.weixinBridgeUrl).toBe('http://127.0.0.1:18787/rpc')
   })
 
+  it('normalizes the IM recent thread list limit', () => {
+    const defaults = defaultClawSettings()
+    expect(defaults.im.recentThreadListLimit).toBe(5)
+
+    const normalized = normalizeAppSettings({
+      ...settings(),
+      claw: {
+        ...defaults,
+        im: {
+          ...defaults.im,
+          recentThreadListLimit: 500
+        }
+      }
+    })
+
+    expect(normalized.claw.im.recentThreadListLimit).toBe(50)
+  })
+
   it('migrates the legacy OpenClaw Gateway URL into the WeChat bridge URL', () => {
     const defaults = defaultClawSettings()
     const normalized = normalizeAppSettings({

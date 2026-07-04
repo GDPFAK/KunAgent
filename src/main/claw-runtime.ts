@@ -110,6 +110,24 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
+function cdataText(value: string): string {
+  return value.replace(/\]\]>/g, ']]]]><![CDATA[>')
+}
+
+function buildImRuntimePrompt(prompt: string): string {
+  return [
+    '<kun_im_context>',
+    '<channel>remote_im</channel>',
+    '<interactive_gui_input_available>false</interactive_gui_input_available>',
+    '<instruction>The user is on a remote IM channel and cannot answer GUI prompts. Do not ask for structured GUI input or wait for GUI confirmation. If information is missing, state your assumption and continue, or ask in the final reply so the user can answer in the next IM message.</instruction>',
+    '</kun_im_context>',
+    '',
+    '<user_message><![CDATA[',
+    cdataText(prompt),
+    ']]></user_message>'
+  ].join('\n')
+}
+
 function fallbackWeixinRemoteSession(
   payload: Record<string, unknown>,
   senderLabel: string
@@ -177,12 +195,24 @@ function isChineseLocale(settings: AppSettingsV1): boolean {
   return settings.locale.toLowerCase().startsWith('zh')
 }
 
-function currentImModel(settings: AppSettingsV1, channel?: ClawImChannelV1): string {
-  return channel?.model?.trim() || settings.claw.im.model.trim() || DEFAULT_CLAW_MODEL
+function currentImModel(
+  settings: AppSettingsV1,
+  channel?: ClawImChannelV1,
+  conversation?: ClawImConversationV1
+): string {
+  return conversation?.model?.trim() ||
+    channel?.model?.trim() ||
+    settings.claw.im.model.trim() ||
+    DEFAULT_CLAW_MODEL
 }
 
-function currentImProviderId(settings: AppSettingsV1, channel?: ClawImChannelV1): string {
-  return channel?.providerId?.trim() ||
+function currentImProviderId(
+  settings: AppSettingsV1,
+  channel?: ClawImChannelV1,
+  conversation?: ClawImConversationV1
+): string {
+  return conversation?.providerId?.trim() ||
+    channel?.providerId?.trim() ||
     settings.claw.im.providerId?.trim() ||
     getKunRuntimeSettings(settings).providerId.trim() ||
     DEFAULT_MODEL_PROVIDER_ID
@@ -216,28 +246,16 @@ function findImProvider(settings: AppSettingsV1, value: string): ModelProviderPr
     providers.find((provider) => provider.name.trim().toLowerCase() === query.toLowerCase())
 }
 
-function currentImProvider(settings: AppSettingsV1, channel?: ClawImChannelV1): ModelProviderProfileV1 {
+function currentImProvider(
+  settings: AppSettingsV1,
+  channel?: ClawImChannelV1,
+  conversation?: ClawImConversationV1
+): ModelProviderProfileV1 {
   const providers = getModelProviderSettings(settings).providers
-  const providerId = currentImProviderId(settings, channel)
+  const providerId = currentImProviderId(settings, channel, conversation)
   return providers.find((provider) => provider.id === providerId) ??
     providers.find((provider) => provider.id === DEFAULT_MODEL_PROVIDER_ID) ??
     providers[0]
-}
-
-function resolveImModelAlias(value: string): string {
-  const normalized = value.trim().toLowerCase()
-  if (normalized === '自动') return 'auto'
-  if (normalized === 'pro') return 'deepseek-v4-pro'
-  if (normalized === 'flash') return 'deepseek-v4-flash'
-  return value.trim()
-}
-
-function findProviderModel(models: readonly string[], value: string): string | undefined {
-  const requested = resolveImModelAlias(value)
-  if (!requested) return undefined
-  if (requested.toLowerCase() === 'auto') return 'auto'
-  return models.find((model) => model === requested) ??
-    models.find((model) => model.toLowerCase() === requested.toLowerCase())
 }
 
 function firstProviderModel(settings: AppSettingsV1, providerId: string): string {
@@ -281,18 +299,18 @@ function imCommandHelpText(settings: AppSettingsV1): string {
       '- `/help`：查看命令帮助',
       '- `/new`：当前 IM 连接开启新话题',
       '- `/stop`：停止当前 Kun 会话里正在运行的任务',
+      '- `/pwd`：查看当前 Kun 会话工作目录本地路径',
+      '- `/usage`：查看当前 Kun 会话 token 消耗、供应商和模型',
       '- `/list-skills`：查看当前 Kun 可用技能',
       '- `/list-mcp`：查看当前 Kun MCP 服务器',
       '- `/list-goal`：查看当前 Kun 会话目标',
       '- `/goal <目标>`：设置当前 Kun 会话目标',
-      '- `/threads`：列出最近的 Kun 会话',
+      '- `/list-threads`：列出最近的 Kun 会话',
       '- `/current`：查看当前 IM 会话连接的 Kun 会话',
-      '- `/switch <序号|标题|thread id>`：切换当前 IM 会话到指定 Kun 会话',
-      '- `/provider`：查看已加载的模型供应商',
-      '- `/provider <id>`：切换当前 IM 连接供应商',
-      '- `/model`：查看当前供应商可用模型',
-      '- `/model <id>`：切换当前 IM 连接模型',
-      '也支持 `-new`、`-threads`、`-switch 2`、`-provider minimax` 这种写法。'
+      '- `/switch <序号|thread id>`：切换当前 IM 会话到指定 Kun 会话',
+      '- `/list-model`：查看所有可用文本模型',
+      '- `/model <序号>`：按 `/list-model` 列出的序号切换当前 IM 连接模型',
+      '命令前缀可以从 `/` 改成 `-`，例如 `-new`、`-list-threads`、`-switch 2`。'
     ].join('\n')
   }
   return [
@@ -300,99 +318,94 @@ function imCommandHelpText(settings: AppSettingsV1): string {
     '- `/help`: show command help',
     '- `/new`: start a new topic for this IM connection',
     '- `/stop`: stop the running task in the current Kun conversation',
+    '- `/pwd`: show the local workspace path for the current Kun conversation',
+    '- `/usage`: show token usage plus provider/model for the current Kun conversation',
     '- `/list-skills`: list available Kun skills',
     '- `/list-mcp`: list Kun MCP servers',
     '- `/list-goal`: show the current Kun conversation goal',
     '- `/goal <objective>`: set the current Kun conversation goal',
-    '- `/threads`: list recent Kun conversations',
+    '- `/list-threads`: list recent Kun conversations',
     '- `/current`: show the Kun conversation connected to this IM chat',
-    '- `/switch <number|title|thread id>`: switch this IM chat to a Kun conversation',
-    '- `/provider`: list loaded model providers',
-    '- `/provider <id>`: switch the provider for this IM connection',
-    '- `/model`: list models for the current provider',
-    '- `/model <id>`: switch the model for this IM connection',
-    '`-new`, `-threads`, `-switch 2`, and `-provider minimax` are supported too.'
+    '- `/switch <number|thread id>`: switch this IM chat to a Kun conversation',
+    '- `/list-model`: list all available text models',
+    '- `/model <number>`: switch this IM connection to a model listed by `/list-model`',
+    'The command prefix can be changed from `/` to `-`, for example `-new`, `-list-threads`, or `-switch 2`.'
   ].join('\n')
 }
 
-function imProviderListText(settings: AppSettingsV1, channel?: ClawImChannelV1): string {
-  const providers = getModelProviderSettings(settings).providers
-  const currentProviderId = currentImProviderId(settings, channel)
-  const rows = providers.map((provider) => {
-    const marker = provider.id === currentProviderId ? '*' : '-'
-    const modelCount = providerTextModels(settings, provider).length
-    const keyStatus = provider.apiKey.trim()
-      ? (isChineseLocale(settings) ? '已配置 API Key' : 'API key set')
-      : (isChineseLocale(settings) ? '未配置 API Key' : 'no API key')
-    return `${marker} \`${provider.id}\` ${providerLabel(provider)} · ${modelCount} models · ${keyStatus}`
+function imModelListText(
+  settings: AppSettingsV1,
+  channel?: ClawImChannelV1,
+  conversation?: ClawImConversationV1
+): string {
+  const currentProviderId = currentImProvider(settings, channel, conversation)?.id
+  const currentModel = currentImModel(settings, channel, conversation)
+  const rows = listImModelOptions(settings).map((option, index) => {
+    const { provider, model } = option
+    const marker = provider.id === currentProviderId && model === currentModel ? '*' : '-'
+    return `${marker} ${index + 1}. \`${model}\` · provider \`${provider.id}\``
   })
   if (isChineseLocale(settings)) {
     return [
       `当前供应商：\`${currentProviderId}\`。`,
-      '已加载供应商：',
-      ...rows,
-      '切换供应商：`/provider <id>`。切换后可用 `/model` 查看该供应商模型。'
+      `当前模型：\`${currentModel}\`。`,
+      ...(rows.length > 0
+        ? ['可用模型：', ...rows, '切换模型：`/model <序号>`。']
+        : ['还没有可用的文本模型，请先在设置里为供应商配置模型。'])
     ].join('\n')
   }
   return [
     `Current provider: \`${currentProviderId}\`.`,
-    'Loaded providers:',
-    ...rows,
-    'Switch provider with `/provider <id>`. Use `/model` after switching to list its models.'
-  ].join('\n')
-}
-
-function imProviderCommandHint(settings: AppSettingsV1, value: string): string {
-  return imKunErrorText(settings, isChineseLocale(settings)
-    ? `没有找到供应商 \`${value}\`。发送 \`/provider\` 查看已加载供应商。`
-    : `Provider \`${value}\` was not found. Send \`/provider\` to list loaded providers.`)
-}
-
-function imProviderChangedText(
-  settings: AppSettingsV1,
-  provider: ModelProviderProfileV1,
-  model: string
-): string {
-  return isChineseLocale(settings)
-    ? `当前 IM 供应商已切换到 \`${provider.id}\`，模型为 \`${model}\`。发送 \`/model\` 可查看这个供应商的可用模型。`
-    : `IM provider switched to \`${provider.id}\`; model is \`${model}\`. Send \`/model\` to list models for this provider.`
-}
-
-function imModelListText(settings: AppSettingsV1, channel?: ClawImChannelV1): string {
-  const provider = currentImProvider(settings, channel)
-  const models = providerTextModels(settings, provider)
-  const currentModel = currentImModel(settings, channel)
-  const rows = models.map((model) => `${model === currentModel ? '*' : '-'} \`${model}\``)
-  if (isChineseLocale(settings)) {
-    return [
-      `当前供应商：\`${provider.id}\` ${providerLabel(provider)}`,
-      `当前模型：\`${currentModel}\`。`,
-      ...(rows.length > 0
-        ? ['可用模型：', ...rows, '切换模型：`/model <id>`。']
-        : ['这个供应商还没有可用的文本模型，请先在设置里为它配置模型。'])
-    ].join('\n')
-  }
-  return [
-    `Current provider: \`${provider.id}\` ${providerLabel(provider)}`,
     `Current model: \`${currentModel}\`.`,
     ...(rows.length > 0
-      ? ['Available models:', ...rows, 'Switch model with `/model <id>`.']
-      : ['This provider has no usable text models yet. Add models for it in Settings first.'])
+      ? ['Available models:', ...rows, 'Switch model with `/model <number>`.']
+      : ['No usable text models are available yet. Add models for a provider in Settings first.'])
   ].join('\n')
 }
 
-function imModelCommandHint(settings: AppSettingsV1, provider: ModelProviderProfileV1, value: string): string {
-  const models = providerTextModels(settings, provider)
-  const ids = models.map((model) => `\`${model}\``).join(', ')
-  return imKunErrorText(settings, isChineseLocale(settings)
-    ? `供应商 \`${provider.id}\` 下没有找到模型 \`${value}\`。${ids ? `可用模型：${ids}。` : '这个供应商还没有可用的文本模型。'}`
-    : `Model \`${value}\` was not found for provider \`${provider.id}\`. ${ids ? `Available models: ${ids}.` : 'This provider has no usable text models yet.'}`)
+type ImModelResolution = {
+  provider: ModelProviderProfileV1
+  model: string
 }
 
-function imModelChangedText(settings: AppSettingsV1, model: string): string {
+function listImModelOptions(settings: AppSettingsV1): ImModelResolution[] {
+  return getModelProviderSettings(settings).providers.flatMap((provider) =>
+    providerTextModels(settings, provider).map((model) => ({ provider, model }))
+  )
+}
+
+function resolveImModelByIndex(settings: AppSettingsV1, value: string): ImModelResolution | undefined {
+  const raw = value.trim()
+  if (!/^\d+$/.test(raw)) return undefined
+  const index = Number.parseInt(raw, 10)
+  if (!Number.isSafeInteger(index) || index < 1) return undefined
+  return listImModelOptions(settings)[index - 1]
+}
+
+function imModelCommandHint(settings: AppSettingsV1, value: string): string {
+  const count = listImModelOptions(settings).length
+  return imKunErrorText(settings, isChineseLocale(settings)
+    ? `无效的模型序号 \`${value}\`。${count > 0 ? '发送 `/list-model` 查看可用序号。' : '还没有可用的文本模型。'}`
+    : `Invalid model number \`${value}\`. ${count > 0 ? 'Send `/list-model` to see available numbers.' : 'No usable text models are available yet.'}`)
+}
+
+function imModelChangedText(settings: AppSettingsV1, providerId: string, model: string): string {
   return isChineseLocale(settings)
-    ? `Claw IM 模型已切换到 \`${model}\`。`
-    : `Claw IM model switched to \`${model}\`.`
+    ? `Claw IM 模型已切换到 \`${model}\`，供应商为 \`${providerId}\`。`
+    : `Claw IM model switched to \`${model}\` with provider \`${providerId}\`.`
+}
+
+function currentImModelResolution(
+  settings: AppSettingsV1,
+  channel?: ClawImChannelV1,
+  conversation?: ClawImConversationV1
+): ImModelResolution {
+  const provider = currentImProvider(settings, channel, conversation)
+  const requestedModel = currentImModel(settings, channel, conversation)
+  const model = requestedModel.trim() && requestedModel.trim() !== DEFAULT_CLAW_MODEL
+    ? requestedModel.trim()
+    : firstProviderModel(settings, provider.id)
+  return { provider, model }
 }
 
 function imNewTopicText(settings: AppSettingsV1): string {
@@ -402,8 +415,14 @@ function imNewTopicText(settings: AppSettingsV1): string {
 }
 
 function imKunErrorText(_settings: AppSettingsV1, message: string): string {
+  return imKunSystemText(message)
+}
+
+function imKunSystemText(message: string): string {
   const trimmed = message.trim()
-  return trimmed.startsWith('Kun:') ? trimmed : `Kun: ${trimmed}`
+  if (trimmed.startsWith('[Kun]')) return trimmed
+  if (trimmed.startsWith('Kun:')) return `[Kun] ${trimmed.slice('Kun:'.length).trim()}`
+  return `[Kun] ${trimmed}`
 }
 
 type ImSkillSummary = {
@@ -421,6 +440,18 @@ type ImMcpServerSummary = {
   transport?: string
   toolCount?: number
   lastError?: string
+}
+
+type ImThreadUsageSummary = {
+  promptTokens: number
+  completionTokens: number
+  totalTokens: number
+  cachedTokens: number
+  cacheHitTokens: number
+  cacheMissTokens: number
+  turns: number
+  costUsd?: number
+  costCny?: number
 }
 
 type ImGoalSummary = {
@@ -492,6 +523,47 @@ function parseMcpResponse(body: string): ImMcpServerSummary[] {
     .filter((server) => server.id)
 }
 
+function numberValue(value: unknown): number {
+  return typeof value === 'number' && Number.isFinite(value) ? value : 0
+}
+
+function optionalNumberValue(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined
+}
+
+function parseThreadUsageResponse(body: string, threadId: string): ImThreadUsageSummary {
+  const parsed = parseJsonObject(body)
+  const buckets = Array.isArray(parsed?.buckets) ? parsed.buckets : []
+  const bucket = buckets.find((item): item is Record<string, unknown> => {
+    return typeof item === 'object' &&
+      item !== null &&
+      !Array.isArray(item) &&
+      asString((item as Record<string, unknown>).thread_id) === threadId
+  })
+  if (!bucket) {
+    return {
+      promptTokens: 0,
+      completionTokens: 0,
+      totalTokens: 0,
+      cachedTokens: 0,
+      cacheHitTokens: 0,
+      cacheMissTokens: 0,
+      turns: 0
+    }
+  }
+  return {
+    promptTokens: numberValue(bucket.input_tokens),
+    completionTokens: numberValue(bucket.output_tokens),
+    totalTokens: numberValue(bucket.total_tokens),
+    cachedTokens: numberValue(bucket.cached_tokens),
+    cacheHitTokens: numberValue(bucket.cache_hit_tokens) || numberValue(bucket.cached_tokens),
+    cacheMissTokens: numberValue(bucket.cache_miss_tokens),
+    turns: numberValue(bucket.turns),
+    costUsd: optionalNumberValue(bucket.cost_usd),
+    costCny: optionalNumberValue(bucket.cost_cny)
+  }
+}
+
 function imMcpListText(settings: AppSettingsV1, servers: readonly ImMcpServerSummary[]): string {
   if (servers.length === 0) {
     return isChineseLocale(settings)
@@ -515,6 +587,55 @@ function imMcpListText(settings: AppSettingsV1, servers: readonly ImMcpServerSum
   ].join('\n')
 }
 
+function imWorkspaceText(settings: AppSettingsV1, threadId: string, workspace: string): string {
+  return isChineseLocale(settings)
+    ? `当前 Kun 会话 \`${threadId}\` 的工作目录：\n\`${workspace}\``
+    : `Workspace for current Kun conversation \`${threadId}\`:\n\`${workspace}\``
+}
+
+function imWorkspaceMissingText(settings: AppSettingsV1, threadId: string): string {
+  return imKunErrorText(settings, isChineseLocale(settings)
+    ? `没有读取到当前 Kun 会话 \`${threadId}\` 的工作目录。`
+    : `Could not read the workspace path for current Kun conversation \`${threadId}\`.`)
+}
+
+function imMarkdownLines(lines: string[]): string {
+  return lines.join('  \n')
+}
+
+function imUsageText(
+  settings: AppSettingsV1,
+  threadId: string,
+  usage: ImThreadUsageSummary,
+  model: ImModelResolution
+): string {
+  const costParts = [
+    usage.costUsd !== undefined ? `USD ${usage.costUsd.toFixed(6)}` : '',
+    usage.costCny !== undefined ? `CNY ${usage.costCny.toFixed(6)}` : ''
+  ].filter(Boolean)
+  const costText = costParts.length > 0 ? costParts.join(' · ') : (isChineseLocale(settings) ? '无' : 'none')
+  if (isChineseLocale(settings)) {
+    return imMarkdownLines([
+      `当前 Kun 会话：\`${threadId}\``,
+      `供应商：\`${model.provider.id}\``,
+      `模型：\`${model.model}\``,
+      `Token 消耗：total ${usage.totalTokens} · input ${usage.promptTokens} · output ${usage.completionTokens}`,
+      `缓存：cached ${usage.cachedTokens} · hit ${usage.cacheHitTokens} · miss ${usage.cacheMissTokens}`,
+      `轮次：${usage.turns}`,
+      `费用：${costText}`
+    ])
+  }
+  return imMarkdownLines([
+    `Current Kun conversation: \`${threadId}\``,
+    `Provider: \`${model.provider.id}\``,
+    `Model: \`${model.model}\``,
+    `Token usage: total ${usage.totalTokens} · input ${usage.promptTokens} · output ${usage.completionTokens}`,
+    `Cache: cached ${usage.cachedTokens} · hit ${usage.cacheHitTokens} · miss ${usage.cacheMissTokens}`,
+    `Turns: ${usage.turns}`,
+    `Cost: ${costText}`
+  ])
+}
+
 function parseGoalResponse(body: string): ImGoalSummary | null {
   const parsed = parseJsonObject(body)
   const goal = typeof parsed?.goal === 'object' && parsed.goal !== null && !Array.isArray(parsed.goal)
@@ -535,8 +656,8 @@ function parseGoalResponse(body: string): ImGoalSummary | null {
 
 function imNoCurrentThreadText(settings: AppSettingsV1): string {
   return imKunErrorText(settings, isChineseLocale(settings)
-    ? '当前 IM 会话还没有绑定 Kun 会话。先发送普通消息创建会话，或用 `/threads` 和 `/switch` 切换到已有会话。'
-    : 'This IM chat is not connected to a Kun conversation yet. Send a normal message to create one, or use `/threads` and `/switch` to pick one.')
+    ? '当前 IM 会话还没有绑定 Kun 会话。先发送普通消息创建会话，或用 `/list-threads` 和 `/switch` 切换到已有会话。'
+    : 'This IM chat is not connected to a Kun conversation yet. Send a normal message to create one, or use `/list-threads` and `/switch` to pick one.')
 }
 
 function imGoalText(settings: AppSettingsV1, goal: ImGoalSummary | null): string {
@@ -633,21 +754,22 @@ function imThreadListText(
       currentThreadId ? `当前会话：\`${currentThreadId}\`。` : '当前还没有绑定 Kun 会话。',
       '最近 Kun 会话：',
       ...rows,
-      '切换会话：`/switch <序号|标题|thread id>`。新话题：`/new`。'
+      '切换会话：`/switch <序号|thread id>`。新话题：`/new`。'
     ].join('\n')
   }
   return [
     currentThreadId ? `Current conversation: \`${currentThreadId}\`.` : 'No Kun conversation is connected yet.',
     'Recent Kun conversations:',
     ...rows,
-    'Switch with `/switch <number|title|thread id>`. Start fresh with `/new`.'
+    'Switch with `/switch <number|thread id>`. Start fresh with `/new`.'
   ].join('\n')
 }
 
 function imCurrentThreadText(
   settings: AppSettingsV1,
   thread: ThreadRecordJson | undefined,
-  currentThreadId: string
+  currentThreadId: string,
+  shared = false
 ): string {
   if (!currentThreadId) {
     return imKunErrorText(settings, isChineseLocale(settings)
@@ -660,9 +782,10 @@ function imCurrentThreadText(
       : `This IM chat is connected to \`${currentThreadId}\`, but it was not found in the thread list.`)
   }
   const status = thread.status?.trim() ? ` · ${thread.status.trim()}` : ''
-  return isChineseLocale(settings)
+  const text = isChineseLocale(settings)
     ? `当前 Kun 会话：\`${thread.id}\` ${imThreadTitle(thread)}${status}。`
     : `Current Kun conversation: \`${thread.id}\` ${imThreadTitle(thread)}${status}.`
+  return shared ? `${text}\n\n${imSharedThreadWarningText(settings)}` : text
 }
 
 function resolveImThreadSwitchTarget(
@@ -678,21 +801,48 @@ function resolveImThreadSwitchTarget(
   const lowered = query.toLowerCase()
   return threads.find((thread) => thread.id === query) ??
     threads.find((thread) => thread.id.toLowerCase() === lowered) ??
-    threads.find((thread) => imThreadTitle(thread).toLowerCase() === lowered) ??
-    threads.find((thread) => imThreadTitle(thread).toLowerCase().includes(lowered)) ??
     null
 }
 
 function imThreadSwitchNotFoundText(settings: AppSettingsV1, target: string): string {
   return imKunErrorText(settings, isChineseLocale(settings)
-    ? `没有找到可切换的会话 \`${target}\`。发送 \`/threads\` 查看最近会话。`
-    : `Could not find a switchable conversation for \`${target}\`. Send \`/threads\` to list recent conversations.`)
+    ? `没有找到可切换的会话 \`${target}\`。发送 \`/list-threads\` 查看最近会话。`
+    : `Could not find a switchable conversation for \`${target}\`. Send \`/list-threads\` to list recent conversations.`)
 }
 
-function imThreadSwitchedText(settings: AppSettingsV1, thread: ThreadRecordJson): string {
+function imSharedThreadWarningText(settings: AppSettingsV1): string {
   return isChineseLocale(settings)
+    ? '注意：这个 Kun 会话也被其他 IM 会话持有。Kun 不会对共享会话做 IM 侧并发控制，请不要在多个 IM 里同时对话。'
+    : 'Note: this Kun conversation is also held by another IM chat. Kun does not add IM-side concurrency control for shared conversations, so avoid chatting into it from multiple IM chats at the same time.'
+}
+
+function imThreadSwitchedText(settings: AppSettingsV1, thread: ThreadRecordJson, shared: boolean): string {
+  const text = isChineseLocale(settings)
     ? `已切换到 Kun 会话 \`${thread.id}\`：${imThreadTitle(thread)}。后续消息会继续这个上下文。`
     : `Switched to Kun conversation \`${thread.id}\`: ${imThreadTitle(thread)}. Future messages will continue that context.`
+  return shared ? `${text}\n\n${imSharedThreadWarningText(settings)}` : text
+}
+
+function hasOtherImThreadBinding(
+  settings: AppSettingsV1,
+  threadId: string,
+  currentChannelId: string | undefined,
+  currentConversationId: string | undefined
+): boolean {
+  const targetThreadId = threadId.trim()
+  if (!targetThreadId) return false
+  for (const channel of settings.claw.channels) {
+    if (!channel.enabled) continue
+    for (const conversation of channel.conversations) {
+      if (conversation.localThreadId.trim() !== targetThreadId) continue
+      if (channel.id === currentChannelId && conversation.id === currentConversationId) continue
+      return true
+    }
+    if (channel.threadId.trim() !== targetThreadId) continue
+    if (channel.id === currentChannelId && !currentConversationId) continue
+    return true
+  }
+  return false
 }
 
 function imStopNoRunningTurnText(settings: AppSettingsV1): string {
@@ -914,7 +1064,9 @@ export class ClawRuntime {
     if (!thread) return { ok: false, message: 'Failed to create thread.' }
     if (!existingThreadId) patchThreadTitle(thread)
 
-    const runtimePrompt = buildClawRuntimePrompt(runtimeSettings, options.prompt, { channel: options.channel })
+    const runtimePrompt = options.source === 'im'
+      ? buildImRuntimePrompt(options.prompt)
+      : buildClawRuntimePrompt(runtimeSettings, options.prompt, { channel: options.channel })
     const displayText = options.displayText?.trim() || parseClawUserPromptForDisplay(options.prompt).text
     const turnBody: Record<string, unknown> = {
       prompt: runtimePrompt,
@@ -928,6 +1080,7 @@ export class ClawRuntime {
     // IM turns follow the same policy the user picked for the GUI.
     if (options.source === 'im') {
       turnBody.disableUserInput = true
+      turnBody.imContext = true
       turnBody.approvalPolicy = runtimeSettings.agents.kun.approvalPolicy
       turnBody.sandboxMode = runtimeSettings.agents.kun.sandboxMode
     }
@@ -1371,30 +1524,10 @@ export class ClawRuntime {
     })
   }
 
-  private async setIncomingImModel(channel: ClawImChannelV1 | undefined, model: string): Promise<void> {
-    if (!channel) {
-      await this.deps.store.patch({ claw: { im: { model } } })
-      return
-    }
-    const currentSettings = await this.deps.store.load()
-    const now = new Date().toISOString()
-    await this.deps.store.patch({
-      claw: {
-        channels: currentSettings.claw.channels.map((item) =>
-          item.id === channel.id
-            ? {
-                ...item,
-                model,
-                updatedAt: now
-              }
-            : item
-        )
-      }
-    })
-  }
-
   private async setIncomingImProvider(
     channel: ClawImChannelV1 | undefined,
+    conversation: ClawImConversationV1 | undefined,
+    remoteSession: Pick<ClawImRemoteSessionV1, 'chatId' | 'messageId' | 'threadId' | 'senderId' | 'senderName'> | undefined,
     providerId: string,
     model: string
   ): Promise<void> {
@@ -1406,30 +1539,89 @@ export class ClawRuntime {
     const now = new Date().toISOString()
     await this.deps.store.patch({
       claw: {
-        channels: currentSettings.claw.channels.map((item) =>
-          item.id === channel.id
+        channels: currentSettings.claw.channels.map((item) => {
+          if (item.id !== channel.id) return item
+          const currentConversation = conversation
+            ? item.conversations.find((entry) => entry.id === conversation.id)
+            : remoteSession
+              ? this.findChannelConversation(item, remoteSession)
+              : undefined
+          const nextConversation: ClawImConversationV1 | null = remoteSession && !currentConversation
             ? {
-                ...item,
+                id: randomUUID(),
+                chatId: remoteSession.chatId,
+                remoteThreadId: remoteSession.threadId,
+                latestMessageId: remoteSession.messageId,
+                senderId: remoteSession.senderId,
+                senderName: remoteSession.senderName,
+                localThreadId: '',
+                workspaceRoot: this.resolveConversationWorkspaceRoot(currentSettings, item, remoteSession),
                 providerId,
                 model,
+                createdAt: now,
                 updatedAt: now
               }
-            : item
-        )
+            : null
+          return {
+            ...item,
+            providerId: remoteSession ? item.providerId : providerId,
+            model: remoteSession ? item.model : model,
+            conversations: currentConversation
+              ? item.conversations.map((entry) =>
+                  entry.id === currentConversation.id
+                    ? {
+                        ...entry,
+                        latestMessageId: remoteSession?.messageId || entry.latestMessageId,
+                        senderId: remoteSession?.senderId || entry.senderId,
+                        senderName: remoteSession?.senderName || entry.senderName,
+                        providerId,
+                        model,
+                        updatedAt: now
+                      }
+                    : entry
+                )
+              : nextConversation
+                ? [...item.conversations, nextConversation]
+                : item.conversations,
+            updatedAt: now
+          }
+        })
       }
     })
   }
 
   private currentIncomingImThreadId(
     channel: ClawImChannelV1 | undefined,
-    conversation: ClawImConversationV1 | undefined
+    conversation: ClawImConversationV1 | undefined,
+    remoteSession?: Pick<ClawImRemoteSessionV1, 'chatId' | 'threadId'> | undefined
   ): string {
+    const legacyChannelThreadId = remoteSession && !conversation && (channel?.conversations.length ?? 0) === 0
+      ? channel?.threadId.trim()
+      : ''
     return conversation?.localThreadId.trim() ||
-      channel?.threadId.trim() ||
+      legacyChannelThreadId ||
+      (remoteSession ? '' : channel?.threadId.trim()) ||
       ''
   }
 
   private async listIncomingImThreads(
+    settings: AppSettingsV1,
+    limit: number
+  ): Promise<ThreadRecordJson[]> {
+    const response = await this.deps.runtimeRequest(
+      settings,
+      `/v1/threads?limit=${encodeURIComponent(String(limit))}`,
+      { method: 'GET' }
+    )
+    if (!response.ok) {
+      throw new Error(runtimeErrorMessage(response, 'Failed to list threads.'))
+    }
+    return parseListThreadsResponse(response.body)
+      .sort((a, b) => imThreadTimestamp(b) - imThreadTimestamp(a))
+      .slice(0, limit)
+  }
+
+  private async listIncomingImSwitchableThreads(
     settings: AppSettingsV1,
     channel: ClawImChannelV1 | undefined
   ): Promise<ThreadRecordJson[]> {
@@ -1518,6 +1710,29 @@ export class ClawRuntime {
     return JSON.parse(response.body) as ThreadDetailJson
   }
 
+  private async getIncomingImThreadUsage(settings: AppSettingsV1, threadId: string): Promise<ImThreadUsageSummary> {
+    const response = await this.deps.runtimeRequest(
+      settings,
+      `/v1/usage?group_by=thread&thread_id=${encodeURIComponent(threadId)}`,
+      { method: 'GET' }
+    )
+    if (!response.ok) {
+      throw new Error(runtimeErrorMessage(response, 'Failed to read usage.'))
+    }
+    return parseThreadUsageResponse(response.body, threadId)
+  }
+
+  private incomingImThreadWorkspace(
+    detail: ThreadDetailJson,
+    conversation: ClawImConversationV1 | undefined
+  ): string {
+    const record = detail as ThreadDetailJson & { workspace?: unknown }
+    return asString(record.workspace) ||
+      asString(record.thread?.workspace) ||
+      conversation?.workspaceRoot.trim() ||
+      ''
+  }
+
   private runningTurnId(detail: ThreadDetailJson): string {
     const turns = Array.isArray(detail.turns) ? detail.turns : []
     for (let index = turns.length - 1; index >= 0; index -= 1) {
@@ -1575,6 +1790,8 @@ export class ClawRuntime {
           senderName: session.senderName,
           localThreadId: input.threadId,
           workspaceRoot: this.resolveConversationWorkspaceRoot(settings, currentChannel, session),
+          providerId: currentImProviderId(settings, currentChannel, input.conversation),
+          model: currentImModel(settings, currentChannel, input.conversation),
           createdAt: now,
           updatedAt: now
         }
@@ -1595,6 +1812,8 @@ export class ClawRuntime {
                         senderId: session?.senderId || conversation.senderId,
                         senderName: session?.senderName || conversation.senderName,
                         localThreadId: input.threadId,
+                        providerId: conversation.providerId,
+                        model: conversation.model,
                         updatedAt: now
                       }
                     : conversation
@@ -1624,7 +1843,7 @@ export class ClawRuntime {
     if (!command) return null
     if (command.kind === 'help') return imCommandHelpText(settings)
     if (command.kind === 'stop') {
-      const currentThreadId = this.currentIncomingImThreadId(input.channel, input.conversation)
+      const currentThreadId = this.currentIncomingImThreadId(input.channel, input.conversation, input.remoteSession)
       if (!currentThreadId) return imNoCurrentThreadText(settings)
       const stoppedTurnId = await this.stopIncomingImTurn(settings, currentThreadId)
       return stoppedTurnId
@@ -1639,13 +1858,32 @@ export class ClawRuntime {
       return imMcpListText(settings, await this.listIncomingImMcpServers(settings))
     }
     if (command.kind === 'showGoal') {
-      const currentThreadId = this.currentIncomingImThreadId(input.channel, input.conversation)
+      const currentThreadId = this.currentIncomingImThreadId(input.channel, input.conversation, input.remoteSession)
       if (!currentThreadId) return imNoCurrentThreadText(settings)
       return imGoalText(settings, await this.getIncomingImGoal(settings, currentThreadId))
     }
+    if (command.kind === 'showWorkspace') {
+      const currentThreadId = this.currentIncomingImThreadId(input.channel, input.conversation, input.remoteSession)
+      if (!currentThreadId) return imNoCurrentThreadText(settings)
+      const detail = await this.getIncomingImThreadDetail(settings, currentThreadId)
+      const workspace = this.incomingImThreadWorkspace(detail, input.conversation)
+      return workspace
+        ? imWorkspaceText(settings, currentThreadId, workspace)
+        : imWorkspaceMissingText(settings, currentThreadId)
+    }
+    if (command.kind === 'showUsage') {
+      const currentThreadId = this.currentIncomingImThreadId(input.channel, input.conversation, input.remoteSession)
+      if (!currentThreadId) return imNoCurrentThreadText(settings)
+      return imUsageText(
+        settings,
+        currentThreadId,
+        await this.getIncomingImThreadUsage(settings, currentThreadId),
+        currentImModelResolution(settings, input.channel, input.conversation)
+      )
+    }
     if (command.kind === 'invalidGoal') return imGoalMissingObjectiveText(settings)
     if (command.kind === 'setGoal') {
-      const currentThreadId = this.currentIncomingImThreadId(input.channel, input.conversation)
+      const currentThreadId = this.currentIncomingImThreadId(input.channel, input.conversation, input.remoteSession)
       if (!currentThreadId) return imNoCurrentThreadText(settings)
       const existingGoal = await this.getIncomingImGoal(settings, currentThreadId)
       if (existingGoal) return imGoalAlreadyExistsText(settings, existingGoal)
@@ -1655,23 +1893,35 @@ export class ClawRuntime {
       )
     }
     if (command.kind === 'showThreads') {
-      const currentThreadId = this.currentIncomingImThreadId(input.channel, input.conversation)
-      const threads = await this.listIncomingImThreads(settings, input.channel)
+      const currentThreadId = this.currentIncomingImThreadId(input.channel, input.conversation, input.remoteSession)
+      const threads = await this.listIncomingImThreads(settings, settings.claw.im.recentThreadListLimit)
       return imThreadListText(settings, threads, currentThreadId)
     }
     if (command.kind === 'showCurrentThread') {
-      const currentThreadId = this.currentIncomingImThreadId(input.channel, input.conversation)
-      const threads = await this.listIncomingImThreads(settings, input.channel)
+      const currentThreadId = this.currentIncomingImThreadId(input.channel, input.conversation, input.remoteSession)
+      if (!currentThreadId) return imCurrentThreadText(settings, undefined, currentThreadId)
+      const threads = await this.listIncomingImSwitchableThreads(settings, input.channel)
       return imCurrentThreadText(
         settings,
         threads.find((thread) => thread.id === currentThreadId),
-        currentThreadId
+        currentThreadId,
+        hasOtherImThreadBinding(settings, currentThreadId, input.channel?.id, input.conversation?.id)
       )
     }
     if (command.kind === 'switchThread') {
-      const threads = await this.listIncomingImThreads(settings, input.channel)
+      const switchTarget = command.target.trim()
+      const threads = await this.listIncomingImThreads(
+        settings,
+        /^\d+$/.test(switchTarget) ? settings.claw.im.recentThreadListLimit : 50
+      )
       const target = resolveImThreadSwitchTarget(threads, command.target)
       if (!target) return imThreadSwitchNotFoundText(settings, command.target)
+      const shared = hasOtherImThreadBinding(
+        settings,
+        target.id,
+        input.channel?.id,
+        input.conversation?.id
+      )
       const switched = await this.switchIncomingImThread(settings, {
         channel: input.channel,
         conversation: input.conversation,
@@ -1683,28 +1933,20 @@ export class ClawRuntime {
           ? '当前消息没有匹配到可保存切换状态的 IM 通道，无法切换会话。'
           : 'This message did not match an IM channel that can persist thread switching.')
       }
-      return imThreadSwitchedText(settings, target)
+      return imThreadSwitchedText(settings, target, shared)
     }
-    if (command.kind === 'showProvider') return imProviderListText(settings, input.channel)
-    if (command.kind === 'provider') {
-      const provider = findImProvider(settings, command.providerId)
-      if (!provider) return imProviderCommandHint(settings, command.providerId)
-      const models = providerTextModels(settings, provider)
-      const currentModel = currentImModel(settings, input.channel)
-      const currentProviderModel = currentModel === DEFAULT_CLAW_MODEL
-        ? undefined
-        : findProviderModel(models, currentModel)
-      const nextModel = currentProviderModel ?? models[0] ?? DEFAULT_CLAW_MODEL
-      await this.setIncomingImProvider(input.channel, provider.id, nextModel)
-      return imProviderChangedText(settings, provider, nextModel)
-    }
-    if (command.kind === 'showModel') return imModelListText(settings, input.channel)
+    if (command.kind === 'showModel') return imModelListText(settings, input.channel, input.conversation)
     if (command.kind === 'model') {
-      const provider = currentImProvider(settings, input.channel)
-      const model = findProviderModel(providerTextModels(settings, provider), command.model)
-      if (!model) return imModelCommandHint(settings, provider, command.model)
-      await this.setIncomingImModel(input.channel, model)
-      return imModelChangedText(settings, model)
+      const resolved = resolveImModelByIndex(settings, command.model)
+      if (!resolved) return imModelCommandHint(settings, command.model)
+      await this.setIncomingImProvider(
+        input.channel,
+        input.conversation,
+        input.remoteSession,
+        resolved.provider.id,
+        resolved.model
+      )
+      return imModelChangedText(settings, resolved.provider.id, resolved.model)
     }
     if (command.kind === 'clear') {
       await this.resetIncomingImThread({
@@ -1727,7 +1969,8 @@ export class ClawRuntime {
     }
   ): Promise<string | null> {
     try {
-      return await this.handleIncomingImCommand(settings, input)
+      const reply = await this.handleIncomingImCommand(settings, input)
+      return reply === null ? null : imKunSystemText(reply)
     } catch (error) {
       const message = errorMessage(error)
       this.deps.logError('claw-im-command', 'IM command failed', {
@@ -1759,16 +2002,21 @@ export class ClawRuntime {
     }
   ): Promise<ClawRunResult> {
     const { channel, conversation, prompt, provider, remoteSession, sender } = input
+    const legacyChannelThreadId = remoteSession && !conversation && (channel?.conversations.length ?? 0) === 0
+      ? channel?.threadId.trim()
+      : ''
     const initialThreadId =
       conversation?.localThreadId.trim() ||
-      channel?.threadId.trim() ||
+      legacyChannelThreadId ||
+      (remoteSession ? '' : channel?.threadId.trim()) ||
       ''
+    const modelResolution = currentImModelResolution(settings, channel, conversation)
     const result = await this.runPrompt(settings, {
       prompt,
       title: channel ? `[Claw IM:${channel.label}] ${sender}` : `[Claw IM:${provider}] ${sender}`,
       workspaceRoot: this.resolveIncomingWorkspaceRoot(settings, channel, conversation, remoteSession),
-      model: channel?.model ?? settings.claw.im.model,
-      providerId: channel?.providerId ?? settings.claw.im.providerId,
+      model: modelResolution.model,
+      providerId: modelResolution.provider.id,
       mode: settings.claw.im.mode,
       waitForResult: input.waitForResult !== false,
       responseTimeoutMs: settings.claw.im.responseTimeoutMs,
@@ -1792,6 +2040,8 @@ export class ClawRuntime {
                 senderName: remoteSession.senderName,
                 localThreadId: threadId,
                 workspaceRoot: this.resolveIncomingWorkspaceRoot(settings, channel, existingConversation, remoteSession),
+                providerId: existingConversation.providerId?.trim() || modelResolution.provider.id,
+                model: existingConversation.model?.trim() || modelResolution.model,
                 updatedAt: now
               }
             : {
@@ -1803,6 +2053,8 @@ export class ClawRuntime {
                 senderName: remoteSession.senderName,
                 localThreadId: threadId,
                 workspaceRoot: this.resolveConversationWorkspaceRoot(settings, channel, remoteSession),
+                providerId: modelResolution.provider.id,
+                model: modelResolution.model,
                 createdAt: now,
                 updatedAt: now
               }
@@ -2052,7 +2304,8 @@ export class ClawRuntime {
     settings: AppSettingsV1,
     threadId: string,
     workspaceRoot: string,
-    context: Record<string, unknown>
+    context: Record<string, unknown>,
+    turnId?: string
   ): Promise<ClawGeneratedFileV1[]> {
     const targetThreadId = threadId.trim()
     if (!targetThreadId) return []
@@ -2072,6 +2325,7 @@ export class ClawRuntime {
       }
       return latestGeneratedFiles(JSON.parse(detailRes.body) as ThreadDetailJson, {
         workspaceRoot,
+        ...(turnId ? { turnId } : {}),
         maxFiles: 3
       })
     } catch (error) {
@@ -2262,11 +2516,12 @@ export class ClawRuntime {
       return
     }
 
+    const modelResolution = currentImModelResolution(settings, channel, conversation)
     const taskCreation = await this.deps.createScheduledTaskFromText?.(text, {
       workspaceRoot: this.resolveChannelWorkspaceRoot(settings, channel),
       clawChannelId: channel.id,
-      providerId: channel.providerId?.trim() || settings.claw.im.providerId?.trim() || null,
-      modelHint: channel.model,
+      providerId: modelResolution.provider.id,
+      modelHint: modelResolution.model,
       mode: settings.claw.im.mode
     }) ?? { kind: 'noop' as const }
     if (taskCreation.kind === 'created') {
@@ -2329,8 +2584,32 @@ export class ClawRuntime {
       await this.deps.telegramRuntime!.sendMessage(channel.id, remoteSession.chatId, IM_PROCESSING_ACK)
       return
     }
-    const reply = (result.text ?? '').trim() || IM_COMPLETED_NO_TEXT_REPLY
+    const generatedFiles = result.files ?? []
+    const filesToSend = generatedFiles.length > 0 || shouldSendGeneratedFilesForPrompt(promptText)
+      ? await this.resolveImGeneratedFiles(generatedFiles, workspaceRoot, {
+          purpose: 'telegram-agent-file-resolve',
+          channelId: channel.id,
+          chatId: remoteSession.chatId,
+          inboundMessageId: remoteSession.messageId,
+          threadId: result.threadId,
+          turnId: result.turnId
+        })
+      : []
+    const reply = replyTextForGeneratedFiles(
+      (result.text ?? '').trim() || IM_COMPLETED_NO_TEXT_REPLY,
+      filesToSend
+    )
     await this.deps.telegramRuntime!.sendMessage(channel.id, remoteSession.chatId, reply)
+    for (const file of filesToSend) {
+      const delivery = await this.deps.telegramRuntime!.sendFile(channel.id, remoteSession.chatId, file.path, file.fileName)
+      if (!delivery.ok) {
+        await this.deps.telegramRuntime!.sendMessage(
+          channel.id,
+          remoteSession.chatId,
+          imKunErrorText(settings, `Telegram 附件发送失败：${delivery.message}`)
+        )
+      }
+    }
   }
 
   /**
@@ -2425,11 +2704,12 @@ export class ClawRuntime {
     }
 
     const sender = feishuSenderLabel(message)
+    const modelResolution = currentImModelResolution(settings, channel, conversation)
     const taskCreation = await this.deps.createScheduledTaskFromText?.(message.content, {
       workspaceRoot: this.resolveChannelWorkspaceRoot(settings, channel),
       clawChannelId: channel.id,
-      providerId: channel.providerId?.trim() || settings.claw.im.providerId?.trim() || null,
-      modelHint: channel.model,
+      providerId: modelResolution.provider.id,
+      modelHint: modelResolution.model,
       mode: settings.claw.im.mode
     }) ?? { kind: 'noop' as const }
     if (taskCreation.kind === 'created') {
@@ -2638,6 +2918,20 @@ export class ClawRuntime {
           })
           if (streamResult.ok) {
             const streamedText = streamResult.finalText.trim() || 'Completed.'
+            const streamFiles = await this.recentGeneratedFilesForThread(
+              settings,
+              started.threadId,
+              workspaceRoot,
+              {
+                purpose: 'feishu-stream-file-lookup',
+                channelId,
+                chatId: message.chatId,
+                inboundMessageId: message.messageId,
+                threadId: started.threadId,
+                turnId: started.turnId
+              },
+              started.turnId
+            )
             // Either the streaming card (FeishuStreamer) or its one-shot
             // fallback already delivered the text to the chat. Mark
             // `streamedToFeishu` so the post-branch sendFeishuMessage
@@ -2648,7 +2942,9 @@ export class ClawRuntime {
               threadId: started.threadId,
               turnId: started.turnId,
               text: streamedText,
-              message: streamResult.fellBack ? 'streamed (fell back to one-shot send)' : 'streamed'
+              message: streamResult.fellBack ? 'streamed (fell back to one-shot send)' : 'streamed',
+              files: streamFiles,
+              completed: true
             }
           } else {
             result = {
@@ -3051,11 +3347,12 @@ export class ClawRuntime {
         writeJson(res, 200, { ok: true, reply: `${welcomePrefix}${commandReply}` })
         return
       }
+      const modelResolution = currentImModelResolution(settings, channel, conversation)
       const taskCreation = await this.deps.createScheduledTaskFromText?.(prompt, {
         workspaceRoot: this.resolveChannelWorkspaceRoot(settings, channel),
         clawChannelId: channel?.id ?? null,
-        providerId: channel?.providerId?.trim() || im.providerId?.trim() || null,
-        modelHint: channel?.model ?? im.model,
+        providerId: modelResolution.provider.id,
+        modelHint: modelResolution.model,
         mode: im.mode
       }) ?? { kind: 'noop' as const }
       if (taskCreation.kind === 'created') {

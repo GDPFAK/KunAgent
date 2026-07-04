@@ -617,19 +617,6 @@ function latestUserMessageText(items: readonly TurnItem[], turnId: string): stri
   return ''
 }
 
-/**
- * Injected when the turn runs without an interactive user (IM bridges,
- * headless runs). The user-input tools are also withheld from the tool
- * catalog; this line keeps the model from promising a GUI dialog that
- * nobody can answer.
- */
-function userInputUnavailableInstruction(): string {
-  return [
-    'Interactive user input is unavailable for this turn: the user is on a remote channel (IM) and cannot answer GUI prompts.',
-    'Do not ask for structured input or wait for confirmation. If information is missing, state your assumption and continue, or finish your reply with the question so the user can answer in their next message.'
-  ].join(' ')
-}
-
 function allowedToolNamesWithGuiStateTools(
   allowedToolNames: readonly string[] | undefined,
   activeGoal: boolean
@@ -1443,9 +1430,9 @@ export class AgentLoop {
       ),
       this.opts.forcedAllowedToolNames
     )
-    // IM/headless turns run without the user-input gate; the tools key
-    // their advertisement off `awaitUserInput`, so omitting it hides
-    // `user_input`/`request_user_input` and rejects stray calls.
+    // IM/headless turns run without the user-input gate. The tools stay
+    // advertised so GUI/IM transitions keep a stable provider tool
+    // catalog; execution returns a tool error if the model calls them.
     const userInputDisabled = turn?.disableUserInput === true
     const toolContext: ToolHostContext = {
       threadId,
@@ -1454,6 +1441,7 @@ export class AgentLoop {
       threadMode: effectiveMode,
       ...(activePlanContext ? { guiPlan: activePlanContext } : {}),
       ...(turn?.guiDesignCanvas ? { guiDesignCanvas: true } : {}),
+      ...(turn?.imContext ? { imContext: true } : {}),
       model: modelCapabilities,
       activeSkillIds: skillResolution.activeSkillIds,
       memoryPolicy: { enabled: Boolean(this.opts.memoryStore) },
@@ -1590,7 +1578,6 @@ export class AgentLoop {
       ...memoryInstructions(memories),
       ...(skillResolution.catalogInstruction ? [skillResolution.catalogInstruction] : []),
       ...skillResolution.instructions,
-      ...(userInputDisabled ? [userInputUnavailableInstruction()] : []),
       ...(toolPreferenceInstruction ? [toolPreferenceInstruction] : []),
       ...(effectiveToolSpecs.some((tool) => tool.name === 'bash') ? [shellRuntimeInstruction()] : []),
       ...(suggestVerification ? [verificationSuggestionInstruction()] : []),
@@ -2123,6 +2110,7 @@ export class AgentLoop {
       activeSkillIds: skillResolution.activeSkillIds,
       allowedToolNames,
       userInputDisabled,
+      imContext: turn?.imContext === true,
       toolProviderKinds: new Map(tools.map((tool) => [tool.name, tool.providerKind])),
       approvalPolicy,
       sandboxMode,
@@ -2145,6 +2133,7 @@ export class AgentLoop {
     activeSkillIds: readonly string[]
     allowedToolNames?: readonly string[]
     userInputDisabled?: boolean
+    imContext?: boolean
     toolProviderKinds: ReadonlyMap<string, ToolProviderKind | undefined>
     approvalPolicy: ToolHostContext['approvalPolicy']
     sandboxMode: NonNullable<ToolHostContext['sandboxMode']>
@@ -2287,6 +2276,7 @@ export class AgentLoop {
     activeSkillIds: readonly string[]
     allowedToolNames?: readonly string[]
     userInputDisabled?: boolean
+    imContext?: boolean
     approvalPolicy: ToolHostContext['approvalPolicy']
     sandboxMode: NonNullable<ToolHostContext['sandboxMode']>
     signal: AbortSignal
@@ -2298,6 +2288,7 @@ export class AgentLoop {
       threadMode: input.threadMode,
       ...(input.activePlanContext ? { guiPlan: input.activePlanContext } : {}),
       ...(input.guiDesignCanvas ? { guiDesignCanvas: true } : {}),
+      ...(input.imContext ? { imContext: true } : {}),
       model: input.modelCapabilities,
       activeSkillIds: input.activeSkillIds,
       memoryPolicy: { enabled: Boolean(this.opts.memoryStore) },

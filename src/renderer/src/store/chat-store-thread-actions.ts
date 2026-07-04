@@ -98,6 +98,7 @@ import {
 } from './chat-store-runtime'
 import {
   composerSelectionForThread,
+  ensureRuntimeProviderForSend,
   fallbackComposerProviderIdForSend,
   subscribeThreadEventsWithRecovery
 } from './chat-store-thread-action-helpers'
@@ -793,6 +794,8 @@ export function createThreadActions(
                 title: generatedTitle,
                 // Provisional first-message title; let the backend LLM titler upgrade it.
                 titleAuto: true,
+                ...(composerModel ? { model: composerModel } : {}),
+                ...(composerProviderId ? { providerId: composerProviderId } : {}),
                 mode: mode ?? 'agent'
               })
             : null
@@ -852,6 +855,10 @@ export function createThreadActions(
       if (!channel && composerModel) {
         rememberThreadComposerSelection(activeThreadId, composerModel, composerProviderId)
       }
+      await ensureRuntimeProviderForSend({
+        providerId: channel ? undefined : composerProviderId,
+        model: composerModel
+      })
       const settings = await rendererRuntimeClient.getSettings()
       let workspaceCheckpointId: string | undefined
       const checkpointThread = get().threads.find((thread) => thread.id === activeThreadId)
@@ -1060,6 +1067,8 @@ export function createThreadActions(
       set({ error: i18n.t('common:composerQueuePlaceholder') })
       return false
     }
+    const composerModel = get().composerModel.trim()
+    const composerProviderId = get().composerProviderId.trim()
     let activeThreadId = get().activeThreadId
     try {
       if (!activeThreadId) {
@@ -1082,6 +1091,8 @@ export function createThreadActions(
             ? await p.createThread({
                 workspace: workspaceRoot,
                 title: i18n.t('common:slashCommandReviewTitle'),
+                ...(composerModel ? { model: composerModel } : {}),
+                ...(composerProviderId ? { providerId: composerProviderId } : {}),
                 mode: 'agent'
               })
             : null
@@ -1099,8 +1110,6 @@ export function createThreadActions(
         }))
       }
       const threadSnap = get().threads.find((thread) => thread.id === activeThreadId)
-      const composerModel = get().composerModel.trim()
-      const composerProviderId = get().composerProviderId.trim()
       const userModelChip = optimisticUserModelLabel(composerModel, threadSnap?.model)
       const seqAtSend = get().lastSeq
       resetBusyRecoveryAttempts()
@@ -1114,6 +1123,10 @@ export function createThreadActions(
         error: null,
         currentTurnId: null,
         currentTurnUserId: null
+      })
+      await ensureRuntimeProviderForSend({
+        providerId: composerProviderId,
+        model: composerModel
       })
       const { turnId, userMessageItemId } = await p.reviewThread(activeThreadId, target, {
         ...(composerModel ? { model: composerModel } : {}),

@@ -66,6 +66,8 @@ export type ToolHostContext = {
   guiPlan?: GuiPlanContext
   /** True when the active GUI turn is allowed to mutate the design canvas. */
   guiDesignCanvas?: boolean
+  /** True when the active turn originated from an IM bridge. */
+  imContext?: boolean
   /** Active model capability metadata used by capability-aware providers. */
   model?: ModelCapabilityMetadata
   /** Skill ids activated for this turn, if the Skill runtime is enabled. */

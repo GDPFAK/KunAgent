@@ -695,7 +695,8 @@ const clawImPatchSchema = z.object({
   providerId: z.string().trim().max(64).optional(),
   model: modelIdSchema.optional(),
   mode: clawRunModeSchema.optional(),
-  responseTimeoutMs: z.number().int().min(5_000).max(600_000).optional()
+  responseTimeoutMs: z.number().int().min(5_000).max(600_000).optional(),
+  recentThreadListLimit: z.number().int().min(1).max(50).optional()
 }).strict()
 
 const clawImAgentProfilePatchSchema = z.object({
@@ -748,6 +749,8 @@ const clawImConversationPatchSchema = z.object({
   senderName: z.string().max(512).optional(),
   localThreadId: z.string().max(MAX_ID_LENGTH).optional(),
   workspaceRoot: defaultPathSchema,
+  providerId: z.string().trim().max(64).optional(),
+  model: z.string().trim().max(128).optional(),
   createdAt: z.string().max(128).optional(),
   updatedAt: z.string().max(128).optional()
 }).strict()

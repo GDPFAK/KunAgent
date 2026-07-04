@@ -1015,6 +1015,8 @@
   "clawMasterSwitchHint": "Enabling starts scheduled tasks, the Feishu / Lark bridge, and the local IM webhook. Normal GUI chats are unaffected.",
   "clawDefaultWorkspace": "Default workspace",
   "clawDefaultWorkspaceHint": "From the GUI working directory",
+  "clawRecentThreadListLimit": "Recent conversations shown",
+  "clawRecentThreadListLimitDesc": "How many recent Kun conversations /list-threads returns in IM.",
   "clawPromptPrefix": "Phone connection prompt",
   "clawPromptPrefixHint": "Prepended to IM and scheduled task prompts",
   "clawPromptPrefixPlaceholder": "Example: You are my personal automation assistant. Before answering, identify the task source and current context.",

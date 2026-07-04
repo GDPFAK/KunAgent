@@ -138,7 +138,7 @@ export function normalizeClawImConversation(input: unknown): ClawImConversationV
   const directLocalThreadId = typeof raw.localThreadId === 'string' ? raw.localThreadId.trim() : ''
   const legacyAgentThreadId = readLegacyAgentThreadId(raw.agentThreadIds)
   const localThreadId = directLocalThreadId || legacyAgentThreadId
-  if (!id || !chatId || !latestMessageId || !localThreadId) return undefined
+  if (!id || !chatId || !latestMessageId) return undefined
   return {
     id,
     chatId,
@@ -148,6 +148,8 @@ export function normalizeClawImConversation(input: unknown): ClawImConversationV
     senderName: typeof raw.senderName === 'string' ? raw.senderName.trim() : '',
     localThreadId,
     workspaceRoot: typeof raw.workspaceRoot === 'string' ? raw.workspaceRoot.trim() : '',
+    providerId: typeof raw.providerId === 'string' ? raw.providerId.trim() : '',
+    model: typeof raw.model === 'string' && raw.model.trim() ? raw.model.trim() : '',
     createdAt: typeof raw.createdAt === 'string' && raw.createdAt ? raw.createdAt : new Date().toISOString(),
     updatedAt: typeof raw.updatedAt === 'string' && raw.updatedAt ? raw.updatedAt : new Date().toISOString()
   }
