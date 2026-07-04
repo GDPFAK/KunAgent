@@ -30,6 +30,77 @@ import { TurnService } from '../services/turn-service.js'
 import { UsageService } from '../services/usage-service.js'
 import type { ChildRunExecutor } from './delegation-runtime.js'
 
+/**
+ * Maximum number of continuation nudges injected when the child agent
+ * produces a text-only response with zero tool calls. A single nudge catches
+ * the common "superficial first reply" case (Issue #621) without risking
+ * infinite loops.
+ */
+const CHILD_NO_TOOL_MAX_RECOVERY_STEPS = 1
+
+/**
+ * System-level instruction injected into every child agent's prefix to enforce
+ * task completion discipline. This addresses Issue #621 (子代理提前结束) by
+ * making the model itself responsible for: using tools to investigate before
+ * concluding, verifying findings against real files/code, and not stopping
+ * after a superficial analysis.
+ */
+const CHILD_TASK_DISCIPLINE_PROMPT = [
+  'You are running as a delegated child agent. Complete the assigned task thoroughly before responding.',
+  'Completion rules:',
+  '- If the task requires investigating code, files, or the filesystem, you MUST use the available tools (read, grep, find, ls, bash, etc.) to gather real evidence before answering. Do NOT guess or give a superficial answer based only on the task description.',
+  '- If you can answer directly from the prompt without tools (e.g. a pure text transformation, a simple question), answer directly.',
+  '- Verify your conclusions by checking actual file contents, command output, or test results — do not assume code works because it looks correct.',
+  '- After using tools to make changes (for non-read-only tasks), run appropriate checks (read modified files, run tests, typecheck) to confirm correctness before concluding.',
+  '- Do NOT end your turn with a plan or promise of future action ("I will now...", "Next I will..."). Do the work now in this turn using tools, then report your concrete results.',
+  '- Your final response should report what you actually found, changed, or verified — not what you intend to do.'
+].join('\n')
+
+/**
+ * Regex patterns that signal the model is PLANNING to do work rather than
+ * reporting completed work. When a child agent produces a response matching
+ * these patterns WITHOUT calling any tools, it almost certainly stopped early
+ * (Issue #621) — it acknowledged the task, described what it intends to do,
+ * but never actually did it via tool calls.
+ */
+const PLANNING_LANGUAGE_PATTERNS = [
+  /\bI(?:'ll| will| will now|'m going to| am going to| need to| will first|'d like to)\b/i,
+  /\bLet me\b/i,
+  /\bFirst,? I\b/i,
+  /\bI (?:will|shall|can|would like to)\b/i,
+  /\bLet's\b/i,
+  /\bI'm going to\b/i,
+  /\bNow I(?:'ll| will)\b/i,
+  /\bNext,? I\b/i,
+  /\bTo (?:fix|solve|address|investigate|analyze|debug|do this)\b/i,
+  /我将|我会|我先|我需要|让我|接下来|首先|现在开始|我来|我准备|我打算/i,
+  /让我(?:先|开始|来|分析|看看|查看|检查|调查|研究)/i,
+  /接下来我|下一步我|下面我/i,
+  /我(?:将|会|要|先|来)(?:开始|进行|分析|查看|检查|调查|研究|阅读|找到|定位|修复)/i
+]
+
+/**
+ * Determine if the assistant text looks like planning/acknowledgement language
+ * rather than a completed answer. Used to detect premature termination where
+ * the model promised action but didn't call tools.
+ */
+function looksLikePlanningLanguage(text: string): boolean {
+  const trimmed = text.trim()
+  if (!trimmed) return true // Empty response is suspicious
+  return PLANNING_LANGUAGE_PATTERNS.some((pattern) => pattern.test(trimmed))
+}
+
+/**
+ * Continuation nudge injected as a user message when the child stops without
+ * calling any tools on a task that looks like it requires investigation.
+ * Gives the model a single chance to recover from a lazy/early stop.
+ */
+const CHILD_NO_TOOL_CONTINUATION_PROMPT = [
+  'You responded without using any tools. If the task requires investigation, reading files, running commands, or making changes, you must use tools to do the actual work now.',
+  'Do NOT repeat your previous answer or summarize what you plan to do — take concrete action using tools, then report your results.',
+  'If you genuinely can answer without tools (pure text task, simple arithmetic, etc.), provide your final answer clearly.'
+].join('\n')
+
 export type ChildAgentExecutorOptions = {
   model: ModelClient
   toolHost: ToolHost
@@ -134,12 +205,21 @@ export function createChildAgentExecutor(options: ChildAgentExecutorOptions): Ch
       ? input.blockedMcpServers.map((serverId) => `mcp:${serverId}`)
       : undefined
     const blockedSkillIds = input.blockedSkills?.length ? [...input.blockedSkills] : undefined
-    // A custom system prompt augments the base prefix (kun tool/safety
-    // conventions stay) on a distinct fingerprint, so same-agent calls still
-    // hit the prompt cache; cross-agent reuse is intentionally given up.
-    const childPrefix = input.systemPrompt?.trim()
-      ? setSystemPrompt(options.prefix, `${options.prefix.systemPrompt}\n\n${input.systemPrompt.trim()}`.trim())
-      : options.prefix
+    // Build the child's system prompt: base kun prefix + optional profile
+    // systemPrompt + mandatory child task discipline instructions. The
+    // discipline prompt is added to EVERY child (regardless of profile) to
+    // prevent the premature-termination bug (#621) where the model gives a
+    // superficial answer without using tools.
+    let systemPromptParts: string[] = []
+    if (input.systemPrompt?.trim()) {
+      systemPromptParts.push(input.systemPrompt.trim())
+    }
+    systemPromptParts.push(CHILD_TASK_DISCIPLINE_PROMPT)
+    const augmentedSystemPrompt = systemPromptParts.join('\n\n')
+    const childPrefix = setSystemPrompt(
+      options.prefix,
+      `${options.prefix.systemPrompt}\n\n${augmentedSystemPrompt}`.trim()
+    )
     const loop = new AgentLoop({
       threadStore,
       sessionStore,
@@ -193,6 +273,23 @@ export function createChildAgentExecutor(options: ChildAgentExecutorOptions): Ch
       relation: 'side',
       parentThreadId: input.parentThreadId
     })
+    // Wire the external AbortSignal (from parent turn or detached controller)
+    // to the child's turn lifecycle. Previously (Issue #621) the signal was
+    // received but never connected: aborting the parent or calling abortChild()
+    // on a detached run would fire the signal, but the child loop kept running
+    // because it only listened to its own internal AbortController.
+    let activeTurnId: string | null = null
+    let abortedExternally = false
+    const abortHandler = (): void => {
+      abortedExternally = true
+      if (activeTurnId) {
+        turns.interruptTurn({ threadId: thread.id, turnId: activeTurnId }).catch(() => {})
+      }
+    }
+    if (input.signal.aborted) {
+      throw new Error('aborted before child agent started')
+    }
+    input.signal.addEventListener('abort', abortHandler, { once: true })
     // A profile preamble rides in the prompt body (not the system prompt) so
     // the cached stable prefix stays byte-identical to the main agent's.
     const promptBase = input.promptPreamble?.trim()
@@ -201,48 +298,154 @@ export function createChildAgentExecutor(options: ChildAgentExecutorOptions): Ch
     const prompt = input.returnFormat === 'evidence'
       ? `${promptBase}\n\nReturn a concise evidence-based conclusion. Inspect the task with tools so the parent can verify the result.`
       : promptBase
-    const started = await turns.startTurn({
-      threadId: thread.id,
-      request: {
-        prompt,
-        model,
-        mode: 'agent',
-        reasoningEffort: normalizeRoleReasoningEffort(input.reasoningEffort),
-        ...(input.guiDesignCanvas ? { guiDesignCanvas: true } : {}),
-        // Children have no GUI surface to answer structured input prompts.
-        disableUserInput: true
+    let status: 'completed' | 'failed' | 'aborted'
+    let lastTurnId: string
+    let recoverySteps = 0
+
+    try {
+      const started = await turns.startTurn({
+        threadId: thread.id,
+        request: {
+          prompt,
+          model,
+          mode: 'agent',
+          reasoningEffort: normalizeRoleReasoningEffort(input.reasoningEffort),
+          ...(input.guiDesignCanvas ? { guiDesignCanvas: true } : {}),
+          // Children have no GUI surface to answer structured input prompts.
+          disableUserInput: true
+        }
+      })
+      lastTurnId = started.turnId
+      activeTurnId = started.turnId
+      status = await loop.runTurn(thread.id, started.turnId)
+      activeTurnId = null
+
+      // Lazy-stop safety net (Issue #621): if the child completed the turn
+      // with ZERO tool calls AND the response looks like planning/promising
+      // language ("I'll analyze...", "Let me start by...", "我将...") rather
+      // than a concrete answer, the model almost certainly stopped early.
+      // Inject a continuation nudge and run a second turn.
+      while (status === 'completed' && recoverySteps < CHILD_NO_TOOL_MAX_RECOVERY_STEPS) {
+        const allItems = await sessionStore.loadItems(thread.id)
+        const currentTurnItems = allItems.filter((item) => item.turnId === lastTurnId)
+        const toolCallsThisTurn = currentTurnItems.filter(
+          (item) => item.kind === 'tool_call'
+        ).length
+        const assistantTextThisTurn = currentTurnItems
+          .filter((item): item is Extract<TurnItem, { kind: 'assistant_text' }> => item.kind === 'assistant_text')
+          .map((item) => item.text.trim())
+          .filter(Boolean)
+          .join('\n\n')
+          .trim()
+
+        if (toolCallsThisTurn > 0) break
+        if (!looksLikePlanningLanguage(assistantTextThisTurn)) break
+
+        if (recoverySteps === 0) {
+          await events.record({
+            kind: 'error',
+            threadId: thread.id,
+            turnId: lastTurnId,
+            message: 'Child agent stopped without tool calls; injecting continuation nudge.',
+            code: 'child_no_tool_continuation',
+            severity: 'warning'
+          })
+          if (abortedExternally) {
+            status = 'aborted'
+            break
+          }
+          const continued = await turns.startTurn({
+            threadId: thread.id,
+            request: {
+              prompt: CHILD_NO_TOOL_CONTINUATION_PROMPT,
+              model,
+              mode: 'agent',
+              reasoningEffort: normalizeRoleReasoningEffort(input.reasoningEffort),
+              disableUserInput: true
+            }
+          })
+          lastTurnId = continued.turnId
+          activeTurnId = continued.turnId
+          status = await loop.runTurn(thread.id, continued.turnId)
+          activeTurnId = null
+          recoverySteps += 1
+          continue
+        }
+        break
       }
-    })
-    const status = await loop.runTurn(thread.id, started.turnId)
-    // Only a FATAL error fails the child. Recoverable tool errors — a tool
-    // rejected by the child's read-only policy, or a tool that crashed — are
-    // recorded as `severity: 'warning'` error events but the loop hands the
-    // model an error tool-result it adapts to and the turn still completes.
-    // Treating those as fatal wrongly marked the whole subagent "failed" for a
-    // single denied `bash` call. Genuine failures are caught by the `status`
-    // check below; here we only honor non-warning (fatal) error events.
-    const runtimeError = (await sessionStore.loadEventsSince(thread.id, 0))
-      .find(
-        (event) =>
-          event.kind === 'error' &&
-          event.turnId === started.turnId &&
-          event.severity !== 'warning' &&
-          event.severity !== 'info'
-      )
-    if (runtimeError?.kind === 'error') {
-      throw new Error(runtimeError.message)
+
+      // If externally aborted, force status to 'aborted'.
+      if (abortedExternally && status !== 'aborted') {
+        status = 'aborted'
+      }
+    } finally {
+      input.signal.removeEventListener('abort', abortHandler)
     }
+
     const items = await sessionStore.loadItems(thread.id)
-    const summary = summarizeChildTurn(items, started.turnId, status)
+
+    // Only a FATAL error fails the child. Recoverable tool errors are
+    // recorded as `severity: 'warning'` and should not mark the whole
+    // subagent "failed". Genuine failures are caught by `status` check;
+    // here we honor non-warning error events across ALL child turns.
+    const allEvents = await sessionStore.loadEventsSince(thread.id, 0)
+    const fatalError = allEvents.find(
+      (event) =>
+        event.kind === 'error' &&
+        event.threadId === thread.id &&
+        event.severity !== 'warning' &&
+        event.severity !== 'info'
+    )
+
     const toolInvocations = items.filter(
-      (item) => item.turnId === started.turnId && item.kind === 'tool_call'
+      (item) => item.kind === 'tool_call'
     ).length
+    const summary = summarizeChildTurn(items, thread.id, status)
+
     const evidence = input.returnFormat === 'evidence'
-      ? childToolEvidence(items, started.turnId)
+      ? childToolEvidence(items, lastTurnId!)
       : undefined
-    if (status !== 'completed') {
-      throw new Error(summary || `child agent ${status}`)
+
+    if (fatalError?.kind === 'error') {
+      const context = buildErrorContext({
+        childId: input.childId,
+        threadId: thread.id,
+        turnId: lastTurnId!,
+        status,
+        toolInvocations,
+        fatalMessage: fatalError.message,
+        fatalCode: fatalError.code
+      })
+      throw new Error(`${fatalError.message}\n${context}`)
     }
+
+    if (status === 'aborted' || input.signal.aborted) {
+      const reason = abortedExternally || input.signal.aborted ? 'cancelled by parent' : 'aborted internally'
+      const context = buildErrorContext({
+        childId: input.childId,
+        threadId: thread.id,
+        turnId: lastTurnId!,
+        status: 'aborted',
+        toolInvocations,
+        fatalMessage: reason
+      })
+      const error = new Error(`child agent aborted (${reason}; ${toolInvocations} tool calls before abort)\n${context}`)
+      error.name = 'ChildAbortedError'
+      throw error
+    }
+
+    if (status !== 'completed') {
+      const context = buildErrorContext({
+        childId: input.childId,
+        threadId: thread.id,
+        turnId: lastTurnId!,
+        status,
+        toolInvocations,
+        fatalMessage: summary || `child agent ${status}`
+      })
+      throw new Error(`${summary || `child agent ${status}`}\n${context}`)
+    }
+
     return {
       summary,
       ...(evidence ? { evidence } : {}),
@@ -287,25 +490,28 @@ function childThreadTitle(childId: string, label?: string, profile?: string): st
 
 function summarizeChildTurn(
   items: readonly TurnItem[],
-  turnId: string,
+  threadId: string,
   status: 'completed' | 'failed' | 'aborted'
 ): string {
-  const turnItems = items.filter((item) => item.turnId === turnId)
-  const assistantText = turnItems
+  // Collect assistant text from ALL turns of this child thread (not just the
+  // last one), since continuation turns may produce the actual final answer.
+  const threadItems = items.filter((item) => item.threadId === threadId)
+  const assistantText = threadItems
     .filter((item): item is Extract<TurnItem, { kind: 'assistant_text' }> => item.kind === 'assistant_text')
     .map((item) => item.text.trim())
     .filter(Boolean)
     .join('\n\n')
     .trim()
   if (assistantText) return assistantText
-  const errors = turnItems
+  const errors = threadItems
     .filter((item): item is Extract<TurnItem, { kind: 'error' }> => item.kind === 'error')
+    .filter((item) => item.severity === 'error')
     .map((item) => item.message.trim())
     .filter(Boolean)
     .join('\n')
     .trim()
   if (errors) return errors
-  const toolResult = [...turnItems]
+  const toolResult = [...threadItems]
     .reverse()
     .find((item): item is Extract<TurnItem, { kind: 'tool_result' }> => item.kind === 'tool_result')
   if (toolResult) return stringifySummary(toolResult.output)
@@ -322,4 +528,31 @@ function stringifySummary(value: unknown): string {
   } catch {
     return String(value)
   }
+}
+
+/**
+ * Build a structured debugging context string for child agent errors.
+ * Includes child/thread/turn IDs, status, tool call count, and fatal error
+ * details so logs and error surfaces have enough context to diagnose issues.
+ */
+function buildErrorContext(input: {
+  childId: string
+  threadId: string
+  turnId: string
+  status: 'completed' | 'failed' | 'aborted'
+  toolInvocations: number
+  fatalMessage?: string
+  fatalCode?: string
+}): string {
+  const parts = [
+    `[Child agent error context]`,
+    `  childId: ${input.childId}`,
+    `  threadId: ${input.threadId}`,
+    `  turnId: ${input.turnId}`,
+    `  status: ${input.status}`,
+    `  toolInvocations: ${input.toolInvocations}`
+  ]
+  if (input.fatalCode) parts.push(`  errorCode: ${input.fatalCode}`)
+  if (input.fatalMessage) parts.push(`  error: ${input.fatalMessage}`)
+  return parts.join('\n')
 }
