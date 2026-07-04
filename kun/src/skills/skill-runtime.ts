@@ -7,6 +7,8 @@ import type { SkillsCapabilityConfig } from '../contracts/capabilities.js'
 const DEFAULT_ACTIVE_LIMIT = 3
 const DEFAULT_INSTRUCTION_BUDGET_BYTES = 24_000
 const DEFAULT_CATALOG_BUDGET_BYTES = 8_000
+/** Minimum interval between automatic stat-based re-scans (ms). */
+const AUTO_RESCAN_INTERVAL_MS = 5_000
 const WORKSPACE_SKILL_RELATIVE_DIRS = [
   '.agents/skills',
   '.claude/skills',
@@ -102,11 +104,16 @@ export class SkillRuntime {
   private validationErrors: Array<{ root: string; message: string }>
   private readonly workspaceSkillCache = new Map<string, {
     rootsKey: string
+    sigKey?: string
     skills: LoadedSkill[]
     validationErrors: Array<{ root: string; message: string }>
   }>()
   private lastActivations: SkillActivation[] = []
   private lastInjection: SkillRuntimeDiagnostics['lastInjection']
+  /** Wall-clock time of the last global scan (discoverSkills over configured roots). */
+  private lastGlobalScanAt = 0
+  /** Tracked mtime+size signatures of global roots at last scan. */
+  private globalRootSignatures: string[] = []
 
   private constructor(
     private config: SkillsCapabilityConfig,
@@ -116,6 +123,7 @@ export class SkillRuntime {
     this.skills = loaded.skills
     this.validationErrors = loaded.validationErrors
     this.workspaceSkillCache.clear()
+    this.lastGlobalScanAt = Date.now()
   }
 
   enabled(): boolean {
@@ -135,7 +143,9 @@ export class SkillRuntime {
     const loaded = normalized.enabled
       ? await discoverSkills(normalized)
       : { skills: [], validationErrors: [] }
-    return new SkillRuntime(normalized, resolvedOptions, loaded)
+    const runtime = new SkillRuntime(normalized, resolvedOptions, loaded)
+    runtime.globalRootSignatures = await computeRootSignatures([...normalized.roots, ...normalized.globalRoots])
+    return runtime
   }
 
   replaceWith(next: SkillRuntime): void {
@@ -155,6 +165,8 @@ export class SkillRuntime {
     this.skills = loaded.skills
     this.validationErrors = loaded.validationErrors
     this.workspaceSkillCache.clear()
+    this.lastGlobalScanAt = Date.now()
+    this.globalRootSignatures = await computeRootSignatures([...this.config.roots, ...this.config.globalRoots])
   }
 
   async resolveTurn(input: {
@@ -165,7 +177,10 @@ export class SkillRuntime {
     blockedSkillIds?: readonly string[]
   }): Promise<SkillTurnResolution> {
     if (!this.config.enabled) return emptyResolution()
-    const skills = filterBlockedSkills(await this.skillsForWorkspace(input.workspace), input.blockedSkillIds)
+    await this.maybeAutoRescan()
+    // Defense-in-depth: always apply config.disabledIds alongside per-call blockedIds.
+    const allBlocked = this.mergeDisabledIds(input.blockedSkillIds)
+    const skills = filterBlockedSkills(await this.skillsForWorkspace(input.workspace), allBlocked)
     const catalogInstruction = renderCatalogInstruction(skills, this.options.catalogBudgetBytes)
     const matches = this.matchSkills(input, skills)
     const active = matches.slice(0, this.options.activeLimit)
@@ -199,7 +214,8 @@ export class SkillRuntime {
    * use resolveTurn so workspace-local skills stay out of the immutable prefix.
   */
   catalogInstruction(): string | undefined {
-    return renderCatalogInstruction(this.skills, this.options.catalogBudgetBytes)
+    const visible = this.filterGlobalByDisabled(this.skills)
+    return renderCatalogInstruction(visible, this.options.catalogBudgetBytes)
   }
 
   /**
@@ -248,11 +264,12 @@ export class SkillRuntime {
   diagnostics(): SkillRuntimeDiagnostics {
     const projectRoots = this.config.roots ?? []
     const globalRoots = this.config.globalRoots ?? []
+    const visibleSkills = this.filterGlobalByDisabled(this.skills)
     return {
       enabled: this.config.enabled,
       roots: [...projectRoots],
       globalRoots: [...globalRoots],
-      skills: this.skills.map((skill) => ({
+      skills: visibleSkills.map((skill) => ({
         id: skill.id,
         name: skill.name,
         ...(skill.description ? { description: skill.description } : {}),
@@ -270,12 +287,48 @@ export class SkillRuntime {
   }
 
   count(): number {
-    return this.skills.length
+    return this.filterGlobalByDisabled(this.skills).length
   }
 
   async countForWorkspace(workspace: string): Promise<number> {
     if (!this.config.enabled) return 0
     return (await this.skillsForWorkspace(workspace)).length
+  }
+
+  /**
+   * Lightweight stat-based check: if enough time has passed and any tracked
+   * skill root has a newer mtime than our last scan, re-scan automatically so
+   * users see new/removed skills without restarting the runtime (#554).
+   */
+  private async maybeAutoRescan(): Promise<void> {
+    if (!this.config.enabled) return
+    const now = Date.now()
+    if (now - this.lastGlobalScanAt < AUTO_RESCAN_INTERVAL_MS) return
+    const sigs = await computeRootSignatures([...this.config.roots, ...this.config.globalRoots])
+    if (sigs.join('|') === this.globalRootSignatures.join('|')) {
+      // No change; just bump timestamp so we don't stat every turn.
+      this.lastGlobalScanAt = now
+      return
+    }
+    await this.refresh()
+  }
+
+  /** Merge config.disabledIds with optional per-call blockedIds (defense-in-depth). */
+  private mergeDisabledIds(callBlocked?: readonly string[]): string[] {
+    const globalDisabled = (this.config.disabledIds ?? []).map((id) =>
+      slug(id.trim().replace(/^[$@]/, '').replace(/^skill:/i, ''))
+    )
+    if (!callBlocked || callBlocked.length === 0) return globalDisabled
+    const callNormalized = callBlocked.map((id) =>
+      slug(id.trim().replace(/^[$@]/, '').replace(/^skill:/i, ''))
+    )
+    return [...new Set([...globalDisabled, ...callNormalized])]
+  }
+
+  /** Filter global skills list by config.disabledIds for diagnostics/catalog. */
+  private filterGlobalByDisabled(skills: LoadedSkill[]): LoadedSkill[] {
+    const disabled = new Set((this.config.disabledIds ?? []).map(slug))
+    return skills.filter((skill) => !disabled.has(skill.id))
   }
 
   private matchSkills(input: {
@@ -342,14 +395,19 @@ export class SkillRuntime {
       ? discoveredRoots.filter((root) => configRoots.has(normalizeRoot(root)))
       : discoveredRoots
     const rootsKey = roots.join('\0')
+    // Compute per-root mtime+size signatures so adding/removing packages inside
+    // an existing skill root dir invalidates the cache — not just adding new
+    // root directories (#554 workspace switch catalogue refresh).
+    const rootSignatures = await computeRootSignatures(roots)
+    const sigKey = rootSignatures.join('|')
     const cached = this.workspaceSkillCache.get(workspaceRoot)
-    if (cached?.rootsKey === rootsKey) {
+    if (cached?.rootsKey === rootsKey && sigKey === (cached as Record<string, unknown>).sigKey) {
       return { skills: cached.skills, validationErrors: cached.validationErrors }
     }
     const loaded = roots.length > 0
       ? await discoverSkills({ ...this.config, roots })
       : { skills: [], validationErrors: [] }
-    this.workspaceSkillCache.set(workspaceRoot, { rootsKey, ...loaded })
+    this.workspaceSkillCache.set(workspaceRoot, { rootsKey, sigKey, ...loaded })
     return loaded
   }
 }
@@ -738,4 +796,20 @@ function slug(value: string): string {
 function errorMessage(error: unknown): string {
   if (error instanceof z.ZodError) return error.issues.map((issue) => issue.message).join('; ')
   return error instanceof Error ? error.message : String(error)
+}
+
+/**
+ * Compute a lightweight mtimeMs + size signature for each root directory so we
+ * can detect package additions/removals inside existing skill roots without a
+ * full rescan every turn. Missing roots contribute an empty signature.
+ */
+async function computeRootSignatures(roots: readonly string[]): Promise<string[]> {
+  return Promise.all(roots.map(async (root) => {
+    try {
+      const info = await stat(root)
+      return `${info.mtimeMs}:${info.size}`
+    } catch {
+      return ''
+    }
+  }))
 }
