@@ -337,11 +337,11 @@ describe('Kun built-in tools', () => {
     })
   })
 
-  it('hides GUI input tools when the turn context has no user-input gate', async () => {
+  it('keeps GUI input tools in the stable catalog without a user-input gate', async () => {
     const tools = await host.listTools(buildContext(workspace))
     const names = tools.map((tool) => tool.name)
-    expect(names).not.toContain('user_input')
-    expect(names).not.toContain('request_user_input')
+    expect(names).toContain('user_input')
+    expect(names).toContain('request_user_input')
   })
 
   it('exposes pi-style coding and read-only tool groups', () => {
@@ -366,6 +366,7 @@ describe('Kun built-in tools', () => {
       'lsp',
       'read',
       'repo_map',
+      'send_im_attachment',
       'verify_changes',
       'write'
     ])
@@ -399,6 +400,7 @@ describe('Kun built-in tools', () => {
       'lsp',
       'read',
       'repo_map',
+      'send_im_attachment',
       'verify_changes',
       'write'
     ])
@@ -411,6 +413,7 @@ describe('Kun built-in tools', () => {
       'lsp',
       'read',
       'repo_map',
+      'send_im_attachment',
       'verify_changes',
       'write'
     ])

@@ -3,7 +3,7 @@ import type { ModelRequest, ModelStreamChunk } from '../src/ports/model-client.j
 import { bootstrapThread, makeHarness } from './loop-test-harness.js'
 
 describe('agent loop: disableUserInput turns (IM bridges)', () => {
-  it('hides GUI input tools and rejects stray calls instead of blocking', async () => {
+  it('keeps a stable catalog but tells the model not to call GUI input tools', async () => {
     let calls = 0
     const seenRequests: ModelRequest[] = []
     const h = makeHarness({
@@ -32,12 +32,13 @@ describe('agent loop: disableUserInput turns (IM bridges)', () => {
     const status = await h.loop.runTurn(h.threadId, h.turnId)
 
     expect(status).toBe('completed')
-    const advertised = seenRequests[0]?.tools.map((tool) => tool.name) ?? []
-    expect(advertised).not.toContain('user_input')
-    expect(advertised).not.toContain('request_user_input')
-    expect(seenRequests[0]?.contextInstructions?.join(' ')).toMatch(
-      /Interactive user input is unavailable/
-    )
+    expect(seenRequests).toHaveLength(2)
+    for (const request of seenRequests) {
+      const advertised = request.tools.map((tool) => tool.name)
+      expect(advertised).toContain('user_input')
+      expect(advertised).toContain('request_user_input')
+      expect(request.contextInstructions?.join(' ')).toMatch(/Do not call either tool/)
+    }
 
     const result = (await h.sessionStore.loadItems(h.threadId)).find(
       (item) => item.kind === 'tool_result' && item.toolName === 'request_user_input'
@@ -69,7 +70,7 @@ describe('agent loop: disableUserInput turns (IM bridges)', () => {
     expect(advertised).toContain('user_input')
     expect(advertised).toContain('request_user_input')
     expect(seenRequests[0]?.contextInstructions?.join(' ') ?? '').not.toMatch(
-      /Interactive user input is unavailable/
+      /Do not call either tool/
     )
   })
 })

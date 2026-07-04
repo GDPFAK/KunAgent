@@ -100,12 +100,21 @@ describe('create_plan tool: advertisement', () => {
     expect(names).not.toEqual(expect.arrayContaining(['bash', 'edit', 'write', 'echo']))
   })
 
-  it('drops the GUI input tools from plan-mode advertisement when no user-input gate is wired', async () => {
+  it('keeps the plan-mode tool catalog stable when no user-input gate is wired', async () => {
     const host = new LocalToolHost({ tools: buildDefaultLocalTools() })
     const tools = await host.listTools(buildContext({ threadMode: 'plan' }))
     const names = tools.map((tool) => tool.name)
 
-    expect(names).toEqual(['read', 'grep', 'find', 'ls', 'repo_map', CREATE_PLAN_TOOL_NAME])
+    expect(names).toEqual([
+      'read',
+      'grep',
+      'find',
+      'ls',
+      'repo_map',
+      'user_input',
+      'request_user_input',
+      CREATE_PLAN_TOOL_NAME
+    ])
   })
 
   it('keeps the normal agent-mode default tool advertisement unchanged', async () => {

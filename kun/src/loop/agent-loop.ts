@@ -261,9 +261,8 @@ const PLAN_READ_ONLY_TOOL_NAMES = new Set([
 /** Interactive tools allowed during the investigation phase (step 0) of a
  * Plan-mode turn so the model can ask the user a structured clarifying
  * question (with options) and continue to `create_plan` in the same turn
- * instead of stopping with a prose question. Only effective on GUI turns:
- * these tools advertise off `awaitUserInput`, so IM/headless plan turns never
- * surface them and the prose-and-stop fallback applies there. */
+ * instead of stopping with a prose question. IM/headless turns retain the
+ * stable catalog but receive an instruction not to call these tools. */
 const PLAN_INTERACTIVE_TOOL_NAMES = new Set(['user_input', 'request_user_input'])
 
 /**
@@ -615,6 +614,13 @@ function latestUserMessageText(items: readonly TurnItem[], turnId: string): stri
     }
   }
   return ''
+}
+
+function userInputUnavailableInstruction(): string {
+  return [
+    'The `user_input` and `request_user_input` tools are unavailable for this turn because the user cannot answer GUI prompts.',
+    'Do not call either tool. If information is missing, ask the question in your normal response and end the turn so the user can answer in their next message.'
+  ].join(' ')
 }
 
 function allowedToolNamesWithGuiStateTools(
@@ -1578,6 +1584,7 @@ export class AgentLoop {
       ...memoryInstructions(memories),
       ...(skillResolution.catalogInstruction ? [skillResolution.catalogInstruction] : []),
       ...skillResolution.instructions,
+      ...(userInputDisabled ? [userInputUnavailableInstruction()] : []),
       ...(toolPreferenceInstruction ? [toolPreferenceInstruction] : []),
       ...(effectiveToolSpecs.some((tool) => tool.name === 'bash') ? [shellRuntimeInstruction()] : []),
       ...(suggestVerification ? [verificationSuggestionInstruction()] : []),
