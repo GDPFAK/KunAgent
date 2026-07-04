@@ -96,6 +96,26 @@ describe('design prompt router', () => {
     })
   })
 
+  it('routes active-page briefs to the multi-page lane when explicitly enabled', () => {
+    expect(routeDesignPrompt({
+      value: 'Design an operations app',
+      attachments: [],
+      attachmentUploadEnabled: true,
+      designState: state({
+        artifacts: [artifact('board', 'canvas'), artifact('home', 'html')],
+        activeArtifactId: 'home',
+        multiPageMode: true
+      }),
+      selectedCount: 0,
+      imageOnlyDisplay: 'image display',
+      imageOnlyPrompt: 'image prompt'
+    })).toEqual({
+      kind: 'multi-page',
+      brief: 'Design an operations app',
+      workspaceRoot: '/workspace'
+    })
+  })
+
   it('builds single-turn display and prompt text for image-only sends', () => {
     expect(routeDesignPrompt({
       value: ' ',

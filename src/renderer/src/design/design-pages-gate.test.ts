@@ -45,6 +45,14 @@ describe('design pages gate', () => {
     })).toEqual({ route: 'multi-page', reason: 'explicit-toggle' })
   })
 
+  it('lets the explicit multi-page toggle force the pipeline from an active page', () => {
+    expect(gate({
+      artifacts: [artifact('board', 'canvas'), artifact('home', 'html')],
+      activeArtifactId: 'home',
+      multiPageMode: true
+    })).toEqual({ route: 'multi-page', reason: 'explicit-toggle' })
+  })
+
   it('keeps incremental existing-page work in the single-turn lane', () => {
     expect(gate({
       artifacts: [artifact('board', 'canvas'), artifact('home', 'html')]
@@ -59,6 +67,21 @@ describe('design pages gate', () => {
       activeArtifactId: 'home'
     })).toEqual({ route: 'single-turn', reason: 'active-html-artifact' })
     expect(gate({ pagesRunActive: true })).toEqual({ route: 'single-turn', reason: 'pages-run-active' })
+  })
+
+  it('keeps safety short-circuits ahead of the explicit multi-page toggle', () => {
+    expect(gate({ selectedCount: 1, multiPageMode: true })).toEqual({
+      route: 'single-turn',
+      reason: 'canvas-selection'
+    })
+    expect(gate({ attachmentCount: 1, multiPageMode: true })).toEqual({
+      route: 'single-turn',
+      reason: 'has-attachments'
+    })
+    expect(gate({ pagesRunActive: true, multiPageMode: true })).toEqual({
+      route: 'single-turn',
+      reason: 'pages-run-active'
+    })
   })
 
   it('keeps standalone image asset prompts out of the multi-page pipeline', () => {

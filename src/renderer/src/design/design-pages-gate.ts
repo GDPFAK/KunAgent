@@ -27,9 +27,10 @@ export function shouldRouteDesignPromptToMultiPage(
   if (input.selectedCount > 0) return { route: 'single-turn', reason: 'canvas-selection' }
   if (looksLikeStandaloneImageAssetPrompt(text)) return { route: 'single-turn', reason: 'standalone-image-asset' }
 
+  if (input.multiPageMode) return { route: 'multi-page', reason: 'explicit-toggle' }
+
   const activeArtifact = input.artifacts.find((artifact) => artifact.id === input.activeArtifactId) ?? null
   if (activeArtifact?.kind === 'html') return { route: 'single-turn', reason: 'active-html-artifact' }
 
-  if (input.multiPageMode) return { route: 'multi-page', reason: 'explicit-toggle' }
   return { route: 'single-turn', reason: 'multi-page-disabled' }
 }
