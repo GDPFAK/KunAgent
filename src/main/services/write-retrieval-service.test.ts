@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -80,8 +80,17 @@ function createRequest(workspaceRoot: string): WriteInlineCompletionRequest {
   }
 }
 
-afterEach(() => {
+const tempRoots: string[] = []
+
+async function createTempWorkspace(): Promise<string> {
+  const root = await mkdtemp(join(tmpdir(), 'ds-gui-write-rag-'))
+  tempRoots.push(root)
+  return root
+}
+
+afterEach(async () => {
   clearWriteRetrievalCache()
+  await Promise.all(tempRoots.splice(0).map((root) => rm(root, { recursive: true, force: true })))
 })
 
 describe('write retrieval service', () => {
@@ -95,7 +104,7 @@ describe('write retrieval service', () => {
   })
 
   it('retrieves relevant cross-document snippets and excludes the active file', async () => {
-    const workspaceRoot = await mkdtemp(join(tmpdir(), 'ds-gui-write-rag-'))
+    const workspaceRoot = await createTempWorkspace()
     await mkdir(join(workspaceRoot, 'research'), { recursive: true })
     await writeFile(
       join(workspaceRoot, 'draft.md'),
@@ -127,7 +136,7 @@ describe('write retrieval service', () => {
   })
 
   it('ignores unsupported large data files while scanning the workspace', async () => {
-    const workspaceRoot = await mkdtemp(join(tmpdir(), 'ds-gui-write-rag-'))
+    const workspaceRoot = await createTempWorkspace()
     await writeFile(join(workspaceRoot, 'draft.md'), '# Draft\n\nembedding cache', 'utf8')
     await writeFile(
       join(workspaceRoot, 'notes.md'),
@@ -155,7 +164,7 @@ describe('write retrieval service', () => {
   })
 
   it('retrieves PDF chunks for assistant context with page locations', async () => {
-    const workspaceRoot = await mkdtemp(join(tmpdir(), 'ds-gui-write-pdf-rag-'))
+    const workspaceRoot = await createTempWorkspace()
     const pdfPath = join(workspaceRoot, 'papers', 'study.pdf')
     await mkdir(join(workspaceRoot, 'papers'), { recursive: true })
     await writeFile(join(workspaceRoot, 'draft.md'), '# Draft\n\nExplain literature context.', 'utf8')
@@ -182,4 +191,42 @@ describe('write retrieval service', () => {
     })
     expect(result?.snippets[0].text).toContain('PDF BM25 关键词检索')
   })
+
+  it('evicts the least recently used workspace index at the cache limit', async () => {
+    const first = await createTempWorkspace()
+    await writeFile(
+      join(first, 'notes.md'),
+      'alphacachemarker provides enough document text for workspace retrieval indexing.',
+      'utf8'
+    )
+    const request = (workspaceRoot: string, query: string) => retrieveWriteContext({
+      workspaceRoot,
+      currentFilePath: join(workspaceRoot, 'draft.md'),
+      query,
+      includeCurrentFile: true
+    })
+    expect(await request(first, 'alphacachemarker')).not.toBeNull()
+
+    const others: string[] = []
+    for (let index = 0; index < 7; index += 1) {
+      const root = await createTempWorkspace()
+      others.push(root)
+      await request(root, 'empty')
+    }
+    expect(await request(first, 'alphacachemarker')).not.toBeNull()
+    await request(await createTempWorkspace(), 'overflow')
+
+    await writeFile(
+      join(others[0]!, 'notes.md'),
+      'betacachemarker provides enough document text for workspace retrieval indexing.',
+      'utf8'
+    )
+    expect(await request(others[0]!, 'betacachemarker')).not.toBeNull()
+    await writeFile(
+      join(first, 'notes.md'),
+      'betacachemarker provides enough document text for workspace retrieval indexing.',
+      'utf8'
+    )
+    expect(await request(first, 'betacachemarker')).toBeNull()
+  }, 10_000)
 })
