@@ -18,6 +18,7 @@ import {
   KUN_RUNTIME_INFO_PATH,
   KUN_RUNTIME_TOOLS_PATH,
   KUN_SKILLS_PATH,
+  KUN_THREADS_PATH,
   kunApprovalPath,
   kunThreadCompactPath,
   kunThreadEventsPath,
@@ -130,11 +131,13 @@ export class KunRuntimeProvider implements AgentProvider {
   }
 
   async connect(): Promise<void> {
+    // Initialize RouteRegistry before any API calls (#237)
+    await rendererRuntimeClient.initRouteRegistry().catch(() => { /* fallback to default routes */ })
     const health = await rendererRuntimeClient.runtimeRequest('/health', 'GET')
     if (!health.ok) {
       throw runtimeErrorToError(readRuntimeError(health.body, `runtime unhealthy (${health.status || 0})`))
     }
-    const threads = await rendererRuntimeClient.runtimeRequest('/v1/threads?limit=1', 'GET')
+    const threads = await rendererRuntimeClient.runtimeRequest(`${KUN_THREADS_PATH}?limit=1`, 'GET')
     if (!threads.ok) {
       throw runtimeErrorToError(readRuntimeError(threads.body, `failed to list threads (${threads.status || 0})`))
     }

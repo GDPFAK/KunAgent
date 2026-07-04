@@ -8,7 +8,7 @@ export type RouteHandler = (
 
 /**
  * Minimal router that supports `:param` placeholders. Routes are
- * registered with `(method, path, handler)` tuples and resolved in
+ * registered with `(method, path, handler, key?)` tuples and resolved in
  * registration order. The first matching route wins; this keeps
  * extension paths (`/v1/threads/:id/turns/:turnId`) explicit.
  */
@@ -18,15 +18,22 @@ export class Router {
     pattern: string
     segments: string[]
     handler: RouteHandler
+    key?: string
   }> = []
 
-  add(method: string, path: string, handler: RouteHandler): void {
+  add(method: string, path: string, handler: RouteHandler, key?: string): void {
     this.routes.push({
       method: method.toUpperCase(),
       pattern: path,
       segments: path.split('/').filter(Boolean),
-      handler
+      handler,
+      key
     })
+  }
+
+  /** Return all registered routes with their semantic keys for client discovery. */
+  listRoutes(): Array<{ key?: string; method: string; path: string }> {
+    return this.routes.map((r) => ({ key: r.key, method: r.method, path: r.pattern }))
   }
 
   match(method: string, path: string): { handler: RouteHandler; params: Record<string, string> } | undefined {

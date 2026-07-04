@@ -5,10 +5,34 @@ import type {
   SseErrorPayload,
   SseEventPayload
 } from '@shared/kun-gui-api'
+import { routeRegistry, type RouteRegistryFetch } from './route-registry.js'
 
 class RendererRuntimeClient {
   private cachedSettings: AppSettingsV1 | null = null
   private settingsPromise: Promise<AppSettingsV1> | null = null
+  private routeRegistryInitialized = false
+
+  /**
+   * Initialize the RouteRegistry with the IPC bridge fetch function.
+   * Idempotent – safe to call multiple times. Falls back to default routes on failure.
+   */
+  async initRouteRegistry(): Promise<void> {
+    if (this.routeRegistryInitialized) return
+    const fetchFn: RouteRegistryFetch = async (path, method) => {
+      return this.runtimeRequest(path, method)
+    }
+    await routeRegistry.init(fetchFn)
+    this.routeRegistryInitialized = true
+  }
+
+  /**
+   * Make a runtime request using a semantic route key.
+   * Automatically resolves the key to the correct path via RouteRegistry.
+   */
+  async requestByKey(key: string, params: Record<string, string> = {}, method?: string, body?: string): Promise<RuntimeRequestResult> {
+    const path = routeRegistry.path(key, params)
+    return this.runtimeRequest(path, method, body)
+  }
 
   async getSettings(options?: { forceRefresh?: boolean }): Promise<AppSettingsV1> {
     if (options?.forceRefresh) {

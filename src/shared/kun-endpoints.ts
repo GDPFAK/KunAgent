@@ -133,6 +133,9 @@ export const KUN_USAGE_TEMPLATE = '/v1/usage'
 export const KUN_DEBUG_LLM_ROUNDS_PATH = '/v1/debug/llm-rounds'
 export const KUN_DEBUG_LLM_ROUNDS_TEMPLATE = '/v1/debug/llm-rounds'
 
+export const KUN_ROUTES_PATH = '/v1/routes'
+export const KUN_ROUTES_TEMPLATE = '/v1/routes'
+
 export const KUN_BACKGROUND_SHELLS_PATH = '/v1/background-shells'
 export const KUN_BACKGROUND_SHELLS_TEMPLATE = '/v1/background-shells'
 export const KUN_BACKGROUND_SHELL_TEMPLATE = '/v1/background-shells/{sessionId}'
