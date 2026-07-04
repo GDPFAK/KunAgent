@@ -39,6 +39,12 @@ async function createFixture(): Promise<string> {
   return root
 }
 
+async function createEmptyFixture(): Promise<string> {
+  const root = await mkdtemp(join(tmpdir(), 'kun-repo-map-cache-'))
+  tempRoots.push(root)
+  return root
+}
+
 function context(workspace: string): ToolHostContext {
   return {
     threadId: 'thread_repo_map',
@@ -95,4 +101,23 @@ describe('repo_map tool', () => {
     expect((cached.output as { cache: { hit: boolean } }).cache.hit).toBe(true)
     expect(SUBAGENT_READ_ONLY_TOOL_NAMES).toContain('repo_map')
   })
+
+  it('evicts the least recently used workspace when the cache reaches its limit', async () => {
+    const first = await createEmptyFixture()
+    const tool = createRepoMapLocalTool()
+    await tool.execute({}, context(first))
+
+    const others: string[] = []
+    for (let index = 0; index < 7; index += 1) {
+      const root = await createEmptyFixture()
+      others.push(root)
+      await tool.execute({}, context(root))
+    }
+    expect((await tool.execute({}, context(first))).output).toMatchObject({ cache: { hit: true } })
+    await tool.execute({}, context(await createEmptyFixture()))
+
+    expect((await tool.execute({}, context(first))).output).toMatchObject({ cache: { hit: true } })
+    const rebuilt = await tool.execute({}, context(others[0]!))
+    expect((rebuilt.output as { cache: { hit: boolean } }).cache.hit).toBe(false)
+  }, 10_000)
 })
