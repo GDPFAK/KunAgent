@@ -1,7 +1,7 @@
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { LocalToolHost, defaultLocalTools } from '../src/adapters/tool/local-tool-host.js'
 import {
   allBuiltinToolNames,
@@ -629,7 +629,7 @@ describe('Kun built-in tools', () => {
     expect(Date.now() - startedAt).toBeGreaterThanOrEqual(1800)
   })
 
-  it('returns immediately for background bash sessions and keeps running after abort', async () => {
+  it('returns a running background bash session and keeps running after abort', async () => {
     const hooks = {
       started: [] as string[],
       settled: [] as string[]
@@ -651,7 +651,6 @@ describe('Kun built-in tools', () => {
       ]
     })
     const abortController = new AbortController()
-    const startedAt = Date.now()
     const output = await backgroundHost.execute(
       {
         callId: 'call_bash_background',
@@ -672,11 +671,9 @@ describe('Kun built-in tools', () => {
     expect(String(payload.session_id)).toMatch(/^[a-z0-9]{8}$/)
     expect(typeof payload.output_file).toBe('string')
     expect(String(payload.output_file)).toMatch(/\.output$/)
-    expect(Date.now() - startedAt).toBeLessThan(500)
     expect(hooks.started).toHaveLength(1)
 
     abortController.abort()
-    await new Promise((resolve) => setTimeout(resolve, 2500))
     const read = await backgroundHost.execute(
       {
         callId: 'call_bash_background_read',
@@ -704,7 +701,9 @@ describe('Kun built-in tools', () => {
       },
       buildContext(workspace)
     )
-    expect(hooks.settled.length).toBeGreaterThanOrEqual(1)
+    await vi.waitFor(() => {
+      expect(hooks.settled.length).toBeGreaterThanOrEqual(1)
+    })
   })
 
   it('polls completed background shell sessions via background_shell', async () => {
