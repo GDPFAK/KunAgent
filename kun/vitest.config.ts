@@ -10,6 +10,7 @@ export default defineConfig({
   test: {
     environment: 'node',
     include: ['tests/**/*.test.ts', 'src/**/*.test.ts'],
-    globals: false
+    globals: false,
+    ...(process.platform === 'win32' ? { maxWorkers: 2 } : {})
   }
 })
