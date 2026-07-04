@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from 'node:fs'
+import { copyFileSync, existsSync, readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { z } from 'zod'
@@ -137,6 +137,10 @@ export const RuntimeTuningConfigSchema = z
     // `stream_idle_timeout`. Local LLM servers prefilling a huge prompt can
     // stay silent well past the 45s default; `0` disables the guard entirely.
     streamIdleTimeoutMs: z.number().int().min(0).optional(),
+    /** Per-step timeout (ms) for the turn-level watchdog. Each pipeline
+     * stage must complete within this window or the turn is interrupted.
+     * Defaults to 120000ms (120s); `0` disables the guard entirely. */
+    stepTimeoutMs: z.number().int().min(0).optional(),
     toolStorm: z
       .object({
         enabled: z.boolean().optional(),
@@ -372,7 +376,19 @@ export function readOptionalKunConfigFile(path: string | undefined): LoadedKunCo
   if (!path) return null
   const resolvedPath = expandHomePath(path)
   if (!existsSync(resolvedPath)) return null
-  return readKunConfigFile(resolvedPath)
+  try {
+    return readKunConfigFile(resolvedPath)
+  } catch {
+    // 配置文件损坏时备份后返回 null,使用默认配置启动而非崩溃。
+    try {
+      const backupPath = `${resolvedPath}.corrupted-${Date.now()}.bak`
+      copyFileSync(resolvedPath, backupPath)
+      console.warn(`[kun-config] corrupted config at ${resolvedPath}, backed up to ${backupPath}`)
+    } catch {
+      // 备份失败也不影响后续使用默认配置的降级路径
+    }
+    return null
+  }
 }
 
 export function kunConfigPathForDataDir(dataDir: string | undefined): string | undefined {
