@@ -9,6 +9,8 @@ import { isToolResultBridgeItem, repairModelHistoryItems } from '../../domain/mo
 import { extractToolResultImages, toolResultTextWithoutImages } from '../../loop/tool-result-image.js'
 import { repairToolArguments } from './tool-argument-repair.js'
 import { isDeepSeekHost, probeDeepSeekReachable } from './model-error-probe.js'
+import { validateModelRequest, detectProviderRules } from './model-request-validator.js'
+import { StreamTimeoutTracker, createFirstTokenTimeoutSignal, normalizeStreamTimeoutConfig } from './stream-timeout.js'
 import {
   DEFAULT_MODEL_ENDPOINT_FORMAT,
   isCustomModelEndpointFormat,
@@ -258,12 +260,33 @@ export class CompatModelClient implements ModelClient {
     }
     const url = buildModelEndpointUrl(this.config.baseUrl, configuredEndpointFormat)
     const stream = request.stream ?? !this.config.nonStreaming
+
+    // Validate request parameters before building the body
+    const rules = detectProviderRules(this.config.baseUrl)
+    const validation = validateModelRequest(request, rules)
+    if (!validation.valid) {
+      yield { kind: 'error', message: `Request validation: ${validation.field} — ${validation.error}` }
+      return
+    }
+
     const body = this.buildRequestBody(request, stream, { endpointFormat })
     if (round) {
       round.requestBody = body
       round.url = redactUrlForLog(url)
     }
     const headers = this.buildHeaders(stream, endpointFormat)
+
+    // Set up T1 (first token) and T3 (total) timeout tracking
+    const timeoutTracker = new StreamTimeoutTracker(
+      normalizeStreamTimeoutConfig({
+        firstTokenTimeoutMs: 30_000,
+        interTokenTimeoutMs: this.config.streamIdleTimeoutMs ?? 45_000,
+        totalTimeoutMs: 600_000
+      }),
+      { provider: this.provider, model: requestModel, threadId: request.threadId, turnId: request.turnId }
+    )
+    timeoutTracker.start()
+
     let result = await this.postChatCompletion(url, headers, body, request.abortSignal)
     // Retry transient gateway failures (502/503/504) a few times before giving
     // up. These are upstream load-balancer hiccups (e.g. an ALB returning
@@ -286,6 +309,13 @@ export class CompatModelClient implements ModelClient {
       yield { kind: 'error', message: result.message }
       return
     }
+    // T1 check: first token should have arrived by now
+    const t1Check = timeoutTracker.checkFirstToken()
+    if (t1Check.kind === 'timeout') {
+      yield { kind: 'error', message: t1Check.message, code: 'stream_first_token_timeout' }
+      return
+    }
+
     let response = result.response
     if (!response.ok) {
       const text = await response.text()
@@ -308,7 +338,7 @@ export class CompatModelClient implements ModelClient {
             yield { kind: 'error', message: 'model response had no body' }
             return
           }
-          yield* this.streamSse(response.body, request.abortSignal, endpointFormat, requestModel)
+          yield* this.streamSse(response.body, request.abortSignal, endpointFormat, requestModel, timeoutTracker)
           return
         }
         const retryText = await response.text()
@@ -353,7 +383,7 @@ export class CompatModelClient implements ModelClient {
       yield { kind: 'error', message: 'model response had no body' }
       return
     }
-    yield* this.streamSse(response.body, request.abortSignal, endpointFormat, requestModel)
+    yield* this.streamSse(response.body, request.abortSignal, endpointFormat, requestModel, timeoutTracker)
   }
 
   private endpointFormat(): ModelEndpointFormat {
@@ -681,7 +711,7 @@ export class CompatModelClient implements ModelClient {
       body.tools = tools.map((tool) => ({
         name: tool.name,
         description: tool.description,
-        input_schema: tool.inputSchema
+        input_schema: canonicalizeToolSchema(tool.inputSchema)
       }))
     }
     return body
@@ -933,7 +963,8 @@ export class CompatModelClient implements ModelClient {
     body: ReadableStream<Uint8Array>,
     signal: AbortSignal,
     endpointFormat: ModelEndpointFormat,
-    model: string
+    model: string,
+    timeoutTracker?: StreamTimeoutTracker
   ): AsyncIterable<ModelStreamChunk> {
     const decoder = new TextDecoder('utf-8')
     const reader = body.getReader()
@@ -988,6 +1019,16 @@ export class CompatModelClient implements ModelClient {
           } catch {
             continue
           }
+
+          // T3 total timeout check on every chunk
+          if (timeoutTracker) {
+            const t3Check = timeoutTracker.onChunk()
+            if (t3Check.kind === 'timeout') {
+              yield { kind: 'error', message: t3Check.message, code: 'stream_total_timeout' }
+              return
+            }
+          }
+
           const result = this.consumeStreamPayload(
             payload as Record<string, unknown>,
             pendingArguments,
@@ -1714,10 +1755,11 @@ function messagesToAnthropic(
       // when they see it. The image rides instead as a sibling `image`
       // block in the same user message — the older shape that every
       // compat layer accepts.
+      const toolResultText = chatContentToTextOnly(message.content) || '(tool result has no text content)'
       const blocks: AnthropicContentBlock[] = [{
         type: 'tool_result',
         tool_use_id: message.tool_call_id,
-        content: chatContentToTextOnly(message.content)
+        content: toolResultText
       }]
       if (Array.isArray(message.content)) {
         for (const part of message.content) {
@@ -2602,6 +2644,16 @@ function canonicalize(value: unknown): unknown {
     out[key] = canonicalize((value as Record<string, unknown>)[key])
   }
   return out
+}
+
+/**
+ * Ensure a tool input schema always has `type: "object"`.
+ * Some third-party Anthropic-compat providers reject schemas without an
+ * explicit type field, even though they accept any valid JSON Schema.
+ */
+function canonicalizeToolSchema(schema: Record<string, unknown>): Record<string, unknown> {
+  if (schema.type && typeof schema.type === 'string') return schema
+  return { ...schema, type: 'object' }
 }
 
 function resolveToolCallDeltaId(
