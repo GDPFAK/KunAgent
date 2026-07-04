@@ -812,7 +812,7 @@ export function SidebarProjectsSection({
     setWorkspaceContextMenu({
       workspacePath,
       x: Math.min(event.clientX, window.innerWidth - 220),
-      y: Math.min(event.clientY, window.innerHeight - 170)
+      y: Math.min(event.clientY, window.innerHeight - 210)
     })
   }
 
@@ -839,6 +839,56 @@ export function SidebarProjectsSection({
       confirmLabel: t('sidebarWorkspaceRemoveConfirmButton'),
       danger: true,
       onConfirm: () => onRemoveWorkspace(workspacePath)
+    })
+  }
+
+  const archivableWorkspaceThreads = (workspacePath: string): NormalizedThread[] => {
+    const targetKey = workspaceRootIdentityKey(workspacePath)
+    if (!targetKey) return []
+    const candidateProjectPaths = sidebarWorkspaceResolutionCandidates({
+      workspaceRoot,
+      workspaceRoots,
+      threadWorktrees,
+      threads
+    })
+    return threads.filter((thread) =>
+      thread.archived !== true &&
+      workspaceRootIdentityKey(
+        sidebarWorkspacePathForThread(thread, threadWorktrees, candidateProjectPaths)
+      ) === targetKey
+    )
+  }
+
+  const handleArchiveWorkspaceThreads = async (workspacePath: string): Promise<void> => {
+    const targets = archivableWorkspaceThreads(workspacePath)
+    if (targets.length === 0) return
+    openActionDialog({
+      title: t('sidebarWorkspaceArchiveDialogTitle', { name: workspaceLabelFromPath(workspacePath) }),
+      description: t('sidebarWorkspaceArchiveDialogDescription', { count: targets.length }),
+      detail: t('sidebarWorkspaceArchiveDialogDetail'),
+      confirmLabel: t('sidebarWorkspaceArchiveConfirmButton'),
+      onConfirm: async () => {
+        const latestTargets = archivableWorkspaceThreads(workspacePath)
+        const targetIds = latestTargets.map((thread) => thread.id.trim()).filter(Boolean)
+        if (targetIds.length === 0) return
+        setDeletingThreadIds((prev) => ({
+          ...prev,
+          ...Object.fromEntries(targetIds.map((threadId) => [threadId, true]))
+        }))
+        try {
+          for (const threadId of targetIds) {
+            await onArchiveThread(threadId)
+          }
+        } finally {
+          setDeletingThreadIds((prev) => {
+            const next = { ...prev }
+            for (const threadId of targetIds) {
+              delete next[threadId]
+            }
+            return next
+          })
+        }
+      }
     })
   }
 
@@ -1119,7 +1169,9 @@ export function SidebarProjectsSection({
           onClose={() => setWorkspaceContextMenu(null)}
           onNewThread={() => onCreateThreadInWorkspace(workspaceContextMenu.workspacePath)}
           onOpenInSystem={() => void openWorkspaceInSystem(workspaceContextMenu.workspacePath)}
+          onArchiveThreads={() => void handleArchiveWorkspaceThreads(workspaceContextMenu.workspacePath)}
           onRemove={() => void handleRemoveWorkspace(workspaceContextMenu.workspacePath)}
+          archiveDisabled={archivableWorkspaceThreads(workspaceContextMenu.workspacePath).length === 0}
           t={t}
         />
       ) : null}
@@ -1592,14 +1644,18 @@ function WorkspaceContextMenu({
   onClose,
   onNewThread,
   onOpenInSystem,
+  onArchiveThreads,
   onRemove,
+  archiveDisabled,
   t
 }: {
   state: WorkspaceContextMenuState
   onClose: () => void
   onNewThread: () => void
   onOpenInSystem: () => void
+  onArchiveThreads: () => void
   onRemove: () => void
+  archiveDisabled: boolean
   t: (k: string, opts?: Record<string, unknown>) => string
 }): ReactElement {
   const run = (action: () => void): void => {
@@ -1626,6 +1682,12 @@ function WorkspaceContextMenu({
         label={t('sidebarWorkspaceOpenInSystem')}
         disabled={false}
         onClick={() => run(onOpenInSystem)}
+      />
+      <ThreadContextMenuItem
+        icon={<Archive className="h-3.5 w-3.5" strokeWidth={1.9} />}
+        label={t('sidebarWorkspaceArchiveThreads')}
+        disabled={archiveDisabled}
+        onClick={() => run(onArchiveThreads)}
       />
       <div className="my-1 h-px bg-ds-border-muted" />
       <ThreadContextMenuItem
