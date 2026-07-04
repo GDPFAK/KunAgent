@@ -34,8 +34,8 @@ function gate(input: Partial<DesignMultiPageGateInput> = {}) {
 }
 
 describe('design pages gate', () => {
-  it('routes from-scratch generate briefs to the multi-page pipeline', () => {
-    expect(gate()).toEqual({ route: 'multi-page', reason: 'from-scratch' })
+  it('keeps from-scratch briefs in the single-turn lane by default', () => {
+    expect(gate()).toEqual({ route: 'single-turn', reason: 'multi-page-disabled' })
   })
 
   it('lets the explicit multi-page toggle force the pipeline when pages already exist', () => {
@@ -48,7 +48,7 @@ describe('design pages gate', () => {
   it('keeps incremental existing-page work in the single-turn lane', () => {
     expect(gate({
       artifacts: [artifact('board', 'canvas'), artifact('home', 'html')]
-    })).toEqual({ route: 'single-turn', reason: 'incremental-existing-pages' })
+    })).toEqual({ route: 'single-turn', reason: 'multi-page-disabled' })
   })
 
   it('does not fan out selected, attached, active-page, or running prompts', () => {

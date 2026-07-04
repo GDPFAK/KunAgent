@@ -11,10 +11,9 @@ const HARD_SCREEN_DESIGN_RE =
   /\b(page|screen|landing page|dashboard|prototype|mockup)\b|页面|界面|原型|设计稿|看板/i
 
 /**
- * Empty design boards normally route a broad brief into the multi-page design
- * pipeline. Strong image-asset briefs (logo/icon/illustration/etc.) should stay
- * on the canvas lane so the agent calls generate_image and places a reusable
- * picture on the whiteboard instead of creating an HTML screen.
+ * Strong image-asset briefs (logo/icon/illustration/etc.) should stay on the
+ * canvas lane so the agent calls generate_image and places a reusable picture
+ * on the whiteboard instead of creating an HTML screen.
  */
 export function looksLikeStandaloneImageAssetPrompt(text: string): boolean {
   const prompt = text.trim()
