@@ -151,6 +151,13 @@ export class BackgroundShellRuntime {
     }
   }
 
+  /** Remove all sessions belonging to a deleted thread. */
+  purgeThread(threadId: string): void {
+    for (const [sessionId, record] of this.sessions) {
+      if (record.threadId === threadId) this.sessions.delete(sessionId)
+    }
+  }
+
   private async notifyAgent(record: BackgroundShellRecord): Promise<void> {
     const thread = await this.deps.threadStore.get(record.threadId)
     if (!thread) return

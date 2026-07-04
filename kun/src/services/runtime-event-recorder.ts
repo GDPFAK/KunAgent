@@ -78,4 +78,10 @@ export class RuntimeEventRecorder {
     const current = this.lastIssuedSeq.get(threadId) ?? 0
     if (seq > current) this.lastIssuedSeq.set(threadId, seq)
   }
+
+  /** Remove cached seq state for a thread and cascade to the event bus. */
+  purgeThread(threadId: string): void {
+    this.lastIssuedSeq.delete(threadId)
+    this.options.eventBus.purgeThread(threadId)
+  }
 }

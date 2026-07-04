@@ -114,6 +114,13 @@ export class InMemorySessionStore implements SessionStore {
     return list.reduce((max, event) => Math.max(max, event.seq), 0)
   }
 
+  /** Drop all in-memory state for a specific thread. */
+  purgeThread(threadId: string): void {
+    this.events.delete(threadId)
+    this.items.delete(threadId)
+    this.sessions.delete(threadId)
+  }
+
   async resetMemory(): Promise<void> {
     this.events.clear()
     this.items.clear()

@@ -77,6 +77,10 @@ export class HybridSessionStore implements SessionStore {
     return this.index.loadLatestUsageSnapshots(options)
   }
 
+  purgeThread(threadId: string): void {
+    this.delegate.purgeThread(threadId)
+  }
+
   async resetMemory(): Promise<void> {
     await this.delegate.resetMemory()
   }

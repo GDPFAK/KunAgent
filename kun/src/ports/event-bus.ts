@@ -11,5 +11,7 @@ export interface EventBus {
   /** Snapshot all events with `seq` greater than `sinceSeq`. */
   snapshotSince(threadId: string, sinceSeq: number): RuntimeEvent[]
   highestSeq(threadId: string): number
+  /** Remove all in-memory state for a thread. Called after the thread is deleted. */
+  purgeThread(threadId: string): void
   reset(): void
 }

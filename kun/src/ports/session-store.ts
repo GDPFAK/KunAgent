@@ -48,6 +48,8 @@ export interface SessionStore {
   loadUsageRecords?(options?: { threadId?: string }): Promise<SessionUsageRecord[]>
   /** Optional indexed latest cumulative usage snapshot query. */
   loadLatestUsageSnapshots?(options?: { threadIds?: string[] }): Promise<SessionLatestUsageSnapshot[]>
+  /** Drop the in-memory cache for a specific thread without touching disk. */
+  purgeThread?(threadId: string): void | Promise<void>
   /** Forget the per-thread in-memory state without touching disk. */
   resetMemory(): Promise<void>
 }

@@ -78,6 +78,7 @@ export class ThreadService {
   private readonly events: RuntimeEventRecorder
   private readonly ids: IdGenerator
   private readonly nowIso: () => string
+  private cleanupHook: ((threadId: string) => void | Promise<void>) | undefined
 
   constructor(options: ThreadServiceOptions) {
     this.threadStore = options.threadStore
@@ -85,6 +86,12 @@ export class ThreadService {
     this.events = options.events
     this.ids = options.ids
     this.nowIso = options.nowIso
+  }
+
+  /** Register a hook called when a thread is deleted, for components that hold
+   * per-thread in-memory state (event bus caches, agent loop caches, etc.). */
+  setCleanupHook(hook: (threadId: string) => void | Promise<void>): void {
+    this.cleanupHook = hook
   }
 
   async list(options: ListThreadsOptions = {}): Promise<ThreadSummary[]> {
@@ -377,6 +384,10 @@ export class ThreadService {
   async delete(threadId: string): Promise<boolean> {
     const ok = await this.threadStore.delete(threadId)
     if (!ok) return false
+    // Purge per-thread in-memory state to prevent memory leaks (Issue #651).
+    this.sessionStore.purgeThread?.(threadId)
+    this.events.purgeThread(threadId)
+    await this.cleanupHook?.(threadId)
     return true
   }
 

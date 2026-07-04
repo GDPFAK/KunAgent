@@ -190,6 +190,12 @@ export class DelegationRuntime {
     return this.options.config.enabled
   }
 
+  /** Reset per-thread budget bookkeeping when a thread is deleted. */
+  purgeThread(threadId: string): void {
+    this.threadCounts.delete(threadId)
+    this.threadSeeds.delete(threadId)
+  }
+
   async runChild(input: {
     parentThreadId: string
     parentTurnId: string

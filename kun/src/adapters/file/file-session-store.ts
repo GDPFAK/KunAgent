@@ -166,6 +166,12 @@ export class FileSessionStore implements SessionStore {
     return events.reduce((max, event) => Math.max(max, event.seq), 0)
   }
 
+  /** Evict a specific thread from the in-memory item cache. */
+  purgeThread(threadId: string): void {
+    this.itemsCache.delete(threadId)
+    this.itemsCacheVersion.delete(threadId)
+  }
+
   async resetMemory(): Promise<void> {
     this.itemsCache.clear()
     this.itemsCacheVersion.clear()

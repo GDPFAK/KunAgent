@@ -69,6 +69,18 @@ export class InMemoryEventBus implements EventBus {
     return next
   }
 
+  /**
+   * Remove all in-memory state for a thread: retained event tail, seq
+   * counters, and subscriber set. Called after the thread is deleted so
+   * long-lived runtimes do not accumulate per-thread memory forever.
+   */
+  purgeThread(threadId: string): void {
+    this.events.delete(threadId)
+    this.subscribers.delete(threadId)
+    this.nextSeq.delete(threadId)
+    this.highestSeqByThread.delete(threadId)
+  }
+
   reset(): void {
     this.events.clear()
     this.subscribers.clear()
