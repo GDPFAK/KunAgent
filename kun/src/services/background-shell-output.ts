@@ -128,6 +128,15 @@ export class BackgroundShellOutputWriter {
   async buildReturnFields(
     maxChars = DEFAULT_BACKGROUND_SHELL_OUTPUT_SUMMARY_MAX_CHARS
   ): Promise<BackgroundShellOutputSummary & { output_file: string }> {
+    const stream = this.stream
+    if (stream) {
+      await new Promise<void>((resolvePromise, reject) => {
+        stream.write('', (error) => {
+          if (error) reject(error)
+          else resolvePromise()
+        })
+      })
+    }
     const summary = await readBackgroundShellOutputSummary(this.paths.outputFilePath, maxChars)
     return {
       ...summary,
