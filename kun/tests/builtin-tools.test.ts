@@ -603,7 +603,9 @@ describe('Kun built-in tools', () => {
     expect(output.truncation).toBe(null)
   })
 
-  it('finishes bash commands after the shell exits even when a background child keeps stdio open', async () => {
+  it.skipIf(process.platform === 'win32')(
+    'finishes POSIX shell commands after a background child keeps stdio open',
+    async () => {
     const startedAt = Date.now()
     const output = await executeTool(host, workspace, 'bash', {
       command: 'sleep 5 & echo done',
@@ -613,7 +615,8 @@ describe('Kun built-in tools', () => {
     expect(output.exit_code).toBe(0)
     expect(String(output.output)).toContain('done')
     expect(Date.now() - startedAt).toBeLessThan(1500)
-  })
+    }
+  )
 
   it('blocks foreground bash commands until the process exits', async () => {
     const startedAt = Date.now()
@@ -761,14 +764,6 @@ describe('Kun built-in tools', () => {
         })
       ]
     })
-    await backgroundHost.execute(
-      {
-        callId: 'call_bash_bg',
-        toolName: 'bash',
-        arguments: { command: 'echo hi', background: true, timeout: 10 }
-      },
-      buildContext(workspace)
-    )
     const listed = await executeTool(backgroundHost, workspace, 'background_shell', {
       action: 'list',
       thread_only: false
@@ -799,9 +794,14 @@ describe('Kun built-in tools', () => {
     const outputFile = String(payload.output_file)
     expect(outputFile).toContain('background-shells')
     expect(outputFile.endsWith(`${String(payload.session_id)}.output`)).toBe(true)
-    await new Promise((resolve) => setTimeout(resolve, 500))
+    const completed = await executeTool(backgroundHost, workspace, 'background_shell', {
+      action: 'poll',
+      session_id: String(payload.session_id),
+      yield_seconds: 2
+    })
+    expect(completed.status).toBe('completed')
     const full = await readFile(outputFile, 'utf-8')
-    expect(full.startsWith('line-one\n')).toBe(true)
+    expect(full.replace(/\r\n/g, '\n').startsWith('line-one\n')).toBe(true)
     expect([...full].length).toBeGreaterThan(10_000)
     const read = await executeTool(backgroundHost, workspace, 'background_shell', {
       action: 'read',
