@@ -7,6 +7,7 @@ import {
   DEFAULT_KUN_MODEL,
   DEFAULT_KUN_PORT,
   DEFAULT_MUSIC_GENERATION_PROTOCOL,
+  DEFAULT_PROMPT_OPTIMIZATION_PROMPT,
   MIN_KUN_LOCAL_PORT,
   DEFAULT_MODEL_ENDPOINT_FORMAT,
   DEFAULT_MODEL_REQUEST_RETRY_HTTP_STATUS_CODES,
@@ -32,6 +33,7 @@ import {
   type ImageGenerationQuality,
   type KunMcpSearchSettingsV1,
   type KunMusicGenerationSettingsV1,
+  type KunPromptOptimizationSettingsV1,
   type KunRuntimeTuningSettingsV1,
   type KunRuntimeSettingsPatchV1,
   type KunRuntimeSettingsV1,
@@ -161,6 +163,7 @@ export function defaultKunRuntimeSettings(
     imageGeneration: defaultKunImageGenerationSettings(),
     speechToText: defaultKunSpeechToTextSettings(),
     textToSpeech: defaultKunTextToSpeechSettings(),
+    promptOptimization: defaultKunPromptOptimizationSettings(),
     musicGeneration: defaultKunMusicGenerationSettings(),
     videoGeneration: defaultKunVideoGenerationSettings(),
     modelProfiles: {},
@@ -242,6 +245,16 @@ export function defaultKunTextToSpeechSettings(): KunTextToSpeechSettingsV1 {
     voice: '',
     format: 'mp3',
     timeoutMs: 120_000
+  }
+}
+
+export function defaultKunPromptOptimizationSettings(): KunPromptOptimizationSettingsV1 {
+  return {
+    enabled: false,
+    providerId: '',
+    model: '',
+    prompt: '',
+    timeoutMs: 60_000
   }
 }
 
@@ -427,6 +440,11 @@ export function mergeKunRuntimeSettings(
     ...currentTextToSpeech,
     ...(patch?.textToSpeech ?? {})
   })
+  const currentPromptOptimization = normalizeKunPromptOptimizationSettings(current.promptOptimization)
+  const nextPromptOptimization = normalizeKunPromptOptimizationSettings({
+    ...currentPromptOptimization,
+    ...(patch?.promptOptimization ?? {})
+  })
   const currentMusicGeneration = normalizeKunMusicGenerationSettings(current.musicGeneration)
   const nextMusicGeneration = normalizeKunMusicGenerationSettings({
     ...currentMusicGeneration,
@@ -498,6 +516,7 @@ export function mergeKunRuntimeSettings(
     imageGeneration: nextImageGeneration,
     speechToText: nextSpeechToText,
     textToSpeech: nextTextToSpeech,
+    promptOptimization: nextPromptOptimization,
     musicGeneration: nextMusicGeneration,
     videoGeneration: nextVideoGeneration,
     modelProfiles: nextModelProfiles,
@@ -654,6 +673,24 @@ function normalizeKunTextToSpeechProtocol(value: unknown): TextToSpeechProtocol 
   return value === 'minimax-t2a' || value === 'mimo-tts'
     ? value
     : DEFAULT_TEXT_TO_SPEECH_PROTOCOL
+}
+
+function normalizeKunPromptOptimizationSettings(
+  input: Partial<KunPromptOptimizationSettingsV1> | undefined
+): KunPromptOptimizationSettingsV1 {
+  const defaults = defaultKunPromptOptimizationSettings()
+  return {
+    enabled: input?.enabled === true,
+    providerId: typeof input?.providerId === 'string' ? input.providerId.trim() : defaults.providerId,
+    model: typeof input?.model === 'string' ? input.model.trim() : defaults.model,
+    prompt: typeof input?.prompt === 'string' ? input.prompt.trim() : defaults.prompt,
+    timeoutMs: boundedPositiveInt(input?.timeoutMs, defaults.timeoutMs, 600_000)
+  }
+}
+
+export function resolveKunPromptOptimizationPrompt(settings: KunRuntimeSettingsV1): string {
+  const configured = settings.promptOptimization?.prompt?.trim() ?? ''
+  return configured || DEFAULT_PROMPT_OPTIMIZATION_PROMPT
 }
 
 function normalizeKunMusicGenerationSettings(

@@ -110,7 +110,7 @@ import {
 } from './FloatingComposerExecutionPicker'
 import { ImagePreviewLightbox } from './ImagePreviewLightbox'
 import { useComposerDraft } from './use-composer-draft'
-import { useSpeechToTextSettings, useVoiceDictation } from './use-voice-dictation'
+import { usePromptOptimizationSettings, useSpeechToTextSettings, useVoiceDictation } from './use-voice-dictation'
 import { VoiceRecordingStrip } from './VoiceRecordingStrip'
 import type { ComposerChangedFile } from '../../lib/composer-change-summary'
 import type { DesignComposerContext } from '../../design/design-composer-context'
@@ -567,6 +567,7 @@ export function FloatingComposer({
   const userInput = useComposerUserInput(pendingUserInputBlock, resolveUserInput)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const speechToTextSettings = useSpeechToTextSettings()
+  const promptOptimizationSettings = usePromptOptimizationSettings()
   const dictationInputRef = useRef(input)
   useEffect(() => {
     dictationInputRef.current = input
@@ -675,6 +676,8 @@ export function FloatingComposer({
   const [goalPanelOpen, setGoalPanelOpen] = useState(false)
   const [contextCapacityOpen, setContextCapacityOpen] = useState(false)
   const [goalRuntimeNowMs, setGoalRuntimeNowMs] = useState(() => Date.now())
+  const [promptOptimizationBusy, setPromptOptimizationBusy] = useState(false)
+  const [promptOptimizationError, setPromptOptimizationError] = useState<string | null>(null)
   const composerRootRef = useRef<HTMLDivElement | null>(null)
   const composerMenuButtonRef = useRef<HTMLButtonElement | null>(null)
   const composerMenuPanelRef = useRef<HTMLDivElement | null>(null)
@@ -1027,6 +1030,13 @@ export function FloatingComposer({
       ? false
     : !canSend
   const primaryActionLoading = !runtimeReady
+  const canOptimizePrompt =
+    promptOptimizationSettings?.enabled === true &&
+    canEditComposer &&
+    !promptOptimizationBusy &&
+    input.trim().length > 0 &&
+    typeof window !== 'undefined' &&
+    typeof window.kunGui?.optimizePrompt === 'function'
   const goalRuntimeStartedAtMs = goalRuntimeStartedAtRef.current
   const liveGoalElapsedSeconds =
     busy && activeThreadGoal?.status === 'active' && goalRuntimeStartedAtMs != null
@@ -1351,6 +1361,33 @@ export function FloatingComposer({
     setComposerMenuOpen(false)
     onToggleWorktreeMode()
     draft.focusComposer()
+  }
+
+  const handlePromptOptimizationClick = (): void => {
+    if (!canOptimizePrompt) return
+    const sourceText = input
+    setPromptOptimizationBusy(true)
+    setPromptOptimizationError(null)
+    void window.kunGui.optimizePrompt({ text: sourceText })
+      .then((result) => {
+        if (!result.ok) {
+          setPromptOptimizationError(result.message)
+          return
+        }
+        setInput(result.text)
+        window.requestAnimationFrame(() => {
+          const textarea = draft.textareaRef.current
+          if (!textarea) return
+          textarea.focus()
+          const cursor = result.text.length
+          textarea.setSelectionRange(cursor, cursor)
+          setComposerCursor(cursor)
+        })
+      })
+      .catch((error) => {
+        setPromptOptimizationError(error instanceof Error ? error.message : String(error))
+      })
+      .finally(() => setPromptOptimizationBusy(false))
   }
 
   const syncComposerCursor = (element = draft.textareaRef.current): void => {
@@ -2273,6 +2310,13 @@ export function FloatingComposer({
               </span>
             </div>
           ) : null}
+          {promptOptimizationError ? (
+            <div className="px-1">
+              <span className="min-w-0 break-words text-[12px] font-medium text-red-600 dark:text-red-300">
+                {promptOptimizationError}
+              </span>
+            </div>
+          ) : null}
           <div
             className={`ds-composer-toolbar flex min-h-9 min-w-0 items-center gap-2 ${
               showToolbarStartControls ? 'justify-between' : 'justify-end'
@@ -2449,6 +2493,22 @@ export function FloatingComposer({
                     <Loader2 className="h-4 w-4 animate-spin" strokeWidth={2.2} />
                   ) : (
                     <Mic className="h-4 w-4" strokeWidth={2} />
+                  )}
+                </button>
+              ) : null}
+              {promptOptimizationSettings?.enabled === true ? (
+                <button
+                  type="button"
+                  disabled={!canOptimizePrompt}
+                  onClick={handlePromptOptimizationClick}
+                  className="ds-no-drag flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-ds-muted transition hover:bg-ds-hover hover:text-ds-ink disabled:cursor-not-allowed disabled:opacity-60"
+                  aria-label={promptOptimizationBusy ? t('composerPromptOptimizing') : t('composerPromptOptimize')}
+                  title={promptOptimizationBusy ? t('composerPromptOptimizing') : t('composerPromptOptimize')}
+                >
+                  {promptOptimizationBusy ? (
+                    <Loader2 className="h-4 w-4 animate-spin" strokeWidth={2.2} />
+                  ) : (
+                    <Sparkles className="h-4 w-4" strokeWidth={2} />
                   )}
                 </button>
               ) : null}

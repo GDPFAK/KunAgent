@@ -223,6 +223,12 @@ export type ModelProviderProbeRequest = {
 export type ModelProviderProbeResult =
   | { ok: true; latencyMs: number; modelIds: string[] }
   | { ok: false; message: string }
+export type PromptOptimizationRequest = {
+  text: string
+}
+export type PromptOptimizationResult =
+  | { ok: true; text: string; model: string; providerId: string }
+  | { ok: false; message: string }
 export type ClawImInstallQrResult =
   | { ok: true; url: string; deviceCode: string; userCode: string; interval: number; expireIn: number }
   | { ok: false; message: string }
@@ -355,6 +361,7 @@ export type KunGuiApi = {
   restartRuntime: () => Promise<void>
   fetchUpstreamModels: () => Promise<UpstreamModelsResult>
   probeModelProvider: (payload: ModelProviderProbeRequest) => Promise<ModelProviderProbeResult>
+  optimizePrompt: (payload: PromptOptimizationRequest) => Promise<PromptOptimizationResult>
   getClawStatus: () => Promise<ClawRuntimeStatus>
   runClawTask: (taskId: string) => Promise<ClawRunResult>
   getScheduleStatus: () => Promise<ScheduleRuntimeStatus>

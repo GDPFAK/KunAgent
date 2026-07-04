@@ -114,6 +114,13 @@ export const DEFAULT_WRITE_WORKSPACE_ROOT = '~/.kun/write_workspace'
 // (defaultConversationWorkspaceRoot)各自按平台推导。
 export const DEFAULT_KUN_DATA_DIR = '~/.kun/data'
 export const DEFAULT_KUN_MODEL = 'deepseek-v4-pro'
+export const DEFAULT_PROMPT_OPTIMIZATION_PROMPT = [
+  'You rewrite rough spoken or typed instructions into a clear prompt for a coding agent.',
+  'Keep the user intent, constraints, names, paths, and concrete details intact.',
+  'Make the prompt actionable, concise, and well structured.',
+  'Do not add requirements the user did not ask for.',
+  'Return only the rewritten prompt text. Do not add markdown fences or explanations.'
+].join('\n')
 export const DEFAULT_WRITE_INLINE_COMPLETION_BASE_URL = 'https://api.deepseek.com/beta'
 export const DEFAULT_WRITE_INLINE_COMPLETION_MODEL = 'deepseek-v4-flash'
 export const WRITE_INLINE_COMPLETION_MODEL_IDS = ['deepseek-v4-pro', 'deepseek-v4-flash'] as const
@@ -338,6 +345,8 @@ export type KunRuntimeSettingsV1 = {
   speechToText: KunSpeechToTextSettingsV1
   /** Text-to-speech provider exposed to agents as generate_speech. */
   textToSpeech: KunTextToSpeechSettingsV1
+  /** Model + prompt used by the composer prompt optimization button. */
+  promptOptimization: KunPromptOptimizationSettingsV1
   /** Music generation provider exposed to agents as generate_music. */
   musicGeneration: KunMusicGenerationSettingsV1
   /** Video generation provider exposed to agents as generate_video. */
@@ -498,6 +507,17 @@ export type KunTextToSpeechSettingsV1 = {
   timeoutMs: number
 }
 
+export type KunPromptOptimizationSettingsV1 = {
+  enabled: boolean
+  /** Existing provider profile to use. Empty means inherit the active Kun provider. */
+  providerId: string
+  /** Empty means smallModel || main conversation model. */
+  model: string
+  /** Empty means use DEFAULT_PROMPT_OPTIMIZATION_PROMPT. */
+  prompt: string
+  timeoutMs: number
+}
+
 export type KunMusicGenerationSettingsV1 = {
   enabled: boolean
   /** Existing provider profile to use for music generation. Empty or "custom" uses the fields below. */
@@ -627,7 +647,7 @@ export type KunTokenEconomySettingsPatchV1 = Partial<
 export type KunRuntimeSettingsPatchV1 = Partial<
   Omit<
     KunRuntimeSettingsV1,
-    'mcpSearch' | 'storage' | 'contextCompaction' | 'runtimeTuning' | 'tokenEconomy' | 'toolOutputLimits' | 'imageGeneration' | 'speechToText' | 'textToSpeech' | 'musicGeneration' | 'videoGeneration' | 'instructions' | 'computerUse' | 'quality' | 'modelProfiles'
+    'mcpSearch' | 'storage' | 'contextCompaction' | 'runtimeTuning' | 'tokenEconomy' | 'toolOutputLimits' | 'imageGeneration' | 'speechToText' | 'textToSpeech' | 'promptOptimization' | 'musicGeneration' | 'videoGeneration' | 'instructions' | 'computerUse' | 'quality' | 'modelProfiles'
   >
 > & {
   mcpSearch?: Partial<KunMcpSearchSettingsV1>
@@ -639,6 +659,7 @@ export type KunRuntimeSettingsPatchV1 = Partial<
   imageGeneration?: Partial<KunImageGenerationSettingsV1>
   speechToText?: Partial<KunSpeechToTextSettingsV1>
   textToSpeech?: Partial<KunTextToSpeechSettingsV1>
+  promptOptimization?: Partial<KunPromptOptimizationSettingsV1>
   musicGeneration?: Partial<KunMusicGenerationSettingsV1>
   videoGeneration?: Partial<KunVideoGenerationSettingsV1>
   instructions?: Partial<KunInstructionSettingsV1>

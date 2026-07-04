@@ -2,7 +2,9 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
   resolveKunSpeechToTextSettings,
+  getKunRuntimeSettings,
   type AppSettingsV1,
+  type KunPromptOptimizationSettingsV1,
   type KunSpeechToTextSettingsV1
 } from '@shared/app-settings'
 import { SPEECH_TRANSCRIPTION_MAX_DURATION_MS } from '@shared/speech-to-text'
@@ -40,6 +42,30 @@ export function useSpeechToTextSettings(): KunSpeechToTextSettingsV1 | null {
   }, [])
 
   return speechToText
+}
+
+export function usePromptOptimizationSettings(): KunPromptOptimizationSettingsV1 | null {
+  const [promptOptimization, setPromptOptimization] = useState<KunPromptOptimizationSettingsV1 | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    const apply = (settings: AppSettingsV1): void => {
+      if (!cancelled) setPromptOptimization(getKunRuntimeSettings(settings).promptOptimization)
+    }
+    if (typeof window.kunGui?.getSettings === 'function') {
+      void window.kunGui.getSettings().then(apply).catch(() => undefined)
+    }
+    const onSettingsChanged = (event: Event): void => {
+      apply((event as CustomEvent<AppSettingsV1>).detail)
+    }
+    window.addEventListener(SETTINGS_CHANGED_EVENT, onSettingsChanged)
+    return () => {
+      cancelled = true
+      window.removeEventListener(SETTINGS_CHANGED_EVENT, onSettingsChanged)
+    }
+  }, [])
+
+  return promptOptimization
 }
 
 export function useVoiceDictation({

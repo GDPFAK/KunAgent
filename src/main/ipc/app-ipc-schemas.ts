@@ -131,6 +131,12 @@ export const providerProbePayloadSchema = z
   })
   .strict()
 
+export const promptOptimizationPayloadSchema = z
+  .object({
+    text: trimmedString(100_000)
+  })
+  .strict()
+
 interface EndpointTemplate {
   /** Compiled path matcher. */
   match(path: string): boolean
@@ -493,6 +499,13 @@ const kunRuntimePatchSchema = z.object({
     voice: z.string().trim().max(128).optional(),
     format: z.string().trim().max(16).optional(),
     timeoutMs: z.number().int().positive().max(900_000).optional()
+  }).strict().optional(),
+  promptOptimization: z.object({
+    enabled: z.boolean().optional(),
+    providerId: z.string().trim().max(64).optional(),
+    model: optionalModelIdSchema,
+    prompt: z.string().trim().max(MAX_BODY_BYTES).optional(),
+    timeoutMs: z.number().int().positive().max(600_000).optional()
   }).strict().optional(),
   musicGeneration: z.object({
     enabled: z.boolean().optional(),
