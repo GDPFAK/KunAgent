@@ -53,7 +53,7 @@ import { createLsTool as createLsToolFromModule } from '../src/adapters/tool/ls.
 import { createWriteTool as createWriteToolFromModule } from '../src/adapters/tool/write.js'
 import { computeEditDiff } from '../src/adapters/tool/edit-diff.js'
 import { withFileMutationQueue } from '../src/adapters/tool/file-mutation-queue.js'
-import { DEFAULT_MAX_BYTES } from '../src/adapters/tool/truncate.js'
+import { DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES } from '../src/adapters/tool/truncate.js'
 import type { TurnItem } from '../src/contracts/items.js'
 import type { FsStats } from '../src/adapters/tool/builtin-tool-types.js'
 import type { ToolHostContext } from '../src/ports/tool-host.js'
@@ -120,6 +120,11 @@ describe('Kun built-in tools', () => {
     const tools = await host.listTools(buildContext(workspace))
     const toolNames = new Set(tools.map((tool) => tool.name))
     expect([...allBuiltinToolNames].every((name) => toolNames.has(name))).toBe(true)
+  })
+
+  it('uses 500kb and 20000 lines as the default tool output caps', () => {
+    expect(DEFAULT_MAX_BYTES).toBe(500 * 1024)
+    expect(DEFAULT_MAX_LINES).toBe(20_000)
   })
 
   it('converts a throwing tool execute into an error tool result instead of failing the turn', async () => {
@@ -350,7 +355,7 @@ describe('Kun built-in tools', () => {
       grep: { defaultLimit: 1 },
       find: { defaultLimit: 1 },
       ls: { defaultLimit: 1 },
-      bash: { defaultTimeoutSeconds: 5 }
+      bash: { defaultTimeoutSeconds: 5, maxLines: 1, maxBytes: 64 }
     })
     expect(Object.keys(toolRecord).sort()).toEqual([
       'bash',
@@ -471,9 +476,10 @@ describe('Kun built-in tools', () => {
       }
     })
     const customBash = createBashLocalTool({
+      maxLines: 1,
       operations: {
         exec: async (_command, _cwd, options) => {
-          options.onData?.(Buffer.from('streamed from custom bash\n'))
+          options.onData?.(Buffer.from('first custom bash line\nstreamed from custom bash\n'))
           return { exitCode: 0 }
         }
       }
@@ -489,6 +495,8 @@ describe('Kun built-in tools', () => {
     expect(grepOutput.backend).toBe('custom')
     const bashOutput = await executeTool(customHost, workspace, 'bash', { command: 'echo ignored' })
     expect(String(bashOutput.output)).toContain('streamed from custom bash')
+    expect(String(bashOutput.output)).not.toContain('first custom bash line')
+    expect(bashOutput.truncation).toMatchObject({ total_lines: 2, output_lines: 1 })
   })
 
   it('exposes a reusable local bash backend constructor like pi', async () => {

@@ -50,6 +50,45 @@ describe('CapabilityRegistry', () => {
     ])).toThrow(/duplicate tool name/)
   })
 
+  it('atomically replaces providers and keeps the old registry on invalid replacement', () => {
+    const oldTool = LocalToolHost.defineTool({
+      name: 'old_tool',
+      description: 'old',
+      inputSchema: { type: 'object' },
+      policy: 'auto',
+      execute: async () => ({ output: { old: true } })
+    })
+    const newTool = LocalToolHost.defineTool({
+      name: 'new_tool',
+      description: 'new',
+      inputSchema: { type: 'object' },
+      policy: 'auto',
+      execute: async () => ({ output: { new: true } })
+    })
+    const duplicate = LocalToolHost.defineTool({
+      name: 'same',
+      description: 'same',
+      inputSchema: { type: 'object' },
+      policy: 'auto',
+      execute: async () => ({ output: { same: true } })
+    })
+    const registry = new CapabilityRegistry([
+      { id: 'old', kind: 'built-in', enabled: true, available: true, tools: [oldTool] }
+    ])
+
+    registry.replaceProviders([
+      { id: 'new', kind: 'web', enabled: true, available: true, tools: [newTool] }
+    ])
+    expect(registry.listTools(buildContext()).map((tool) => tool.name)).toEqual(['new_tool'])
+    expect(() => registry.resolveTool('old_tool', buildContext())).toThrow(/unknown tool/)
+
+    expect(() => registry.replaceProviders([
+      { id: 'bad-1', kind: 'web', enabled: true, available: true, tools: [duplicate] },
+      { id: 'bad-2', kind: 'mcp', enabled: true, available: true, tools: [duplicate] }
+    ])).toThrow(/duplicate tool name/)
+    expect(registry.listTools(buildContext()).map((tool) => tool.name)).toEqual(['new_tool'])
+  })
+
   it('hides disabled providers and rejects execution before the provider is reached', async () => {
     let executed = false
     const tool = LocalToolHost.defineTool({

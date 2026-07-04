@@ -4,8 +4,10 @@ import {
   ChevronDown,
   ChevronUp,
   Copy,
-  Download
+  Download,
+  Shapes
 } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
 import {
   isValidElement,
   memo,
@@ -31,7 +33,7 @@ import {
   highlightCodeHtml,
   renderFallbackCodeHtml
 } from '../../lib/code-highlighting'
-import { useChatStore } from '../../store/chat-store'
+import { useTimelineFilePreviewWorkspaceRoot } from './timeline-file-preview-workspace'
 
 const LANGUAGE_REGEX = /language-([^\s]+)/
 const TRAILING_NEWLINES_REGEX = /\n+$/
@@ -99,6 +101,41 @@ function displayCodeLanguage(language: string): string {
   return isPlainTextLanguage(language) ? 'plain text' : language
 }
 
+function canvasOpsJsonCount(code: string): number | null {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(code)
+  } catch {
+    return null
+  }
+
+  const countValue = (value: unknown): number | null => {
+    if (Array.isArray(value)) {
+      if (value.length === 0) return null
+      if (value.every((item) => isRecord(item) && typeof item.op === 'string')) {
+        return value.length
+      }
+      let total = 0
+      for (const item of value) {
+        const count = countValue(item)
+        if (count !== null) total += count
+      }
+      return total > 0 ? total : null
+    }
+    if (!isRecord(value)) return null
+    if (typeof value.op === 'string') return 1
+    const action = typeof value.action === 'string' ? value.action : ''
+    if (action === 'add_screen' || action === 'update_shapes' || action === 'create_board') return 1
+    return null
+  }
+
+  return countValue(parsed)
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+}
+
 function inlineFileReference(text: string): { text: string; target: FileReferenceTarget } | null {
   const trimmed = text.trim()
   if (!trimmed) return null
@@ -117,7 +154,7 @@ function InlineFileReferenceCode({
   target: FileReferenceTarget
   className?: string
 }): ReactNode {
-  const workspaceRoot = useChatStore((s) => s.workspaceRoot)
+  const workspaceRoot = useTimelineFilePreviewWorkspaceRoot()
   const validation = useValidatedFileReference(target, workspaceRoot)
 
   if (validation.status !== 'valid') {
@@ -346,11 +383,65 @@ function CodeComponent({ node, className, children, ...props }: CodeProps) {
   const match = className?.match(LANGUAGE_REGEX)
   const language = match?.[1] ?? ''
 
+  if (language === 'shapeops' || language === 'design_canvas') {
+    return <CanvasOpsChip code={text} language={language} />
+  }
+
+  if (language === 'json' && canvasOpsJsonCount(text) !== null) {
+    return <CanvasOpsChip code={text} language="design_canvas" />
+  }
+
   if (isPlainTextLanguage(language) && !text.replace(TRAILING_NEWLINES_REGEX, '').trim()) {
     return null
   }
 
   return <CodeBlock code={text} language={language} />
+}
+
+/**
+ * Renders ```shapeops``` / ```design_canvas``` blocks as compact chips instead
+ * of dumping raw JSON (which may embed full HTML payloads). Click to inspect.
+ */
+function CanvasOpsChip({
+  code,
+  language
+}: {
+  code: string
+  language: 'shapeops' | 'design_canvas'
+}): ReactNode {
+  const { t } = useTranslation('common')
+  const [expanded, setExpanded] = useState(false)
+  const count = useMemo(() => {
+    if (language === 'design_canvas') return canvasOpsJsonCount(code)
+    try {
+      const parsed = JSON.parse(code)
+      return Array.isArray(parsed) ? parsed.length : 1
+    } catch {
+      return null
+    }
+  }, [code, language])
+  const labelKey = count === null ? 'canvasOpsApplied' : 'canvasOpsAppliedCount'
+  const label = count === null ? t(labelKey) : t(labelKey, { count })
+  const fallbackLabel = count === null ? 'Canvas ops' : `Canvas ops (${count})`
+
+  return (
+    <div className="my-1.5">
+      <button
+        type="button"
+        onClick={() => setExpanded((value) => !value)}
+        className="inline-flex items-center gap-1.5 rounded-full border border-accent/30 bg-accent/10 px-2.5 py-1 text-[12px] font-medium text-accent transition hover:bg-accent/15"
+      >
+        <Shapes className="h-3.5 w-3.5" strokeWidth={1.9} />
+        {label === labelKey ? fallbackLabel : label}
+        {expanded ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+      </button>
+      {expanded ? (
+        <div className="mt-1.5">
+          <CodeBlock code={code} language="json" />
+        </div>
+      ) : null}
+    </div>
+  )
 }
 
 const MemoCode = memo(CodeComponent, (prev, next) => {

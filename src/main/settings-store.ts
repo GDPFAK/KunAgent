@@ -15,6 +15,7 @@ import {
   defaultClawSettings,
   defaultKunRuntimeSettings,
   defaultModelProviderSettings,
+  defaultDesignSettings,
   defaultScheduleSettings,
   defaultWorkflowSettings,
   getKunRuntimeSettings,
@@ -23,6 +24,7 @@ import {
   defaultWriteSettings,
   mergeClawSettings,
   mergeAppBehaviorSettings,
+  mergeDesignSettings,
   mergeScheduleSettings,
   mergeWorkflowSettings,
   mergeWriteSettings,
@@ -258,6 +260,7 @@ const defaultSettings = (): AppSettingsV1 => ({
   claw: defaultClawSettings(),
   schedule: defaultScheduleSettings(),
   workflow: defaultWorkflowSettings(),
+  design: defaultDesignSettings(),
   terminal: defaultTerminalSettings()
 })
 
@@ -284,6 +287,7 @@ function buildMergedSettings(parsed: Partial<AppSettingsV1>): AppSettingsV1 {
     claw: mergeClawSettings(defaults.claw, migrated.claw),
     schedule: mergeScheduleSettings(defaults.schedule, migrated.schedule),
     workflow: mergeWorkflowSettings(defaults.workflow, migrated.workflow),
+    design: mergeDesignSettings(defaults.design, migrated.design),
     terminal: mergeTerminalSettings(defaults.terminal, migrated.terminal),
     guiUpdate: { ...defaults.guiUpdate, ...migrated.guiUpdate },
     codePromptPrefix: typeof migrated.codePromptPrefix === 'string' ? migrated.codePromptPrefix : '',
@@ -481,6 +485,7 @@ export class JsonSettingsStore {
       claw: mergeClawSettings(cur.claw, partial.claw),
       schedule: mergeScheduleSettings(cur.schedule, partial.schedule),
       workflow: mergeWorkflowSettings(cur.workflow, partial.workflow),
+      design: mergeDesignSettings(cur.design, partial.design),
       terminal: mergeTerminalSettings(cur.terminal, partial.terminal),
       guiUpdate: { ...cur.guiUpdate, ...(partial.guiUpdate ?? {}) }
     })

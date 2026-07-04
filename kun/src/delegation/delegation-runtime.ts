@@ -94,6 +94,8 @@ export type ChildRunExecutor = (input: {
   blockedSkills?: string[]
   toolPolicy: SubagentToolPolicy
   promptPreamble?: string
+  /** True when the parent turn is a GUI design-canvas turn. */
+  guiDesignCanvas?: boolean
   /** Reasoning depth for this profile's child model requests (default 'off'). */
   reasoningEffort?: string
   tokenBudget?: number
@@ -177,7 +179,7 @@ export class DelegationRuntime {
   private readonly detachedAborts = new Map<string, AbortController>()
   private runTurn: RunTurnFn | null = null
 
-  constructor(private readonly options: {
+  constructor(private options: {
     config: SubagentsCapabilityConfig
     store: FileDelegationStore
     events?: RuntimeEventRecorder
@@ -193,6 +195,17 @@ export class DelegationRuntime {
     this.runTurn = input.runTurn
   }
 
+  replaceConfig(config: SubagentsCapabilityConfig): void {
+    this.options = {
+      ...this.options,
+      config
+    }
+  }
+
+  enabled(): boolean {
+    return this.options.config.enabled
+  }
+
   async runChild(input: {
     parentThreadId: string
     parentTurnId: string
@@ -202,6 +215,8 @@ export class DelegationRuntime {
     model?: string
     providerId?: string
     profile?: string
+    /** Forward GUI design-canvas scope into the child turn when present. */
+    guiDesignCanvas?: boolean
     tokenBudget?: number
     timeBudgetMs?: number
     returnFormat?: ChildReturnFormat
@@ -309,6 +324,7 @@ export class DelegationRuntime {
         resolvedBlockedMcpServers,
         resolvedBlockedSkills,
         promptPreamble,
+        guiDesignCanvas: input.guiDesignCanvas === true,
         resolvedReasoningEffort,
         tokenBudget,
         timeBudgetMs,
@@ -365,6 +381,7 @@ export class DelegationRuntime {
         ...(resolvedBlockedSkills ? { blockedSkills: resolvedBlockedSkills } : {}),
         toolPolicy,
         ...(promptPreamble ? { promptPreamble } : {}),
+        ...(input.guiDesignCanvas ? { guiDesignCanvas: true } : {}),
         ...(resolvedReasoningEffort ? { reasoningEffort: resolvedReasoningEffort } : {}),
         ...(tokenBudget ? { tokenBudget } : {}),
         ...(timeBudgetMs ? { timeBudgetMs } : {}),
@@ -436,6 +453,7 @@ export class DelegationRuntime {
     resolvedBlockedMcpServers: string[] | undefined
     resolvedBlockedSkills: string[] | undefined
     promptPreamble: string | undefined
+    guiDesignCanvas: boolean
     resolvedReasoningEffort: string | undefined
     tokenBudget: number | undefined
     timeBudgetMs: number | undefined
@@ -486,6 +504,7 @@ export class DelegationRuntime {
         ...(args.resolvedBlockedSkills ? { blockedSkills: args.resolvedBlockedSkills } : {}),
         toolPolicy: args.toolPolicy,
         ...(args.promptPreamble ? { promptPreamble: args.promptPreamble } : {}),
+        ...(args.guiDesignCanvas ? { guiDesignCanvas: true } : {}),
         ...(args.resolvedReasoningEffort ? { reasoningEffort: args.resolvedReasoningEffort } : {}),
         ...(args.tokenBudget ? { tokenBudget: args.tokenBudget } : {}),
         ...(args.timeBudgetMs ? { timeBudgetMs: args.timeBudgetMs } : {}),

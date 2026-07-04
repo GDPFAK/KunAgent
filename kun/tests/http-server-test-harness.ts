@@ -148,6 +148,7 @@ export function buildHarness(): Harness {
     insecure: false,
     allocateSeq,
     nowIso,
+    applyConfig: async () => ({ ok: true }),
     info: () => ({
       host: '127.0.0.1',
       port: 0,

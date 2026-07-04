@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { ChatBlock } from '../agent/types'
+import type { ChatBlock, NormalizedThread } from '../agent/types'
 import {
   armBusyWatchdog,
   buildThreadEventSink,
@@ -7,6 +7,8 @@ import {
   clearWatchedCompletionNotifications,
   clearPendingClawFeishuMirrors,
   completionNotificationDedupeKeyForWatchedThread,
+  isCodeSidebarThread,
+  isCodeThread,
   MAX_PENDING_CLAW_FEISHU_MIRRORS,
   MAX_WATCHED_COMPLETION_NOTIFICATIONS,
   rememberPendingClawFeishuMirror,
@@ -15,6 +17,7 @@ import {
 } from './chat-store-runtime'
 import { clearBusyWatchdog, resetBusyRecoveryAttempts } from './chat-store-schedulers'
 import type { ChatState, ChatStoreSet } from './chat-store-types'
+import { emptyDesignThreadRegistry, markDesignThread } from '../design/design-thread-registry'
 
 function makeSinkHarness(overrides: Partial<ChatState> = {}): {
   getState: () => ChatState
@@ -55,6 +58,52 @@ function makeSinkHarness(overrides: Partial<ChatState> = {}): {
     get
   }
 }
+
+function makeThread(overrides: Partial<NormalizedThread> & Pick<NormalizedThread, 'id'>): NormalizedThread {
+  return {
+    id: overrides.id,
+    title: overrides.title ?? overrides.id,
+    updatedAt: overrides.updatedAt ?? '2026-06-01T00:00:00.000Z',
+    model: overrides.model ?? 'deepseek-v4-pro',
+    mode: overrides.mode ?? 'agent',
+    workspace: overrides.workspace ?? '/workspace/deepseek-gui',
+    ...(overrides.archived !== undefined ? { archived: overrides.archived } : {}),
+    ...(overrides.status ? { status: overrides.status } : {})
+  }
+}
+
+describe('code thread classification', () => {
+  it('keeps archived Code threads visible for the sidebar archive view', () => {
+    const archived = makeThread({ id: 'thr_archived', archived: true })
+
+    expect(isCodeSidebarThread(archived)).toBe(true)
+    expect(isCodeThread(archived)).toBe(false)
+  })
+
+  it('excludes registered design threads from Code-visible and active Code thread sets', () => {
+    const designRegistry = markDesignThread(
+      '/workspace/deepseek-gui',
+      'login-screen',
+      'thr_design',
+      emptyDesignThreadRegistry()
+    )
+    const design = makeThread({ id: 'thr_design' })
+
+    expect(isCodeSidebarThread(design, [], undefined, designRegistry)).toBe(false)
+    expect(isCodeThread(design, [], undefined, designRegistry)).toBe(false)
+  })
+
+  it('excludes threads stored in the internal design workspace even without registry data', () => {
+    const designWorkspaceThread = makeThread({
+      id: 'thr_design_workspace',
+      title: 'Design Assistant',
+      workspace: '/Users/zxy/.kun/design-workspace'
+    })
+
+    expect(isCodeSidebarThread(designWorkspaceThread)).toBe(false)
+    expect(isCodeThread(designWorkspaceThread)).toBe(false)
+  })
+})
 
 describe('thread event sink binding', () => {
   it('ignores reasoning deltas from a stream bound to a different active thread', () => {
@@ -131,6 +180,53 @@ describe('thread event sink binding', () => {
     sink.onDeltas([{ kind: 'agent_message', text: ' world', seq: 12 }])
 
     expect(getState().liveAssistant).toBe('hello world')
+  })
+
+  it('serializes overlapping replays across concurrent sinks so live text is not duplicated', () => {
+    // Repro for the design-rail duplicate-text bug: a long, flaky turn can
+    // briefly leave two sinks live at once. Their per-sink floors are
+    // independent, so each re-appends the same replayed deltas. The shared
+    // store-level floor serializes them — each seq folds in at most once.
+    const { getState, set, get } = makeSinkHarness({
+      activeThreadId: 'thread-current',
+      lastSeq: 100,
+      liveDeltaSeqFloor: 100
+    })
+    const sinkA = buildThreadEventSink(set, get, { threadId: 'thread-current', sinceSeq: 100 })
+    const sinkB = buildThreadEventSink(set, get, { threadId: 'thread-current', sinceSeq: 100 })
+
+    sinkA.onDeltas([
+      { kind: 'agent_message', text: 'alpha', seq: 101 },
+      { kind: 'agent_message', text: 'beta', seq: 102 }
+    ])
+    // sinkB replays the very same persisted deltas. Its own closure floor is
+    // back at 100, so without the shared floor it would re-append them.
+    sinkB.onDeltas([
+      { kind: 'agent_message', text: 'alpha', seq: 101 },
+      { kind: 'agent_message', text: 'beta', seq: 102 }
+    ])
+
+    expect(getState().liveAssistant).toBe('alphabeta')
+    expect(getState().liveDeltaSeqFloor).toBe(102)
+  })
+
+  it('re-baselining the shared floor lets a new subscription apply lower seqs', () => {
+    // A thread switch resets liveDeltaSeqFloor to the new (per-thread) since_seq.
+    // Because seqs are per-thread, the shared floor must not strand the new
+    // thread's low seqs.
+    const { getState, set, get } = makeSinkHarness({
+      activeThreadId: 'thread-current',
+      liveDeltaSeqFloor: 0
+    })
+    const sink = buildThreadEventSink(set, get, { threadId: 'thread-current', sinceSeq: 0 })
+
+    sink.onDeltas([
+      { kind: 'agent_message', text: 'first', seq: 1 },
+      { kind: 'agent_message', text: ' second', seq: 2 }
+    ])
+
+    expect(getState().liveAssistant).toBe('first second')
+    expect(getState().liveDeltaSeqFloor).toBe(2)
   })
 
   it('never rewinds lastSeq when a stale heartbeat seq arrives', () => {
@@ -368,6 +464,37 @@ describe('thread event sink runtime errors', () => {
         }
       }
     })
+  })
+
+  it('adds model request retry events as runtime status instead of a banner error', () => {
+    const { getState, set, get } = makeSinkHarness({
+      activeThreadId: 'thread-current',
+      busy: true,
+      blocks: [{ kind: 'user', id: 'user-current', text: 'hello' }]
+    })
+    const sink = buildThreadEventSink(set, get, { threadId: 'thread-current' })
+
+    sink.onRuntimeStatus?.({
+      kind: 'model_request_retry',
+      itemId: 'runtime_status_turn-current_model_retry',
+      turnId: 'turn-current',
+      createdAt: '2026-06-08T00:00:00.000Z',
+      status: 429,
+      attempt: 1,
+      maxAttempts: 3,
+      delayMs: 3000
+    })
+
+    const systemBlocks = getState().blocks.filter((block) => block.kind === 'system')
+    expect(systemBlocks).toHaveLength(1)
+    expect(systemBlocks[0]).toMatchObject({
+      kind: 'system',
+      id: 'runtime_status_turn-current_model_retry'
+    })
+    expect(systemBlocks[0].text).toContain('429')
+    expect(systemBlocks[0].text).toContain('1')
+    expect(systemBlocks[0].text).toContain('3')
+    expect(getState().error).toBeNull()
   })
 
   it('adds runtime error events to the timeline with details', () => {

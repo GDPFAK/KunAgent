@@ -94,6 +94,8 @@ export type RuntimeDisclosureMetadata = {
   injectedMemoryIds?: string[]
   injectedMemorySummaries?: Array<{ id: string; content: string }>
   skillInjectionBytes?: number
+  injectedInstructionSources?: Array<{ scope: 'global' | 'workspace'; path: string; bytes: number; truncated?: boolean }>
+  instructionInjectionBytes?: number
   child?: RuntimeChildMetadata
   sources?: WebCitationSource[]
 }
@@ -344,6 +346,7 @@ export type ToolEventPayload = {
 export type RuntimeStatusEventPayload = {
   kind:
     | 'tool_result_upload_wait'
+    | 'model_request_retry'
     | 'tool_catalog_changed'
     | 'tool_storm_suppressed'
     | 'compaction_summary_fallback'
@@ -352,6 +355,10 @@ export type RuntimeStatusEventPayload = {
   createdAt?: string
   message?: string
   toolResultCount?: number
+  status?: number
+  attempt?: number
+  maxAttempts?: number
+  delayMs?: number
   changeKind?: 'additive' | 'breaking'
   toolName?: string
   callId?: string
@@ -490,6 +497,7 @@ export interface AgentProvider {
     options?: {
       mode?: string
       model?: string
+      providerId?: string
       reasoningEffort?: string
       displayText?: string
       guiPlan?: {
@@ -500,6 +508,7 @@ export interface AgentProvider {
         sourceRequest?: string
         title?: string
       }
+      guiDesignCanvas?: boolean
       attachmentIds?: string[]
       workspaceCheckpointId?: string
       fileReferences?: UserFileReference[]
@@ -509,7 +518,7 @@ export interface AgentProvider {
   reviewThread?(
     threadId: string,
     target: ReviewTarget,
-    options?: { model?: string }
+    options?: { model?: string; providerId?: string }
   ): Promise<{ turnId: string; threadId: string; userMessageItemId?: string; reviewItemId?: string }>
   getRuntimeInfo?(): Promise<CoreRuntimeInfoJson>
   getToolDiagnostics?(): Promise<CoreRuntimeToolDiagnosticsJson>

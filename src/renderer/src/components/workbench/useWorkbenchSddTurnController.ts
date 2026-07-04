@@ -1,0 +1,568 @@
+import { useCallback, useEffect, useRef } from 'react'
+import { useTranslation } from 'react-i18next'
+import { buildGuiPlanId, buildPlanRelativePath } from '@shared/gui-plan'
+import { sddDraftTraceRelativePath } from '@shared/sdd'
+import { buildSddTraceSnapshot } from '@shared/sdd-trace'
+import type { ModelProviderModelGroup } from '@shared/kun-gui-api'
+import type { AttachmentReference, ChatBlock, RuntimeConnectionStatus } from '../../agent/types'
+import type { CoreRuntimeInfoJson } from '../../agent/kun-contract'
+import { getProvider } from '../../agent/registry'
+import { useChatStore } from '../../store/chat-store'
+import type { ChatState, SendMessageOverrides } from '../../store/chat-store-types'
+import { providerIdForComposerModel } from '../../store/chat-store-helpers'
+import { threadHasPendingRuntimeWork } from '../../store/chat-store-runtime-helpers'
+import { useWriteWorkspaceStore } from '../../write/write-workspace-store'
+import { PENDING_INFOGRAPHIC_PROTOCOL } from '../../write/infographic-pending'
+import { confirmDialog } from '../../lib/confirm-dialog'
+import { prepareImageAttachmentUpload } from '../../lib/image-attachment-upload'
+import {
+  composerReasoningEffortRequestValue,
+  type ComposerReasoningEffort
+} from '../chat/FloatingComposerModelPicker'
+import {
+  firstVisionCapableComposerModel
+} from './useWorkbenchComposerCapabilities'
+import type { ComposerAttachmentScope } from '../workbench-composer-attachments'
+import {
+  buildComposerDocumentContextPrompt,
+  stripTransientAttachmentFields
+} from './workbench-composer-prompts'
+import {
+  collectSddDraftImages,
+  withAttachmentIds,
+  type SddDraftImageReference
+} from '../../sdd/sdd-draft-images'
+import { forgetRememberedSddDraft, useSddDraftStore, type SddDraft } from '../../sdd/sdd-draft-store'
+import { saveActiveSddDraftToDisk } from '../../sdd/sdd-draft-actions'
+import { composeSddAssistantPrompt } from '../../sdd/sdd-assistant-prompt'
+import { frameworkById } from '../../sdd/pm-skill-frameworks'
+import { buildSddDraftToPlanPrompt } from '../../sdd/sdd-plan-prompt'
+import type { GuiPlanArtifact } from '../../plan/plan-store'
+
+type PendingSddPlanTarget = {
+  planId: string
+  relativePath: string
+  workspaceRoot: string
+}
+
+type PlanTurnOverrides = Pick<
+  SendMessageOverrides,
+  'attachmentIds' | 'attachments' | 'displayText' | 'fileReferences' | 'guiPlan' | 'model' | 'reasoningEffort'
+> & {
+  workspaceRoot?: string
+}
+
+type UseWorkbenchSddTurnControllerParams = {
+  activeGuiPlan: GuiPlanArtifact | null
+  attachmentUploadEnabled: boolean
+  blocks: ChatBlock[]
+  busy: boolean
+  composerAttachments: AttachmentReference[]
+  composerMode: 'plan' | 'agent'
+  composerModelGroups: ModelProviderModelGroup[]
+  composerReasoningEffort: ComposerReasoningEffort
+  input: string
+  resolvedWriteAssistantProviderId: string
+  runtimeConnection: RuntimeConnectionStatus
+  runtimeInfo: CoreRuntimeInfoJson | null
+  selectedModelSupportsImageInput: boolean
+  sendMessage: ChatState['sendMessage']
+  sendPlanTurn: (text: string, overrides?: PlanTurnOverrides) => Promise<boolean>
+  setAttachmentUploadError: (message: string | null) => void
+  setComposerMode: (mode: 'plan' | 'agent') => void
+  setError: (message: string | null) => void
+  setInput: (value: string) => void
+  setWriteAssistantModel: (model: string, providerId?: string) => void
+  writeAssistantModel: string
+  clearComposerAttachments: (scope?: ComposerAttachmentScope) => void
+  ensureSddAssistantThreadForDraft: (draft: SddDraft) => Promise<string | null>
+  getAttachmentScope: () => ComposerAttachmentScope
+  openSddAssistantPanel: () => Promise<void>
+  startNewSddAssistantConversation: () => void
+}
+
+export type SddPrototypeTurnPayload = {
+  prompt: string
+  displayText: string
+  image?: { absolutePath: string; alt: string }
+}
+
+export type WorkbenchSddTurnController = {
+  applySddFramework: (frameworkId: string) => void
+  handleSddNextStep: () => Promise<void>
+  sendSddAssistantPrompt: (value: string) => Promise<void>
+  sendSddPrototypeTurn: (payload: SddPrototypeTurnPayload) => Promise<boolean>
+  startNewSddAssistantConversation: () => void
+}
+
+function fileNameFromPath(path: string): string {
+  return path.replaceAll('\\', '/').split('/').filter(Boolean).pop() || 'image'
+}
+
+function sddDraftPlanRelativePath(draft: SddDraft): string {
+  const parts = draft.relativePath.replaceAll('\\', '/').split('/').filter(Boolean)
+  const draftFolder = parts.at(-2)?.trim() || draft.id.split(':').pop()?.trim() || `draft-${Date.now()}`
+  return buildPlanRelativePath(`sdd-${draftFolder}`)
+}
+
+function sddDraftSourceRequest(markdown: string, fallbackPath: string): string {
+  const firstMeaningfulLine = markdown
+    .split('\n')
+    .map((line) => line.replace(/^#+\s*/, '').trim())
+    .find(Boolean)
+  return (firstMeaningfulLine || fallbackPath).slice(0, 160)
+}
+
+function sddPlanMatchesPendingTarget(
+  plan: { id: string; workspaceRoot: string; relativePath: string } | null,
+  target: PendingSddPlanTarget | null
+): boolean {
+  if (!plan || !target) return false
+  if (plan.id === target.planId) return true
+  return buildGuiPlanId(plan.workspaceRoot, plan.relativePath) === target.planId
+}
+
+function sddAssistantContextFromBlocks(blocks: ChatBlock[], maxMessages = 10): string {
+  const messages: string[] = []
+  for (const block of blocks) {
+    if (block.kind !== 'user' && block.kind !== 'assistant') continue
+    if (block.kind === 'user' && block.meta?.displayText) continue
+    const text = block.text.trim()
+    if (!text) continue
+    messages.push(`${block.kind === 'user' ? 'User' : 'Requirement AI'}:\n${text}`)
+  }
+  return messages.slice(-maxMessages).join('\n\n').slice(0, 12_000)
+}
+
+function base64ImageToFile(image: SddDraftImageReference): File {
+  return base64ToFile(image.dataBase64, fileNameFromPath(image.relativePath), image.mimeType)
+}
+
+function base64ToFile(dataBase64: string, name: string, mimeType: string): File {
+  const binary = atob(dataBase64)
+  const bytes = new Uint8Array(binary.length)
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index)
+  }
+  return new File([bytes], name || 'image', { type: mimeType })
+}
+
+export function useWorkbenchSddTurnController({
+  activeGuiPlan,
+  attachmentUploadEnabled,
+  blocks,
+  busy,
+  composerAttachments,
+  composerMode,
+  composerModelGroups,
+  composerReasoningEffort,
+  input,
+  resolvedWriteAssistantProviderId,
+  runtimeConnection,
+  runtimeInfo,
+  selectedModelSupportsImageInput,
+  sendMessage,
+  sendPlanTurn,
+  setAttachmentUploadError,
+  setComposerMode,
+  setError,
+  setInput,
+  setWriteAssistantModel,
+  writeAssistantModel,
+  clearComposerAttachments,
+  ensureSddAssistantThreadForDraft,
+  getAttachmentScope,
+  openSddAssistantPanel,
+  startNewSddAssistantConversation: startThreadSddAssistantConversation
+}: UseWorkbenchSddTurnControllerParams): WorkbenchSddTurnController {
+  const { t } = useTranslation('common')
+  const pendingSddFrameworkRef = useRef<string | null>(null)
+  const pendingSddFrameworkPromptRef = useRef<string | null>(null)
+  const sddUpgradeInFlightRef = useRef(false)
+  const sddUpgradeTargetRef = useRef<PendingSddPlanTarget | null>(null)
+  const sddDraftOperationStatus = useSddDraftStore((s) => s.operationStatus)
+
+  useEffect(() => {
+    if (
+      !activeGuiPlan ||
+      !sddUpgradeInFlightRef.current ||
+      !sddPlanMatchesPendingTarget(activeGuiPlan, sddUpgradeTargetRef.current)
+    ) {
+      return
+    }
+    sddUpgradeInFlightRef.current = false
+    sddUpgradeTargetRef.current = null
+    useSddDraftStore.getState().setOperationStatus('idle')
+    const completedDraft = useSddDraftStore.getState().activeDraft
+    if (completedDraft) forgetRememberedSddDraft(completedDraft)
+    useSddDraftStore.getState().clearActiveDraft()
+  }, [activeGuiPlan])
+
+  useEffect(() => {
+    if (
+      busy ||
+      !sddUpgradeInFlightRef.current ||
+      sddDraftOperationStatus !== 'upgrading' ||
+      sddPlanMatchesPendingTarget(activeGuiPlan, sddUpgradeTargetRef.current)
+    ) {
+      return
+    }
+    const timeout = window.setTimeout(() => {
+      if (!sddUpgradeInFlightRef.current) return
+      if (useSddDraftStore.getState().operationStatus !== 'upgrading') return
+      sddUpgradeInFlightRef.current = false
+      sddUpgradeTargetRef.current = null
+      useSddDraftStore.getState().setOperationStatus('error', t('planToolResultMissing'))
+    }, 800)
+    return () => window.clearTimeout(timeout)
+  }, [activeGuiPlan, busy, sddDraftOperationStatus, t])
+
+  const applySddFramework = useCallback((frameworkId: string): void => {
+    const framework = frameworkById(frameworkId)
+    if (!framework?.promptKey) return
+    const promptText = t(framework.promptKey)
+    setInput(input.trim() ? `${input.trim()}\n\n${promptText}` : promptText)
+    pendingSddFrameworkRef.current = framework.guidance ? framework.id : null
+    pendingSddFrameworkPromptRef.current = framework.guidance ? promptText : null
+  }, [input, setInput, t])
+
+  const uploadSddImagesAsAttachments = useCallback(async (
+    images: SddDraftImageReference[],
+    threadId: string,
+    workspace: string
+  ): Promise<{ images: SddDraftImageReference[]; attachmentIds: string[] }> => {
+    const provider = getProvider()
+    const attachmentCapabilities = runtimeInfo?.capabilities.attachments
+    if (!attachmentCapabilities || typeof provider.uploadAttachment !== 'function') {
+      throw new Error(t('composerAttachmentUnavailable'))
+    }
+    const attachmentIds: string[] = []
+    for (const image of images) {
+      const file = base64ImageToFile(image)
+      const prepared = await prepareImageAttachmentUpload(file, attachmentCapabilities)
+      const attachment = await provider.uploadAttachment({
+        name: fileNameFromPath(image.relativePath),
+        mimeType: prepared.mimeType,
+        dataBase64: prepared.dataBase64,
+        textFallback: prepared.textFallback,
+        threadId,
+        workspace
+      })
+      attachmentIds.push(attachment.id)
+    }
+    return { images: withAttachmentIds(images, attachmentIds), attachmentIds }
+  }, [runtimeInfo?.capabilities.attachments, t])
+
+  const sendSddAssistantPrompt = useCallback(async (value: string): Promise<void> => {
+    const v = value.trim()
+    const draft = useSddDraftStore.getState().activeDraft
+    const attachmentScope = getAttachmentScope()
+    const attachments = composerAttachments
+    const documentAttachments = attachments.filter((attachment) => attachment.kind === 'document')
+    const attachmentIds = attachments.map((attachment) => attachment.id)
+    const publicAttachments = stripTransientAttachmentFields(attachments)
+    if ((!v && attachmentIds.length === 0 && documentAttachments.length === 0) || !draft) return
+    if (attachmentIds.length > 0 && !attachmentUploadEnabled) {
+      setAttachmentUploadError(t('composerAttachmentModelUnsupported'))
+      return
+    }
+    const threadId = await ensureSddAssistantThreadForDraft(draft)
+    if (!threadId) return
+    const snapshot = useSddDraftStore.getState()
+    void saveActiveSddDraftToDisk()
+    const userPrompt = buildComposerDocumentContextPrompt(
+      v || (documentAttachments.length > 0 ? t('composerFileOnlyPrompt') : t('composerImageOnlyPrompt')),
+      documentAttachments
+    )
+    const pendingPrompt = pendingSddFrameworkPromptRef.current
+    const frameworkId =
+      pendingSddFrameworkRef.current && pendingPrompt && value.includes(pendingPrompt)
+        ? pendingSddFrameworkRef.current
+        : null
+    const prompt = composeSddAssistantPrompt({
+      userPrompt,
+      draftMarkdown: snapshot.content,
+      draftRelativePath: draft.relativePath,
+      workspaceRoot: draft.workspaceRoot,
+      ...(frameworkId ? { frameworkIds: [frameworkId] } : {})
+    })
+    setInput('')
+    const model = writeAssistantModel.trim()
+    const providerId = resolvedWriteAssistantProviderId.trim()
+    const reasoningEffort = composerReasoningEffortRequestValue(composerReasoningEffort)
+    const sent = await sendMessage(prompt, composerMode === 'plan' ? 'plan' : 'agent', {
+      displayText: v || (documentAttachments.length > 0
+        ? t('composerFileOnlyDisplay', { count: documentAttachments.length })
+        : t('composerImageOnlyDisplay')),
+      ...(model ? { model } : {}),
+      ...(providerId ? { providerId } : {}),
+      ...(reasoningEffort ? { reasoningEffort } : {}),
+      ...(attachmentIds.length ? { attachmentIds } : {}),
+      ...(publicAttachments.length ? { attachments: publicAttachments } : {})
+    })
+    if (sent) {
+      pendingSddFrameworkRef.current = null
+      pendingSddFrameworkPromptRef.current = null
+      if (attachments.length > 0) clearComposerAttachments(attachmentScope)
+    } else {
+      setInput(v)
+    }
+  }, [
+    attachmentUploadEnabled,
+    clearComposerAttachments,
+    composerAttachments,
+    composerMode,
+    composerReasoningEffort,
+    ensureSddAssistantThreadForDraft,
+    getAttachmentScope,
+    resolvedWriteAssistantProviderId,
+    sendMessage,
+    setAttachmentUploadError,
+    setInput,
+    t,
+    writeAssistantModel
+  ])
+
+  const firstVisionCapableModel = useCallback((): { modelId: string; providerId?: string } | null => {
+    return firstVisionCapableComposerModel(composerModelGroups)
+  }, [composerModelGroups])
+
+  const sendSddPrototypeTurn = useCallback(async (
+    payload: SddPrototypeTurnPayload
+  ): Promise<boolean> => {
+    const draft = useSddDraftStore.getState().activeDraft
+    if (!draft) return false
+    if (runtimeConnection !== 'ready') {
+      useSddDraftStore.getState().setOperationStatus('error', t('runtimeActionNeedsConnection'))
+      return false
+    }
+
+    if (payload.image && !selectedModelSupportsImageInput) {
+      const visionSelection = firstVisionCapableModel()
+      if (!visionSelection) {
+        useSddDraftStore.getState().setOperationStatus('error', t('sddPrototypeNoVisionModel'))
+        return false
+      }
+      const switchModel = await confirmDialog(
+        t('sddPrototypeSwitchVisionModel', { model: visionSelection.modelId })
+      )
+      if (!switchModel) return false
+      setWriteAssistantModel(visionSelection.modelId, visionSelection.providerId)
+    }
+
+    const threadId = await ensureSddAssistantThreadForDraft(draft)
+    if (!threadId) return false
+    await openSddAssistantPanel()
+
+    let attachmentIds: string[] = []
+    if (payload.image) {
+      try {
+        const read = await window.kunGui.readWorkspaceImage({
+          path: payload.image.absolutePath,
+          workspaceRoot: draft.workspaceRoot
+        })
+        if (!read.ok) throw new Error(read.message)
+        const dataBase64 = read.dataUrl.split(';base64,', 2)[1] ?? ''
+        if (!dataBase64) throw new Error(t('composerAttachmentUnavailable'))
+        const uploaded = await uploadSddImagesAsAttachments(
+          [
+            {
+              index: 1,
+              alt: payload.image.alt,
+              markdownPath: payload.image.absolutePath,
+              relativePath: payload.image.absolutePath,
+              mimeType: read.mimeType,
+              dataBase64,
+              byteSize: read.size
+            }
+          ],
+          threadId,
+          draft.workspaceRoot
+        )
+        attachmentIds = uploaded.attachmentIds
+      } catch (error) {
+        useSddDraftStore.getState().setOperationStatus(
+          'error',
+          error instanceof Error ? error.message : String(error)
+        )
+        return false
+      }
+    }
+
+    const assistantSelection = useWriteWorkspaceStore.getState()
+    const model = assistantSelection.assistantModel.trim()
+    const providerId =
+      assistantSelection.assistantProviderId.trim() || providerIdForComposerModel(composerModelGroups, model)
+    return sendMessage(payload.prompt, 'agent', {
+      displayText: payload.displayText,
+      ...(model ? { model } : {}),
+      ...(providerId ? { providerId } : {}),
+      ...(attachmentIds.length ? { attachmentIds } : {})
+    })
+  }, [
+    composerModelGroups,
+    ensureSddAssistantThreadForDraft,
+    firstVisionCapableModel,
+    openSddAssistantPanel,
+    runtimeConnection,
+    selectedModelSupportsImageInput,
+    sendMessage,
+    setWriteAssistantModel,
+    t,
+    uploadSddImagesAsAttachments
+  ])
+
+  const handleSddNextStep = useCallback(async (): Promise<void> => {
+    const snapshot = useSddDraftStore.getState()
+    const draft = snapshot.activeDraft
+    if (!draft) return
+    if (sddUpgradeInFlightRef.current || snapshot.operationStatus === 'upgrading') return
+    if (!snapshot.content.trim()) {
+      useSddDraftStore.getState().setOperationStatus('error', t('sddEmptyDraftError'))
+      return
+    }
+    if (snapshot.content.includes(PENDING_INFOGRAPHIC_PROTOCOL)) {
+      useSddDraftStore.getState().setOperationStatus('error', t('sddPendingImageBlocked'))
+      return
+    }
+    const chatSnapshot = useChatStore.getState()
+    if (chatSnapshot.busy || threadHasPendingRuntimeWork(chatSnapshot.blocks)) {
+      setError(t('composerQueuePlaceholder'))
+      return
+    }
+    if (chatSnapshot.runtimeConnection !== 'ready') {
+      setError(t('runtimeActionNeedsConnection'))
+      return
+    }
+    sddUpgradeInFlightRef.current = true
+    useSddDraftStore.getState().setOperationStatus('upgrading')
+    const saved = await saveActiveSddDraftToDisk()
+    if (!saved) {
+      sddUpgradeInFlightRef.current = false
+      useSddDraftStore.getState().setOperationStatus('error', useSddDraftStore.getState().error)
+      return
+    }
+
+    const threadId = await ensureSddAssistantThreadForDraft(draft)
+    if (!threadId) {
+      sddUpgradeInFlightRef.current = false
+      useSddDraftStore.getState().setOperationStatus('idle')
+      return
+    }
+
+    const collected = await collectSddDraftImages({
+      markdown: useSddDraftStore.getState().content,
+      draftRelativePath: draft.relativePath,
+      workspaceRoot: draft.workspaceRoot
+    })
+    if (collected.errors.length > 0) {
+      sddUpgradeInFlightRef.current = false
+      useSddDraftStore.getState().setOperationStatus('error', collected.errors.join('\n'))
+      return
+    }
+
+    const supportsImageAttachments =
+      collected.images.length > 0 &&
+      runtimeInfo?.capabilities.model.inputModalities.includes('image') === true &&
+      runtimeInfo.capabilities.attachments.available === true &&
+      typeof getProvider().uploadAttachment === 'function'
+
+    let imagesForPrompt = collected.images
+    let attachmentIds: string[] = []
+    let imageMode: 'attachments' | 'base64' | 'none' =
+      collected.images.length === 0 ? 'none' : 'base64'
+
+    if (supportsImageAttachments) {
+      try {
+        const uploaded = await uploadSddImagesAsAttachments(collected.images, threadId, draft.workspaceRoot)
+        imagesForPrompt = uploaded.images
+        attachmentIds = uploaded.attachmentIds
+        imageMode = 'attachments'
+      } catch (error) {
+        sddUpgradeInFlightRef.current = false
+        useSddDraftStore.getState().setOperationStatus(
+          'error',
+          error instanceof Error ? error.message : String(error)
+        )
+        return
+      }
+    }
+
+    const latestDraftContent = useSddDraftStore.getState().content
+    const planRelativePath = sddDraftPlanRelativePath(draft)
+    const planId = buildGuiPlanId(draft.workspaceRoot, planRelativePath)
+    const sourceRequest = sddDraftSourceRequest(latestDraftContent, draft.relativePath)
+    const assistantContext = sddAssistantContextFromBlocks(blocks)
+    const prompt = buildSddDraftToPlanPrompt({
+      draftMarkdown: latestDraftContent,
+      draftRelativePath: draft.relativePath,
+      planRelativePath,
+      assistantContext,
+      workspaceRoot: draft.workspaceRoot,
+      images: imagesForPrompt,
+      imageMode,
+      ...(draft.designContext ? { designContext: draft.designContext } : {})
+    })
+    sddUpgradeTargetRef.current = {
+      planId,
+      relativePath: planRelativePath,
+      workspaceRoot: draft.workspaceRoot
+    }
+    setComposerMode('plan')
+    const sent = await sendPlanTurn(prompt, {
+      displayText: t('sddGeneratePlanAction'),
+      workspaceRoot: draft.workspaceRoot,
+      guiPlan: {
+        operation: 'draft',
+        workspaceRoot: draft.workspaceRoot,
+        relativePath: planRelativePath,
+        planId,
+        sourceRequest
+      },
+      ...(attachmentIds.length ? { attachmentIds } : {})
+    })
+    if (!sent) {
+      sddUpgradeInFlightRef.current = false
+      sddUpgradeTargetRef.current = null
+      useSddDraftStore.getState().setOperationStatus('idle')
+      return
+    }
+    const tracePath = sddDraftTraceRelativePath(draft.relativePath)
+    if (tracePath) {
+      await window.kunGui
+        .writeWorkspaceFile({
+          workspaceRoot: draft.workspaceRoot,
+          path: tracePath,
+          content: JSON.stringify(
+            buildSddTraceSnapshot(latestDraftContent, planRelativePath),
+            null,
+            2
+          )
+        })
+        .catch(() => undefined)
+    }
+  }, [
+    blocks,
+    ensureSddAssistantThreadForDraft,
+    runtimeInfo,
+    sendPlanTurn,
+    setComposerMode,
+    setError,
+    t,
+    uploadSddImagesAsAttachments
+  ])
+
+  const startNewSddAssistantConversation = useCallback((): void => {
+    pendingSddFrameworkRef.current = null
+    pendingSddFrameworkPromptRef.current = null
+    startThreadSddAssistantConversation()
+  }, [startThreadSddAssistantConversation])
+
+  return {
+    applySddFramework,
+    handleSddNextStep,
+    sendSddAssistantPrompt,
+    sendSddPrototypeTurn,
+    startNewSddAssistantConversation
+  }
+}

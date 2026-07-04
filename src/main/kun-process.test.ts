@@ -7,6 +7,9 @@ import { configureLogger } from './logger'
 import {
   defaultClawSettings,
   DEFAULT_LOG_RETENTION_DAYS,
+  DEFAULT_TOOL_OUTPUT_MAX_BYTES,
+  DEFAULT_TOOL_OUTPUT_MAX_LINES,
+  defaultDesignSettings,
   defaultKeyboardShortcuts,
   defaultKunRuntimeSettings,
   defaultModelProviderSettings,
@@ -55,6 +58,7 @@ function createSettings(binaryPath: string): AppSettingsV1 {
     claw: defaultClawSettings(),
     schedule: defaultScheduleSettings(),
     workflow: defaultWorkflowSettings(),
+    design: defaultDesignSettings(),
     terminal: defaultTerminalSettings(),
     guiUpdate: { channel: 'stable' },
     codePromptPrefix: '',
@@ -536,6 +540,10 @@ describe('syncGuiManagedKunConfig', () => {
         maxArrayItems: 80
       }
     })
+    expect(parsed.serve.toolOutputLimits).toEqual({
+      maxLines: DEFAULT_TOOL_OUTPUT_MAX_LINES,
+      maxBytes: DEFAULT_TOOL_OUTPUT_MAX_BYTES
+    })
     expect(parsed.contextCompaction).toMatchObject({
       defaultSoftThreshold: 96000,
       defaultHardThreshold: 108800,
@@ -556,11 +564,12 @@ describe('syncGuiManagedKunConfig', () => {
         hardThreshold: 990_000
       }
     })
-    expect(parsed.runtime.streamIdleTimeoutMs).toBe(45000)
+    expect(parsed.runtime.streamIdleTimeoutMs).toBe(450000)
     expect(parsed.runtime.toolStorm).toMatchObject({ enabled: true, windowSize: 8, threshold: 3 })
     expect(parsed.runtime.toolArgumentRepair).toMatchObject({ maxStringBytes: 524288 })
     expect(parsed.capabilities.attachments).toMatchObject({ enabled: true })
     expect(parsed.capabilities.memory).toMatchObject({ enabled: false })
+    expect(parsed.capabilities.instructions).toMatchObject({ enabled: true })
     // Subagents have no GUI enable toggle: they default ON so delegate_task + the
     // built-in profiles are always offered. maxParallel/maxChildRuns must be >=1 or
     // DelegationRuntime can never run a child. This locks the default against regressions.
@@ -570,6 +579,7 @@ describe('syncGuiManagedKunConfig', () => {
     expect(parsed.capabilities.imageGen).toEqual({
       enabled: false,
       protocol: 'openai-images',
+      quality: 'auto',
       timeoutMs: 180000
     })
     expect(parsed.capabilities.speechGen).toEqual({
@@ -635,6 +645,20 @@ describe('syncGuiManagedKunConfig', () => {
     expect(parsed.capabilities.memory).toMatchObject({ enabled: true })
   })
 
+  it('writes the instructions capability from the GUI instructions toggle', async () => {
+    if (!tempRoot) throw new Error('temp root not initialized')
+    const configPath = join(tempRoot, 'config.json')
+    const module = await import('./kun-process')
+
+    await module.syncGuiManagedKunConfig(tempRoot, {
+      ...defaultKunRuntimeSettings(),
+      instructions: { enabled: false }
+    })
+
+    const parsed = JSON.parse(readFileSync(configPath, 'utf8')) as any
+    expect(parsed.capabilities.instructions).toMatchObject({ enabled: false })
+  })
+
   it('writes the image generation capability and omits cleared fields', async () => {
     if (!tempRoot) throw new Error('temp root not initialized')
     const configPath = join(tempRoot, 'config.json')
@@ -649,6 +673,7 @@ describe('syncGuiManagedKunConfig', () => {
         apiKey: 'sk-image-test',
         model: 'Kwai-Kolors/Kolors',
         defaultSize: '',
+        quality: 'high' as const,
         timeoutMs: 240000
       }
     }
@@ -662,6 +687,7 @@ describe('syncGuiManagedKunConfig', () => {
       baseUrl: 'https://api.siliconflow.cn/v1',
       apiKey: 'sk-image-test',
       model: 'Kwai-Kolors/Kolors',
+      quality: 'high',
       timeoutMs: 240000
     })
     expect(KunConfigSchema.safeParse(parsed).success).toBe(true)
@@ -673,6 +699,110 @@ describe('syncGuiManagedKunConfig', () => {
     })
     const cleared = JSON.parse(readFileSync(configPath, 'utf8')) as any
     expect('apiKey' in cleared.capabilities.imageGen).toBe(false)
+    expect('headers' in cleared.capabilities.imageGen).toBe(false)
+  })
+
+  it('unwraps Codex OAuth credentials and writes Codex headers for image generation', async () => {
+    if (!tempRoot) throw new Error('temp root not initialized')
+    const configPath = join(tempRoot, 'config.json')
+    const module = await import('./kun-process')
+    const codexCredentials = JSON.stringify({
+      kind: 'codex-oauth',
+      accessToken: 'codex-access-token',
+      refreshToken: 'codex-refresh-token',
+      expiresAt: Date.now() + 3600_000,
+      accountId: 'acct_123',
+      email: 'user@example.com'
+    })
+
+    await module.syncGuiManagedKunConfig(tempRoot, {
+      ...defaultKunRuntimeSettings(),
+      imageGeneration: {
+        enabled: true,
+        providerId: 'codex',
+        protocol: 'codex-responses-image',
+        baseUrl: 'https://chatgpt.com/backend-api/codex',
+        apiKey: codexCredentials,
+        model: 'gpt-image-2',
+        defaultSize: '',
+        quality: 'medium',
+        timeoutMs: 180000
+      }
+    })
+
+    const parsed = JSON.parse(readFileSync(configPath, 'utf8')) as any
+    expect(parsed.capabilities.imageGen).toMatchObject({
+      enabled: true,
+      protocol: 'codex-responses-image',
+      baseUrl: 'https://chatgpt.com/backend-api/codex',
+      apiKey: 'codex-access-token',
+      model: 'gpt-image-2',
+      quality: 'medium',
+      timeoutMs: 180000,
+      headers: {
+        'ChatGPT-Account-Id': 'acct_123',
+        originator: 'codex_cli_rs',
+        'OpenAI-Beta': 'responses=experimental'
+      }
+    })
+    expect(parsed.capabilities.imageGen.headers['User-Agent']).toContain('codex_cli_rs')
+    expect(typeof parsed.capabilities.imageGen.headers.session_id).toBe('string')
+    expect(KunConfigSchema.safeParse(parsed).success).toBe(true)
+  })
+
+  it('replaces stale GUI-managed model profile fields while preserving compaction overrides', async () => {
+    if (!tempRoot) throw new Error('temp root not initialized')
+    const configPath = join(tempRoot, 'config.json')
+    const module = await import('./kun-process')
+    writeFileSync(configPath, JSON.stringify({
+      models: {
+        profiles: {
+          'gpt-5.5': {
+            contextWindowTokens: 128000,
+            maxOutputTokens: 16000,
+            inputModalities: ['text', 'image'],
+            outputModalities: ['text'],
+            supportsToolCalling: true,
+            messageParts: ['text', 'image_url'],
+            endpointFormat: 'responses',
+            contextCompaction: { softThreshold: 900000 }
+          },
+          'user-model': {
+            contextWindowTokens: 96000,
+            endpointFormat: 'messages',
+            contextCompaction: { softThreshold: 86000 }
+          }
+        }
+      }
+    }), 'utf8')
+
+    await module.syncGuiManagedKunConfig(tempRoot, {
+      ...defaultKunRuntimeSettings(),
+      modelProfiles: {
+        'gpt-5.5': {
+          contextWindowTokens: 1_000_000,
+          inputModalities: ['text', 'image'],
+          outputModalities: ['text'],
+          supportsToolCalling: true,
+          messageParts: ['text', 'image_url']
+        }
+      }
+    })
+
+    const parsed = JSON.parse(readFileSync(configPath, 'utf8')) as any
+    expect(parsed.models.profiles['gpt-5.5']).toMatchObject({
+      contextWindowTokens: 1_000_000,
+      inputModalities: ['text', 'image'],
+      contextCompaction: { softThreshold: 900000 }
+    })
+    expect(parsed.models.profiles['gpt-5.5'].endpointFormat).toBeUndefined()
+    expect(parsed.models.profiles['gpt-5.5'].maxOutputTokens).toBeUndefined()
+    expect(parsed.models.profiles['user-model']).toMatchObject({
+      contextWindowTokens: 96000,
+      endpointFormat: 'messages',
+      contextCompaction: { softThreshold: 86000 }
+    })
+    expect(KunConfigSchema.safeParse(parsed).success).toBe(true)
   })
 
   it('keeps the config stable across repeated syncs with imageGen configured', async () => {
@@ -689,6 +819,7 @@ describe('syncGuiManagedKunConfig', () => {
         apiKey: 'sk-image-test',
         model: 'Kwai-Kolors/Kolors',
         defaultSize: '1024x1024',
+        quality: 'auto' as const,
         timeoutMs: 180000
       }
     }
@@ -1039,6 +1170,10 @@ describe('syncGuiManagedKunConfig', () => {
             maxToolArgumentStringTokens: 1000,
             maxArrayItems: 40
           }
+        },
+        toolOutputLimits: {
+          maxLines: 30000,
+          maxBytes: 2 * 1024 * 1024
         }
       },
       { mcpConfigPath: join(tempRoot, 'missing-mcp.json') }
@@ -1068,6 +1203,10 @@ describe('syncGuiManagedKunConfig', () => {
     })
     expect(parsed.serve.tokenEconomy.customTokenEconomyFlag).toBeUndefined()
     expect(parsed.serve.tokenEconomy.historyHygiene.customHistoryFlag).toBeUndefined()
+    expect(parsed.serve.toolOutputLimits).toEqual({
+      maxLines: 30000,
+      maxBytes: 2 * 1024 * 1024
+    })
     expect(parsed.contextCompaction).toMatchObject({
       defaultSoftThreshold: 32000,
       defaultHardThreshold: 64000,

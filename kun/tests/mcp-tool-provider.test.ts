@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { mkdtemp } from 'node:fs/promises'
+import { mkdir, mkdtemp } from 'node:fs/promises'
 import { createServer, get as httpGet } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
@@ -115,6 +115,22 @@ describe('MCP tool provider', () => {
       '/Users/alice/.local/bin',
       '/Users/alice/.bun/bin'
     ])
+  })
+
+  it('adds nvm node bin directories to stdio MCP environments on Linux', async () => {
+    const home = (await mkdtemp(join(tmpdir(), 'kun-nvm-home-'))).replace(/\\/g, '/')
+    const nvmBin = `${home}/.nvm/versions/node/v22.23.0/bin`
+    await mkdir(nvmBin, { recursive: true })
+
+    const env = buildMcpStdioEnvironment({}, {
+      platform: 'linux',
+      baseEnv: {
+        PATH: '/usr/bin',
+        HOME: home
+      }
+    })
+
+    expect(env.PATH).toContain(nvmBin)
   })
 
   it('keeps explicitly configured stdio MCP PATH values ahead of common paths', () => {

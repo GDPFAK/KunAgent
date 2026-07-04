@@ -50,7 +50,8 @@ let backgroundCheckPromise: Promise<void> | null = null
 
 const GUI_UPDATE_SCHEDULE_FILE = 'gui-update-schedule.json'
 const GUI_VERSION_STATE_FILE = 'gui-version-state.json'
-const DEFAULT_CHANGELOG_URL = 'https://deepseek-gui.com/changelog'
+const DEFAULT_CHANGELOG_DIRECTORY_URL = 'https://github.com/KunAgent/Kun/tree/master/release'
+const DEFAULT_CHANGELOG_FILE_BASE_URL = 'https://github.com/KunAgent/Kun/blob/master/release'
 
 type GuiVersionState = {
   lastSeenVersion?: string
@@ -165,8 +166,20 @@ async function writeGuiVersionState(state: GuiVersionState): Promise<void> {
   await writeFile(path, JSON.stringify(state, null, 2), 'utf8')
 }
 
-function changelogUrl(): string {
-  return envWithLegacyFallback('KUN_CHANGELOG_URL', 'DEEPSEEK_GUI_CHANGELOG_URL') || DEFAULT_CHANGELOG_URL
+function normalizeChangelogVersion(version: string): string {
+  const cleaned = version.trim().replace(/^v/i, '')
+  return /^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(cleaned) ? `v${cleaned}` : ''
+}
+
+function changelogUrl(version?: string): string {
+  const normalizedVersion = normalizeChangelogVersion(version ?? '')
+  const configured = envWithLegacyFallback('KUN_CHANGELOG_URL', 'DEEPSEEK_GUI_CHANGELOG_URL')
+  if (configured) {
+    return normalizedVersion ? configured.replace(/\{version\}/g, normalizedVersion) : configured
+  }
+  return normalizedVersion
+    ? `${DEFAULT_CHANGELOG_FILE_BASE_URL}/release-${encodeURIComponent(normalizedVersion)}.md`
+    : DEFAULT_CHANGELOG_DIRECTORY_URL
 }
 
 function normalizeReleaseNotes(value: unknown): string | undefined {
@@ -617,6 +630,8 @@ export function initializeGuiUpdater(
 }
 
 export async function showPostUpdateReleaseNotes(): Promise<void> {
+  if (!app.isPackaged) return
+
   const currentVersion = app.getVersion().trim()
   const state = await readGuiVersionState()
   if (!state.lastSeenVersion) {
@@ -624,6 +639,7 @@ export async function showPostUpdateReleaseNotes(): Promise<void> {
     return
   }
   if (state.lastSeenVersion === currentVersion) return
+  if (!isVersionGreater(currentVersion, state.lastSeenVersion)) return
 
   const pendingUpdate =
     state.pendingUpdate?.version === currentVersion ? state.pendingUpdate : undefined
@@ -651,7 +667,7 @@ export async function showPostUpdateReleaseNotes(): Promise<void> {
       ? await dialog.showMessageBox(window, options)
       : await dialog.showMessageBox(options)
   if (result.response === 0) {
-    await shell.openExternal(changelogUrl())
+    await shell.openExternal(changelogUrl(currentVersion))
   }
 }
 

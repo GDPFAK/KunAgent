@@ -9,13 +9,16 @@ import {
   ContextCompactionConfigSchema,
   DEFAULT_KUN_MODEL,
   DEFAULT_STORAGE_CONFIG,
+  DEFAULT_TOOL_OUTPUT_LIMITS_CONFIG,
+  ModelRequestRetryConfigSchema,
   ModelConfigSchema,
   QualityConfigSchema,
   RolesConfigSchema,
   RuntimeTuningConfigSchema,
   ServeProviderConfigSchema,
   StorageConfigSchema,
-  TokenEconomyConfigSchema
+  TokenEconomyConfigSchema,
+  ToolOutputLimitsConfigSchema
 } from '../config/kun-config.js'
 import {
   DEFAULT_KUN_CAPABILITIES_CONFIG,
@@ -49,13 +52,16 @@ export const ServeOptionsSchema = z.object({
   baseUrl: z.string().default('https://api.deepseek.com/beta'),
   modelProxyUrl: z.string().default(''),
   endpointFormat: z.preprocess(normalizeModelEndpointFormat, z.enum(MODEL_ENDPOINT_FORMATS)).default(DEFAULT_MODEL_ENDPOINT_FORMAT),
+  retry: ModelRequestRetryConfigSchema.optional(),
   model: z.string().default(DEFAULT_SERVE_MODEL),
   approvalPolicy: ApprovalPolicySchema.default(DEFAULT_APPROVAL_POLICY),
   sandboxMode: SandboxModeSchema.default(DEFAULT_SANDBOX_MODE),
   tokenEconomyMode: z.boolean().default(false),
   tokenEconomy: TokenEconomyConfigSchema.optional(),
+  toolOutputLimits: ToolOutputLimitsConfigSchema.default(DEFAULT_TOOL_OUTPUT_LIMITS_CONFIG),
   insecure: z.boolean().default(false),
   storage: StorageConfigSchema.default(DEFAULT_STORAGE_CONFIG),
+  headers: z.record(z.string(), z.string()).optional(),
   providers: z.record(z.string().min(1), ServeProviderConfigSchema).optional(),
   models: ModelConfigSchema.optional(),
   contextCompaction: ContextCompactionConfigSchema.optional(),
@@ -80,6 +86,7 @@ export const DEFAULT_SERVE_OPTIONS: ServeOptions = {
   approvalPolicy: DEFAULT_APPROVAL_POLICY,
   sandboxMode: DEFAULT_SANDBOX_MODE,
   tokenEconomyMode: false,
+  toolOutputLimits: DEFAULT_TOOL_OUTPUT_LIMITS_CONFIG,
   insecure: false,
   storage: DEFAULT_STORAGE_CONFIG,
   capabilities: DEFAULT_KUN_CAPABILITIES_CONFIG

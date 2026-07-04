@@ -131,9 +131,28 @@ function ensureNodePtyHelpersExecutable(context) {
   }
 }
 
+function normalizeArch(arch) {
+  if (arch === 'x64' || arch === 1) return 'x64'
+  if (arch === 'arm64' || arch === 3) return 'arm64'
+  throw new Error(`[after-pack] Unsupported Whisper runner arch: ${arch}`)
+}
+
+function prunePackedWhisperResources(context) {
+  const whisperDir = join(packedResourcesDir(context), 'whisper')
+  if (!existsSync(whisperDir)) return
+
+  const keep = `${normalizePlatform(context.electronPlatformName)}-${normalizeArch(context.arch)}`
+  for (const entry of readdirSync(whisperDir)) {
+    if (entry === keep || entry === 'LICENSE.whisper.cpp') continue
+    rmSync(join(whisperDir, entry), { recursive: true, force: true })
+    console.log(`[after-pack] Removed non-target Whisper resource: ${entry}`)
+  }
+}
+
 async function afterPack(context) {
   prunePackedKunDependencies(context)
   validateBundledKunRuntime(context)
+  prunePackedWhisperResources(context)
   ensureNodePtyHelpersExecutable(context)
   maybeAdhocSignMacApp(context)
 }
@@ -146,6 +165,8 @@ exports._internals = {
   npmCommand,
   prunePackedKunDependencies,
   validateBundledKunRuntime,
+  normalizeArch,
+  prunePackedWhisperResources,
   ensureNodePtyHelpersExecutable
 }
 exports.default = afterPack

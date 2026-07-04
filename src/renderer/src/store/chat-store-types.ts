@@ -49,6 +49,7 @@ export type QueuedUserMessage = {
     sourceRequest?: string
     title?: string
   }
+  guiDesignCanvas?: boolean
 }
 
 /**
@@ -73,6 +74,7 @@ export type SendMessageOverrides = {
   reasoningEffort?: string
   displayText?: string
   guiPlan?: GuiPlanMessageContext
+  guiDesignCanvas?: boolean
   attachmentIds?: string[]
   attachments?: AttachmentReference[]
   fileReferences?: UserFileReference[]
@@ -83,6 +85,7 @@ export type SettingsRouteSection =
   | 'general'
   | 'providers'
   | 'write'
+  | 'design'
   | 'imageGeneration'
   | 'mediaGeneration'
   | 'speechToText'
@@ -96,7 +99,7 @@ export type SettingsRouteSection =
   | 'claw'
   | 'updates'
   | 'terminal'
-export type AppRoute = 'chat' | 'write' | 'settings' | 'plugins' | 'claw' | 'schedule' | 'workflow'
+export type AppRoute = 'chat' | 'write' | 'design' | 'settings' | 'plugins' | 'claw' | 'schedule' | 'workflow'
 export type PluginHostRoute = 'chat' | 'claw'
 
 /**
@@ -161,6 +164,21 @@ export type ChatState = {
   liveReasoning: string
   liveAssistant: string
   lastSeq: number
+  /**
+   * Highest delta `seq` (per-thread, monotonic) already folded into the live
+   * buffers. Unlike the per-sink `appliedDeltaSeqFloor` closure — which only
+   * dedups within ONE subscription — this lives in the store and is shared
+   * across every sink. When a long, tool-heavy turn loses its SSE stream and
+   * more than one sink is briefly live (recovery / re-subscribe), the per-sink
+   * floors are independent and each re-appends the same replayed deltas; the
+   * shared floor serializes them so a given seq folds into `liveAssistant` at
+   * most once. Reset to the new subscription's `sinceSeq` in lockstep with
+   * every `liveAssistant` reset (send / select / recover / live / clear) — and
+   * because seqs are per-thread, the reset is what keeps a thread switch from
+   * dropping the new thread's low seqs. A genuine new delta always has seq >
+   * sinceSeq, so this never drops live text.
+   */
+  liveDeltaSeqFloor: number
   usageRefreshKey: number
   /**
    * Latest turn's usage snapshot, tagged with the thread it belongs to. Used by
@@ -211,12 +229,16 @@ export type ChatState = {
   openCode: () => Promise<void>
   ensureWriteThreadForWorkspace: (workspaceRoot?: string) => Promise<string | null>
   createWriteThread: (workspaceRoot?: string) => Promise<string | null>
+  ensureDesignThreadForWorkspace: (workspaceRoot?: string, docId?: string) => Promise<string | null>
+  createDesignThread: (workspaceRoot?: string, docId?: string) => Promise<string | null>
   selectWriteThread: (threadId: string, workspaceRoot?: string) => Promise<void>
   openSettings: (section?: SettingsRouteSection) => void
   openPlugins: (host?: PluginHostRoute) => void
   openClaw: () => void
   openSchedule: () => void
   openWorkflow: () => void
+  openDesign: () => void
+  clearActiveThreadSelection: () => void
   refreshClawChannels: () => Promise<void>
   addClawChannel: (
     provider: ClawImProvider,
@@ -235,7 +257,7 @@ export type ChatState = {
   selectClawConversation: (channelId: string, threadId: string) => Promise<void>
   deleteClawChannel: (channelId: string) => Promise<void>
   resetClawChannelSession: (channelId: string) => Promise<void>
-  setClawChannelModel: (channelId: string, model: string) => Promise<void>
+  setClawChannelModel: (channelId: string, model: string, providerId?: string) => Promise<void>
   openInitialSetup: (mode?: InitialSetupMode) => void
   closeInitialSetup: () => void
   boot: () => Promise<void>

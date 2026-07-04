@@ -11,12 +11,14 @@ import {
   modelProviderTokenPlanProfile,
   normalizeAppSettings,
   tokenPlanProviderId,
+  type AppSettingsPatch,
   type AppSettingsV1,
   type KunToolPermissionMode,
   type KunRuntimeSettingsPatchV1,
   type ModelProviderPreset,
   type ModelProviderProfileV1
 } from '@shared/app-settings'
+import { diffSettingsPatch } from './settings-utils'
 
 export type InitialSetupAccessMode = 'api' | 'token-plan'
 
@@ -203,6 +205,14 @@ export function buildInitialSetupSettings(
       : {})
   }
   return applyKunRuntimePatch(next, kunPatch)
+}
+
+export function buildInitialSetupSettingsPatch(
+  settings: AppSettingsV1,
+  drafts: InitialSetupDrafts,
+  selection: Pick<InitialSetupSelection, 'presetId' | 'mode'> & Partial<Pick<InitialSetupSelection, 'permissionMode'>>
+): AppSettingsPatch {
+  return diffSettingsPatch(settings, buildInitialSetupSettings(settings, drafts, selection))
 }
 
 function upsertPresetProfile(

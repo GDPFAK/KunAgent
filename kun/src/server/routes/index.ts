@@ -32,6 +32,7 @@ import { resumeSession } from './sessions.js'
 import { usageJsonResponse } from './usage.js'
 import { llmDebugRoundsResponse } from './debug-llm.js'
 import { runtimeInfoJsonResponse, runtimeToolDiagnosticsJsonResponse } from './runtime-info.js'
+import { applyRuntimeConfig } from './runtime-config.js'
 import { listSkills } from './skills.js'
 import {
   attachmentDiagnostics,
@@ -57,6 +58,7 @@ import {
   backgroundShellStop
 } from './background-shells.js'
 import { authorizeMcpOAuth, clearMcpOAuth, mcpOAuthDiagnostics } from './mcp-oauth.js'
+import { auditSupplyChainPackage, checkSupplyChainUpdate } from './supply-chain.js'
 import { isAuthorized, bearerToken } from '../auth.js'
 import { ERRORS } from './runtime-error.js'
 import type { ServerRuntime } from './server-runtime.js'
@@ -66,6 +68,7 @@ import type { ServerRuntime } from './server-runtime.js'
  * - `GET /health` (unauthenticated)
  * - `GET /v1/runtime/info` (auth)
  * - `GET /v1/runtime/tools` (auth)
+ * - `POST /v1/runtime/config/apply` (auth)
  * - `GET /v1/mcp/oauth`, `DELETE /v1/mcp/oauth/{id}` (auth)
  * - `GET /v1/skills` (auth)
  * - `POST /v1/attachments` (auth)
@@ -93,6 +96,7 @@ import type { ServerRuntime } from './server-runtime.js'
  * - `POST /v1/sessions/{id}/resume-thread` (auth)
  * - `GET /v1/usage` (auth)
  * - `GET /v1/debug/llm-rounds` (auth)
+ * - `POST /v1/supply-chain/audit`, `/v1/supply-chain/update-check` (auth)
  */
 export function buildRouter(runtime: ServerRuntime): Router {
   const router = new Router()
@@ -104,6 +108,10 @@ export function buildRouter(runtime: ServerRuntime): Router {
   router.add('GET', '/v1/runtime/tools', async (request) => {
     if (!authorize(request, runtime)) return ERRORS.unauthorized()
     return runtimeToolDiagnosticsJsonResponse(runtime)
+  })
+  router.add('POST', '/v1/runtime/config/apply', async (request) => {
+    if (!authorize(request, runtime)) return ERRORS.unauthorized()
+    return applyRuntimeConfig(runtime, request)
   })
   router.add('GET', '/v1/mcp/oauth', async (request) => {
     if (!authorize(request, runtime)) return ERRORS.unauthorized()
@@ -124,6 +132,14 @@ export function buildRouter(runtime: ServerRuntime): Router {
   router.add('GET', '/v1/skills', async (request) => {
     if (!authorize(request, runtime)) return ERRORS.unauthorized()
     return listSkills(runtime)
+  })
+  router.add('POST', '/v1/supply-chain/audit', async (request) => {
+    if (!authorize(request, runtime)) return ERRORS.unauthorized()
+    return auditSupplyChainPackage(runtime, request)
+  })
+  router.add('POST', '/v1/supply-chain/update-check', async (request) => {
+    if (!authorize(request, runtime)) return ERRORS.unauthorized()
+    return checkSupplyChainUpdate(request)
   })
   router.add('POST', '/v1/attachments', async (request) => {
     if (!authorize(request, runtime)) return ERRORS.unauthorized()
@@ -262,8 +278,8 @@ export function buildRouter(runtime: ServerRuntime): Router {
       runtime.turnService,
       ctx.params.id,
       request,
-      ({ threadId, turnId, reviewItemId }, target, model) => {
-        runtime.runReview?.({ threadId, turnId, reviewItemId, target, model })
+      ({ threadId, turnId, reviewItemId }, target, model, providerId) => {
+        runtime.runReview?.({ threadId, turnId, reviewItemId, target, model, providerId })
       }
     )
   })

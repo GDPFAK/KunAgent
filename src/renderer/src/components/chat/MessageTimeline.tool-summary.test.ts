@@ -3,9 +3,19 @@ import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import type { ChatBlock, NormalizedThread, ToolBlock } from '../../agent/types'
 import { useChatStore } from '../../store/chat-store'
-import { MessageTimeline, goalTimelinePaddingClass, liveTurnProgressClass, summarizeToolBlock } from './MessageTimeline'
+import {
+  MessageTimeline,
+  goalTimelinePaddingClass,
+  liveTurnProgressClass,
+  summarizeToolBlock
+} from './MessageTimeline'
 import { GeneratedFilesPanel, MessageBubble } from './message-timeline-bubbles'
 import { ProcessSectionRow } from './message-timeline-process'
+import {
+  TimelineFilePreviewWorkspaceProvider,
+  timelineFilePreviewWorkspaceRoot,
+  useTimelineFilePreviewWorkspaceRoot
+} from './timeline-file-preview-workspace'
 
 const labels: Record<string, string> = {
   toolActionCommand: 'Ran command',
@@ -43,6 +53,36 @@ function toolBlock(overrides: Partial<ToolBlock>): ToolBlock {
 }
 
 describe('MessageTimeline tool summaries', () => {
+  function WorkspaceConsumer() {
+    return createElement('span', null, useTimelineFilePreviewWorkspaceRoot())
+  }
+
+  it('uses the active thread workspace for file previews before falling back to the global workspace', () => {
+    expect(timelineFilePreviewWorkspaceRoot(
+      { workspace: ' /tmp/thread-workspace ' },
+      '/tmp/global-workspace'
+    )).toBe('/tmp/thread-workspace')
+
+    expect(timelineFilePreviewWorkspaceRoot(
+      { workspace: '   ' },
+      '/tmp/global-workspace'
+    )).toBe('/tmp/global-workspace')
+  })
+
+  it('provides the timeline workspace through context instead of the global active thread', () => {
+    const html = renderToStaticMarkup(
+      createElement(
+        TimelineFilePreviewWorkspaceProvider,
+        {
+          workspaceRoot: '/tmp/embedded-thread',
+          children: createElement(WorkspaceConsumer)
+        }
+      )
+    )
+
+    expect(html).toContain('/tmp/embedded-thread')
+  })
+
   it('summarizes built-in read/write/edit tools with their file path', () => {
     expect(
       summarizeToolBlock(
@@ -249,6 +289,32 @@ describe('MessageTimeline Kun runtime metadata smoke', () => {
     expect(html).toContain('ds-media-printer-reveal')
   })
 
+  it('deduplicates generated files across tool blocks by path', () => {
+    const first: ToolBlock = toolBlock({
+      id: 'tool_export_1',
+      summary: 'export_report',
+      meta: {
+        generatedFiles: [
+          { relativePath: 'reports/summary.md', mimeType: 'text/markdown' }
+        ]
+      }
+    })
+    const second: ToolBlock = toolBlock({
+      id: 'tool_export_2',
+      summary: 'export_report',
+      meta: {
+        generatedFiles: [
+          { relativePath: 'reports/summary.md', mimeType: 'text/markdown' }
+        ]
+      }
+    })
+
+    const html = renderToStaticMarkup(createElement(GeneratedFilesPanel, { blocks: [first, second] }))
+
+    expect((html.match(/summary\.md/g) ?? []).length).toBe(2)
+    expect((html.match(/type="button"/g) ?? []).length).toBe(2)
+  })
+
   it('renders managed Claw prompts as the user-visible message', () => {
     const block: ChatBlock = {
       kind: 'user',
@@ -352,6 +418,7 @@ describe('MessageTimeline Kun runtime metadata smoke', () => {
         section: { id: 'execution-tool_1', kind: 'execution', blocks: [block] },
         processing: false,
         singleReasoningSection: false,
+        workspaceRoot: '/tmp/project',
         viewportRef: { current: null }
       })
     )
@@ -378,6 +445,7 @@ describe('MessageTimeline Kun runtime metadata smoke', () => {
         section: { id: 'execution-tool_1', kind: 'execution', blocks: [block] },
         processing: true,
         singleReasoningSection: false,
+        workspaceRoot: '/tmp/project',
         viewportRef: { current: null }
       })
     )
@@ -390,7 +458,7 @@ describe('MessageTimeline Kun runtime metadata smoke', () => {
     expect(html).toContain('ds-process-file-reference')
   })
 
-  it('shows failed tool details by default while keeping the row collapsible', () => {
+  it('keeps a completed failed-tool detail collapsed by default while staying expandable', () => {
     const block: ChatBlock = toolBlock({
       summary: 'Recognize image recognize_image',
       status: 'error',
@@ -403,17 +471,43 @@ describe('MessageTimeline Kun runtime metadata smoke', () => {
         section: { id: 'execution-tool_error', kind: 'execution', blocks: [block] },
         processing: false,
         singleReasoningSection: false,
+        workspaceRoot: '/tmp/project',
+        viewportRef: { current: null }
+      })
+    )
+
+    // The header (summary + warning tone) renders, but once the turn has
+    // completed a failed tool call stays collapsed by default — the error
+    // detail is revealed only after the user expands the row.
+    expect(html).toContain('Recognize image recognize_image')
+    expect(html).toContain('text-orange-700')
+    expect(html).not.toContain('text-red-600')
+    expect(html).not.toContain('model request failed with status 401')
+    expect(html).toContain('role="button"')
+    expect(html).toContain('aria-expanded="false"')
+  })
+
+  it('keeps an active failed-tool detail visible while the turn is running', () => {
+    const block: ChatBlock = toolBlock({
+      summary: 'Recognize image recognize_image',
+      status: 'error',
+      detail: 'model request failed with status 401',
+      meta: { toolName: 'recognize_image' }
+    })
+
+    const html = renderToStaticMarkup(
+      createElement(ProcessSectionRow, {
+        section: { id: 'execution-tool_error', kind: 'execution', blocks: [block] },
+        processing: true,
+        singleReasoningSection: false,
+        workspaceRoot: '/tmp/project',
         viewportRef: { current: null }
       })
     )
 
     expect(html).toContain('Recognize image recognize_image')
     expect(html).toContain('model request failed with status 401')
-    expect(html).toContain('role="button"')
-    expect(html).toContain('text-orange-700')
-    expect(html).toContain('border-orange-200/80')
-    expect(html).not.toContain('text-red-600')
-    expect(html).not.toContain('border-red-200/80')
+    expect(html).toContain('aria-expanded="true"')
   })
 
   it('expands active reasoning so the current process is visible', () => {
@@ -428,6 +522,7 @@ describe('MessageTimeline Kun runtime metadata smoke', () => {
         section: { id: 'reasoning', kind: 'reasoning', blocks: [block] },
         processing: true,
         singleReasoningSection: true,
+        workspaceRoot: '/tmp/project',
         viewportRef: { current: null }
       })
     )
@@ -458,6 +553,7 @@ describe('MessageTimeline Kun runtime metadata smoke', () => {
         section: { id: 'execution-batch', kind: 'execution', blocks: [readBlock, grepBlock] },
         processing: false,
         singleReasoningSection: false,
+        workspaceRoot: '/tmp/project',
         viewportRef: { current: null }
       })
     )
@@ -503,6 +599,7 @@ describe('MessageTimeline Kun runtime metadata smoke', () => {
         section: { id: 'execution-batch', kind: 'execution', blocks: [readBlock, inputBlock] },
         processing: true,
         singleReasoningSection: false,
+        workspaceRoot: '/tmp/project',
         viewportRef: { current: null }
       })
     )
@@ -535,6 +632,7 @@ describe('MessageTimeline Kun runtime metadata smoke', () => {
         section: { id: 'execution-batch', kind: 'execution', blocks: [readBlock, approvalBlock] },
         processing: true,
         singleReasoningSection: false,
+        workspaceRoot: '/tmp/project',
         viewportRef: { current: null }
       })
     )
@@ -569,6 +667,7 @@ describe('MessageTimeline Kun runtime metadata smoke', () => {
         section: { id: 'execution-input', kind: 'execution', blocks: [inputBlock] },
         processing: true,
         singleReasoningSection: false,
+        workspaceRoot: '/tmp/project',
         viewportRef: { current: null }
       })
     )
@@ -604,6 +703,7 @@ describe('MessageTimeline Kun runtime metadata smoke', () => {
         section: { id: 'execution-input', kind: 'execution', blocks: [inputBlock] },
         processing: true,
         singleReasoningSection: false,
+        workspaceRoot: '/tmp/project',
         viewportRef: { current: null }
       })
     )
@@ -689,7 +789,7 @@ describe('MessageTimeline Kun runtime metadata smoke', () => {
     expect(html).not.toContain('aria-expanded=')
   })
 
-  it('keeps completed runtime errors visible instead of folding them into the work summary', () => {
+  it('folds a completed runtime error into the collapsed work summary', () => {
     const blocks: ChatBlock[] = [
       {
         kind: 'user',
@@ -730,9 +830,14 @@ describe('MessageTimeline Kun runtime metadata smoke', () => {
       })
     )
 
-    expect(html).toContain('request failed with status 400')
-    expect(html).toContain('Code: http_400')
-    expect(html).toContain('full provider body only visible in the expanded error detail')
+    // Completed turns auto-collapse: a runtime error folds into the toggleable
+    // work summary rather than rendering inline, so its text and detail stay
+    // hidden until the user expands the panel.
+    expect(html).toContain('Work process (1 steps)')
+    expect(html).toContain('aria-expanded="false"')
+    expect(html).not.toContain('request failed with status 400')
+    expect(html).not.toContain('Code: http_400')
+    expect(html).not.toContain('full provider body only visible in the expanded error detail')
   })
 
   it('adds extra bottom padding only for chat timelines with an active goal banner', () => {
@@ -780,6 +885,24 @@ describe('MessageTimeline Kun runtime metadata smoke', () => {
     const copyIndex = html.slice(forkIndex).search(/copyMessage|Copy message|复制消息/)
     expect(forkIndex).toBeGreaterThanOrEqual(0)
     expect(copyIndex).toBeGreaterThan(0)
+  })
+
+  it('renders an export action for completed assistant responses', () => {
+    const html = renderToStaticMarkup(
+      createElement(MessageBubble, {
+        block: {
+          kind: 'assistant',
+          id: 'assistant_1',
+          turnId: 'turn_1',
+          text: 'share this answer'
+        }
+      })
+    )
+
+    expect(html).toMatch(/exportAnswer|Export answer|导出回答/)
+    expect(html).toMatch(/writeExportPdf|Export PDF|导出 PDF/)
+    expect(html).toMatch(/writeExportDocx|Export DOCX|导出 DOCX/)
+    expect(html).toMatch(/writeExportPng|Export PNG|导出 PNG/)
   })
 
   it('renders the workspace rollback action with fork in completed assistant response actions', () => {

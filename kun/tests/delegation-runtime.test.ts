@@ -183,6 +183,36 @@ describe('DelegationRuntime', () => {
     }
   })
 
+  it('forwards guiDesignCanvas from delegate_task context into the child run', async () => {
+    const seen: boolean[] = []
+    const runtime = createRuntime({
+      executor: async (input) => {
+        seen.push(input.guiDesignCanvas === true)
+        return { summary: 'done' }
+      }
+    })
+    const host = new LocalToolHost({
+      registry: new CapabilityRegistry(buildDelegationToolProviders(runtime))
+    })
+
+    const result = await host.execute({
+      callId: 'call_canvas',
+      toolName: 'delegate_task',
+      arguments: { label: 'Canvas', prompt: 'Add a screen' }
+    }, {
+      threadId: 'thr_1',
+      turnId: 'turn_1',
+      workspace: '/tmp/ws',
+      guiDesignCanvas: true,
+      approvalPolicy: 'auto',
+      abortSignal: new AbortController().signal,
+      awaitApproval: async () => 'allow'
+    })
+
+    expect(seen).toEqual([true])
+    expect(result.item).toMatchObject({ kind: 'tool_result', isError: false })
+  })
+
   it('rejects invalid delegate_task budgets before starting a child', async () => {
     const runtime = createRuntime()
     const host = new LocalToolHost({

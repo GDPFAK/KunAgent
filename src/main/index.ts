@@ -11,6 +11,7 @@ import {
   type ContextMenuParams,
   type MenuItemConstructorOptions
 } from 'electron'
+import { randomBytes } from 'node:crypto'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -38,6 +39,7 @@ import {
   mergeWorkflowSettings,
   mergeAppBehaviorSettings,
   mergeModelProviderSettings,
+  mergeDesignSettings,
   mergeScheduleSettings,
   mergeWriteSettings,
   mergeTerminalSettings,
@@ -46,6 +48,7 @@ import {
   normalizeAppBehaviorSettings,
   normalizeCheckpointCleanupSettings,
   normalizeKeyboardShortcuts,
+  resolveModelProviderProxyUrl,
   resolveKunRuntimeSettings,
   resolveTerminalColorMode,
   type AppBehaviorConfigV1,
@@ -69,9 +72,11 @@ import { waitForRuntimeTurnsIdle } from './runtime/managed-runtime-idle'
 import {
   resolveKunDataDir,
   setKunUnexpectedExitHandler,
+  syncGuiManagedKunConfig,
   waitForKunStartupSettled,
   type KunUnexpectedExitInfo
 } from './kun-process'
+import { resolveCodexOAuthApiKey } from './codex-auth'
 import { expandHomePath } from './settings-store'
 import { RestartBudget, type KunRuntimeStatus } from './kun-runtime-supervisor'
 import { configureLogger, logError, logWarn, pruneOnStartup } from './logger'
@@ -81,11 +86,15 @@ import { createScheduleRuntime, type ScheduleRuntime } from './schedule-runtime'
 import { createWorkflowRuntime, type WorkflowRuntime } from './workflow-runtime'
 import { runClawScheduleMcpServerFromArgv } from './claw-schedule-mcp-server'
 import {
-  clawScheduleMcpSettingsChanged,
   resolveKunMcpJsonPath,
   syncClawScheduleMcpConfig,
   type ClawScheduleMcpLaunchConfig
 } from './claw-schedule-mcp-config'
+import {
+  runtimeProcessConfigChanged,
+  runtimeSettingsApplyMode,
+  stableSettingsStringify
+} from './runtime-settings-apply-mode'
 import { registerAppIpcHandlers } from './ipc/register-app-ipc-handlers'
 import {
   configureManagedWeixinBridgeUrlResolver,
@@ -954,15 +963,23 @@ function queueRuntimeSettingsApply(prev: AppSettingsV1, next: AppSettingsV1): vo
   // original `prev` captured when this call was queued.
   const anchor = lastAppliedSettings ?? prev
   lastAppliedSettings = next
-  const startupConfigChanged = runtimeStartupConfigChanged(anchor, next)
-  if (!startupConfigChanged) return
+  const applyMode = runtimeSettingsApplyMode(anchor, next)
+  if (applyMode === 'none') return
 
   const previousTask = runtimeSettingsApplyPromise ?? Promise.resolve()
   const task = previousTask
     .catch(() => undefined)
     .then(async () => {
       const current = lastAppliedSettings ?? next
-      await restartManagedRuntimeForSettingsChange(anchor, current)
+      const currentMode = runtimeSettingsApplyMode(anchor, current)
+      if (currentMode === 'restart') {
+        await restartManagedRuntimeForSettingsChange(anchor, current)
+      } else if (currentMode === 'hot') {
+        const result = await applyManagedRuntimeSettingsHot(current, 'settings-apply')
+        if (result === 'restart_required') {
+          await restartManagedRuntimeForSettingsChange(anchor, current, true)
+        }
+      }
     })
     .catch((error: unknown) => {
       logWarn('settings-apply', 'Failed to apply Kun runtime settings in background', {
@@ -986,7 +1003,10 @@ function queueRuntimeMcpConfigApply(settings: AppSettingsV1): void {
     .catch(() => undefined)
     .then(async () => {
       const current = lastAppliedSettings ?? settings
-      await restartManagedRuntimeForMcpConfigChange(current)
+      const result = await applyManagedRuntimeSettingsHot(current, 'mcp-config')
+      if (result === 'restart_required') {
+        await restartManagedRuntimeForMcpConfigChange(current)
+      }
     })
     .catch((error: unknown) => {
       logWarn('mcp-config', 'Failed to apply Kun MCP config change in background', {
@@ -1067,9 +1087,11 @@ async function resolveManagedKunLaunchSettings(
   settings: AppSettingsV1,
   source: string
 ): Promise<AppSettingsV1> {
-  const runtime = getKunRuntimeSettings(settings)
+  const tokenResult = await ensureManagedKunRuntimeToken(settings, source)
+  const launchSettings = tokenResult.settings
+  const runtime = getKunRuntimeSettings(launchSettings)
   const resolved = await kunRuntimeAdapter.resolveAvailablePort(runtime.port)
-  if (!resolved.changed) return settings
+  if (!resolved.changed) return launchSettings
 
   const next = await store.patch({ agents: { kun: { port: resolved.port } } })
   lastAppliedSettings = next
@@ -1081,16 +1103,44 @@ async function resolveManagedKunLaunchSettings(
   return next
 }
 
-async function ensureKunRuntime(settings: AppSettingsV1): Promise<AppSettingsV1> {
-  const runtime = getKunRuntimeSettings(settings)
-  const hasApiKey = Boolean(resolveConfiguredApiKey(settings))
+function generateKunRuntimeToken(): string {
+  return randomBytes(32).toString('base64url')
+}
 
-  const healthy = await waitForKunHealth(settings, 2_000)
+async function ensureManagedKunRuntimeToken(
+  settings: AppSettingsV1,
+  source: string
+): Promise<{ settings: AppSettingsV1; generated: boolean }> {
+  const runtime = getKunRuntimeSettings(settings)
+  if (runtime.runtimeToken.trim()) {
+    return { settings, generated: false }
+  }
+
+  const next = await store.patch({
+    agents: { kun: { runtimeToken: generateKunRuntimeToken() } }
+  })
+  lastAppliedSettings = next
+  logWarn(source, 'Generated a runtime token for the managed Kun runtime because none was configured.')
+  return { settings: next, generated: true }
+}
+
+async function ensureKunRuntime(settings: AppSettingsV1): Promise<AppSettingsV1> {
+  const tokenResult = await ensureManagedKunRuntimeToken(settings, 'runtime-start')
+  const currentSettings = tokenResult.settings
+  if (tokenResult.generated && kunRuntimeAdapter.isChildRunning()) {
+    logWarn('runtime-start', 'Restarting managed Kun to apply the generated runtime token.')
+    await kunRuntimeAdapter.stopAndWait()
+  }
+
+  const runtime = getKunRuntimeSettings(currentSettings)
+  const hasApiKey = Boolean(resolveConfiguredApiKey(currentSettings))
+
+  const healthy = await waitForKunHealth(currentSettings, 2_000)
   if (healthy) {
-    const threadApi = await probeThreadApi(settings)
+    const threadApi = await probeThreadApi(currentSettings)
     if (threadApi.ok) {
       noteRuntimeHealthy('ensure')
-      return settings
+      return currentSettings
     }
     throw runtimeJsonError(threadApi.error, threadApi.message)
   }
@@ -1123,12 +1173,12 @@ async function ensureKunRuntime(settings: AppSettingsV1): Promise<AppSettingsV1>
     if (kunRuntimeAdapter.isChildRunning()) {
       // Give a merely-busy runtime a real chance to answer before judging it
       // hung, so one long synchronous step does not cost the user their turn.
-      const recovered = await waitForKunHealth(settings, RUNTIME_HUNG_CONFIRM_MS)
+      const recovered = await waitForKunHealth(currentSettings, RUNTIME_HUNG_CONFIRM_MS)
       if (recovered) {
-        const threadApi = await probeThreadApi(settings)
+        const threadApi = await probeThreadApi(currentSettings)
         if (threadApi.ok) {
           noteRuntimeHealthy('ensure')
-          return settings
+          return currentSettings
         }
         throw runtimeJsonError(threadApi.error, threadApi.message)
       }
@@ -1140,7 +1190,7 @@ async function ensureKunRuntime(settings: AppSettingsV1): Promise<AppSettingsV1>
     }
   }
 
-  const launchSettings = await resolveManagedKunLaunchSettings(settings, 'runtime-start')
+  const launchSettings = await resolveManagedKunLaunchSettings(currentSettings, 'runtime-start')
   const adapter = kunRuntimeAdapter
   try {
     await adapter.ensureRunning(launchSettings)
@@ -1300,44 +1350,6 @@ function createWindow(options: { suppressInitialShow?: boolean } = {}): void {
 }
 
 /**
- * Stable equality for the Kun runtime settings. Most fields are flat,
- * but GUI-managed capability options can be nested, so compare values
- * structurally while still surviving future field additions.
- */
-function kunRuntimeConfigChanged(prev: AppSettingsV1, next: AppSettingsV1): boolean {
-  const a = resolveKunRuntimeSettings(prev)
-  const b = resolveKunRuntimeSettings(next)
-  const keys = new Set([...Object.keys(a), ...Object.keys(b)] as Array<keyof typeof a>)
-  for (const key of keys) {
-    if (!stableSettingsValueEqual(a[key], b[key])) return true
-  }
-  return false
-}
-
-function stableSettingsValueEqual(a: unknown, b: unknown): boolean {
-  if (a === b) return true
-  return stableSettingsStringify(a) === stableSettingsStringify(b)
-}
-
-function stableSettingsStringify(value: unknown): string {
-  return JSON.stringify(canonicalSettingsValue(value))
-}
-
-function canonicalSettingsValue(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(canonicalSettingsValue)
-  if (!value || typeof value !== 'object') return value
-  const out: Record<string, unknown> = {}
-  for (const key of Object.keys(value as Record<string, unknown>).sort()) {
-    out[key] = canonicalSettingsValue((value as Record<string, unknown>)[key])
-  }
-  return out
-}
-
-function runtimeStartupConfigChanged(prev: AppSettingsV1, next: AppSettingsV1): boolean {
-  return kunRuntimeConfigChanged(prev, next) || clawScheduleMcpSettingsChanged(prev, next)
-}
-
-/**
  * Reject runtime-affecting values that would persist a config kun can
  * never boot with. Runs before the settings patch is written to disk.
  */
@@ -1360,11 +1372,134 @@ function validateRuntimeSettingsForApply(next: AppSettingsV1): string | null {
   return null
 }
 
+function preserveRuntimeTokenForFullSettingsSnapshot(
+  prev: AppSettingsV1,
+  partial: AppSettingsPatch
+): AppSettingsPatch {
+  const incomingKun = partial.agents?.kun
+  if (!incomingKun || !isFullSettingsSnapshotPatch(partial)) return partial
+  if (typeof incomingKun.runtimeToken !== 'string' || incomingKun.runtimeToken.trim()) return partial
+
+  const currentToken = getKunRuntimeSettings(prev).runtimeToken.trim()
+  if (!currentToken) return partial
+
+  return {
+    ...partial,
+    agents: {
+      ...partial.agents,
+      kun: {
+        ...incomingKun,
+        runtimeToken: currentToken
+      }
+    }
+  }
+}
+
+function isFullSettingsSnapshotPatch(partial: AppSettingsPatch): boolean {
+  return partial.version !== undefined &&
+    partial.provider !== undefined &&
+    partial.agents?.kun !== undefined &&
+    partial.log !== undefined &&
+    partial.checkpointCleanup !== undefined &&
+    partial.notifications !== undefined &&
+    partial.appBehavior !== undefined &&
+    partial.keyboardShortcuts !== undefined &&
+    partial.write !== undefined &&
+    partial.claw !== undefined &&
+    partial.schedule !== undefined &&
+    partial.workflow !== undefined &&
+    partial.terminal !== undefined &&
+    partial.guiUpdate !== undefined
+}
+
+type ManagedRuntimeHotApplyResult = 'applied' | 'skipped' | 'restart_required'
+
+async function applyManagedRuntimeSettingsHot(
+  settings: AppSettingsV1,
+  source: string
+): Promise<ManagedRuntimeHotApplyResult> {
+  await waitForKunStartupSettled()
+  const adapter = kunRuntimeAdapter
+  if (!adapter.isChildRunning()) return 'skipped'
+
+  const runtime = resolveKunRuntimeSettings(settings)
+  const dataDir = resolveKunDataDir(runtime)
+  const config = await syncGuiManagedKunConfig(dataDir, runtime, {
+    scheduleMcp: {
+      settings,
+      launch: getClawScheduleMcpLaunchConfig()
+    }
+  })
+  const serve = config.serve ?? {}
+  const defaultClientApiKey = resolveCodexOAuthApiKey(runtime.apiKey).apiKey
+  const body = {
+    ...config,
+    serve: {
+      ...serve,
+      apiKey: defaultClientApiKey || runtime.apiKey,
+      baseUrl: runtime.baseUrl,
+      modelProxyUrl: resolveModelProviderProxyUrl(settings),
+      endpointFormat: runtime.endpointFormat,
+      model: runtime.model,
+      approvalPolicy: runtime.approvalPolicy,
+      sandboxMode: runtime.sandboxMode,
+      tokenEconomyMode: runtime.tokenEconomyMode,
+      tokenEconomy: runtime.tokenEconomy,
+      toolOutputLimits: runtime.toolOutputLimits,
+      providers: serve.providers ?? {}
+    }
+  }
+
+  const headers = runtimeAuthHeaders(settings)
+  headers.set('content-type', 'application/json')
+  try {
+    const response = await fetch(
+      `${getRuntimeBaseUrlForSettings(settings)}/v1/runtime/config/apply`,
+      {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(body)
+      }
+    )
+    const text = await response.text()
+    if (response.status === 404 || response.status === 405) {
+      logWarn(source, 'Kun runtime does not support hot config apply; falling back to restart.')
+      return 'restart_required'
+    }
+    let parsed: unknown = null
+    if (text.trim()) {
+      try {
+        parsed = JSON.parse(text)
+      } catch {
+        parsed = null
+      }
+    }
+    if (response.ok && parsed && typeof parsed === 'object' && (parsed as { ok?: unknown }).ok === true) {
+      noteRuntimeHealthy(source)
+      return 'applied'
+    }
+    const code = parsed && typeof parsed === 'object' ? (parsed as { code?: unknown }).code : undefined
+    const message = parsed && typeof parsed === 'object'
+      ? String((parsed as { message?: unknown }).message ?? text)
+      : text
+    if (code === 'restart_required') {
+      logWarn(source, `Kun hot config apply requested restart: ${message}`)
+      return 'restart_required'
+    }
+    throw new Error(message || `Kun hot config apply failed with HTTP ${response.status}`)
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    logWarn(source, `Kun hot config apply failed; falling back to restart: ${message}`)
+    return 'restart_required'
+  }
+}
+
 async function restartManagedRuntimeForSettingsChange(
   prev: AppSettingsV1,
-  next: AppSettingsV1
+  next: AppSettingsV1,
+  force = false
 ): Promise<void> {
-  if (!runtimeStartupConfigChanged(prev, next)) return
+  if (!force && !runtimeProcessConfigChanged(prev, next)) return
 
   // Let any in-flight boot launch finish (or fail) before we read liveness
   // and stop the child. Killing a kun that is still inside its startup window
@@ -1634,30 +1769,32 @@ app.whenReady().then(async () => {
   traceStartup('ipc registration:start')
   const applySettingsPatch = async (partial: AppSettingsPatch): Promise<AppSettingsV1> => {
     const prev = await store.load()
-    const { agents: agentsPatch, provider: providerPatch, ...restPatch } = partial
+    const effectivePartial = preserveRuntimeTokenForFullSettingsSnapshot(prev, partial)
+    const { agents: agentsPatch, provider: providerPatch, ...restPatch } = effectivePartial
     const next = normalizeAppSettings({
       ...applyKunRuntimePatch(prev, agentsPatch?.kun),
       ...restPatch,
       provider: mergeModelProviderSettings(prev.provider, providerPatch),
-      log: { ...prev.log, ...(partial.log ?? {}) },
+      log: { ...prev.log, ...(effectivePartial.log ?? {}) },
       checkpointCleanup: normalizeCheckpointCleanupSettings({
         ...prev.checkpointCleanup,
-        ...(partial.checkpointCleanup ?? {})
+        ...(effectivePartial.checkpointCleanup ?? {})
       }),
-      notifications: { ...prev.notifications, ...(partial.notifications ?? {}) },
-      appBehavior: mergeAppBehaviorSettings(prev.appBehavior, partial.appBehavior),
+      notifications: { ...prev.notifications, ...(effectivePartial.notifications ?? {}) },
+      appBehavior: mergeAppBehaviorSettings(prev.appBehavior, effectivePartial.appBehavior),
       keyboardShortcuts: normalizeKeyboardShortcuts({
         bindings: {
           ...prev.keyboardShortcuts.bindings,
-          ...(partial.keyboardShortcuts?.bindings ?? {})
+          ...(effectivePartial.keyboardShortcuts?.bindings ?? {})
         }
       }),
-      write: mergeWriteSettings(prev.write, partial.write),
-      claw: mergeClawSettings(prev.claw, partial.claw),
-      schedule: mergeScheduleSettings(prev.schedule, partial.schedule),
-      workflow: mergeWorkflowSettings(prev.workflow, partial.workflow),
-      terminal: mergeTerminalSettings(prev.terminal, partial.terminal),
-      guiUpdate: { ...prev.guiUpdate, ...(partial.guiUpdate ?? {}) }
+      write: mergeWriteSettings(prev.write, effectivePartial.write),
+      claw: mergeClawSettings(prev.claw, effectivePartial.claw),
+      schedule: mergeScheduleSettings(prev.schedule, effectivePartial.schedule),
+      workflow: mergeWorkflowSettings(prev.workflow, effectivePartial.workflow),
+      design: mergeDesignSettings(prev.design, effectivePartial.design),
+      terminal: mergeTerminalSettings(prev.terminal, effectivePartial.terminal),
+      guiUpdate: { ...prev.guiUpdate, ...(effectivePartial.guiUpdate ?? {}) }
     })
     if (prev.log.enabled !== next.log.enabled || prev.log.retentionDays !== next.log.retentionDays) {
       configureLogger({ enabled: next.log.enabled, retentionDays: next.log.retentionDays })
@@ -1666,7 +1803,7 @@ app.whenReady().then(async () => {
     if (runtimeValidationError) {
       throw new Error(`Invalid runtime settings: ${runtimeValidationError}`)
     }
-    const saved = await store.patch(partial)
+    const saved = await store.patch(effectivePartial)
     await syncClawScheduleMcpConfig(saved, getClawScheduleMcpLaunchConfig()).catch((error) => {
       console.error('[claw-schedule-mcp] failed to sync config after settings change:', error)
     })
@@ -1697,7 +1834,7 @@ app.whenReady().then(async () => {
   }
 
   const saveSettingsPatch = async (partial: AppSettingsPatch): Promise<AppSettingsV1> => {
-    return store.patch(partial)
+    return store.patch(preserveRuntimeTokenForFullSettingsSnapshot(await store.load(), partial))
   }
 
   registerAppIpcHandlers({
@@ -1739,6 +1876,7 @@ app.whenReady().then(async () => {
   })
 
   registerRuntimeSseIpc({ ipcMain, store, ensureRuntime, logError })
+
   registerTerminalPtyIpc({
     ipcMain,
     getMainWindow: () => mainWindow,

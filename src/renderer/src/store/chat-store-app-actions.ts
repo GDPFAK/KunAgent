@@ -1,5 +1,6 @@
 import type i18next from 'i18next'
 import type { AppSettingsV1 } from '@shared/app-settings'
+import type { ModelProviderModelGroup } from '@shared/kun-gui-api'
 import { rendererRuntimeClient } from '../agent/runtime-client'
 import type { ChatState, ChatStoreGet, ChatStoreSet, InitialSetupMode, PluginHostRoute, SettingsRouteSection } from './chat-store-types'
 import type { ComposerPlanMode } from './chat-store-helpers'
@@ -28,7 +29,11 @@ type CreateAppActionsOptions = {
   rememberThreadComposerMode: (threadId: string, mode: ComposerPlanMode) => void
   readStoredComposerModel: (allowedIds: readonly string[]) => string
   mergeComposerPickList: (upstreamOk: boolean, upstreamIds: string[]) => string[]
-  fallbackComposerModel: (pickList: readonly string[], runtimeDefault: string) => string
+  fallbackComposerModel: (
+    pickList: readonly string[],
+    runtimeDefault: string,
+    modelGroups?: readonly ModelProviderModelGroup[]
+  ) => string
   getComposerModelLoadPromise: () => Promise<void> | null
   setComposerModelLoadPromise: (promise: Promise<void> | null) => void
   applyTheme: (theme: AppSettingsV1['theme']) => void
@@ -56,6 +61,7 @@ export function createAppActions(options: CreateAppActionsOptions): Pick<
   | 'openClaw'
   | 'openSchedule'
   | 'openWorkflow'
+  | 'openDesign'
   | 'openInitialSetup'
   | 'closeInitialSetup'
   | 'selectInspectorItem'
@@ -159,7 +165,7 @@ export function createAppActions(options: CreateAppActionsOptions): Pick<
             shouldPersist = false
           }
           if (model === '' || !isSelectable(model)) {
-            model = fallbackComposerModel(pick, runtimeDefault)
+            model = fallbackComposerModel(pick, runtimeDefault, groups)
             shouldPersist = false
           }
           if (shouldPersist) persistComposerModel(model)
@@ -221,6 +227,9 @@ export function createAppActions(options: CreateAppActionsOptions): Pick<
 
     openWorkflow: () => {
       set({ route: 'workflow' })
+    },
+    openDesign: () => {
+      set({ route: 'design' })
     },
 
     openInitialSetup: (mode: InitialSetupMode = 'required') =>

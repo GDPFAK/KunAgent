@@ -14,6 +14,7 @@ import {
   workspaceDirectoryTargetPayloadSchema,
   workspaceEntryDeletePayloadSchema,
   workspaceEntryRenamePayloadSchema,
+  workspaceImagePickPayloadSchema,
   writeExportPayloadSchema,
   writeRichClipboardPayloadSchema,
   writeInlineCompletionPayloadSchema
@@ -45,6 +46,19 @@ describe('app-ipc-schemas', () => {
     })
 
     expect(payload.path).toBe('/v1/runtime/tools')
+  })
+
+  it('accepts Kun supply-chain audit endpoints', () => {
+    expect(runtimeRequestPayloadSchema.parse({
+      path: '/v1/supply-chain/audit',
+      method: 'POST',
+      body: '{}'
+    }).path).toBe('/v1/supply-chain/audit')
+    expect(runtimeRequestPayloadSchema.parse({
+      path: '/v1/supply-chain/update-check',
+      method: 'POST',
+      body: '{}'
+    }).path).toBe('/v1/supply-chain/update-check')
   })
 
   it('accepts Kun MCP OAuth status and token reset endpoints', () => {
@@ -197,6 +211,10 @@ describe('app-ipc-schemas', () => {
             historyHygiene: {
               maxToolResultTokens: 4000
             }
+          },
+          toolOutputLimits: {
+            maxLines: 30000,
+            maxBytes: 1048576
           }
         }
       },
@@ -213,6 +231,11 @@ describe('app-ipc-schemas', () => {
           ]
         }
       },
+      design: {
+        brandColor: '#3b82d8',
+        tone: ['专业', '科技感'],
+        designSystemPreset: 'shadcn'
+      },
       disabledSkillIds: ['test-skill-08']
     })
 
@@ -221,9 +244,13 @@ describe('app-ipc-schemas', () => {
     expect(payload.agents?.kun?.modelProfiles?.['custom-vision-model']?.maxOutputTokens).toBe(32000)
     expect(payload.agents?.kun?.tokenEconomy?.enabled).toBe(true)
     expect(payload.agents?.kun?.tokenEconomy?.historyHygiene?.maxToolResultTokens).toBe(4000)
+    expect(payload.agents?.kun?.toolOutputLimits?.maxLines).toBe(30000)
+    expect(payload.agents?.kun?.toolOutputLimits?.maxBytes).toBe(1048576)
     expect(payload.write?.inlineCompletion?.model).toBe('deepseek-v4-pro')
     expect(payload.write?.selectionAssist?.infographicPrompt).toBe('手绘风格信息图。')
     expect(payload.write?.selectionAssist?.quickActions).toHaveLength(2)
+    expect(payload.design?.brandColor).toBe('#3b82d8')
+    expect(payload.design?.designSystemPreset).toBe('shadcn')
     expect(payload.disabledSkillIds).toEqual(['test-skill-08'])
   })
 
@@ -314,6 +341,39 @@ describe('app-ipc-schemas', () => {
     expect(payload.agents?.kun?.videoGeneration?.defaultResolution).toBe('1080P')
   })
 
+  it('accepts provider and resolved runtime retry settings', () => {
+    const payload = settingsPatchSchema.parse({
+      provider: {
+        providers: [{
+          id: 'deepseek',
+          name: 'DeepSeek',
+          apiKey: 'sk-test',
+          baseUrl: 'https://api.deepseek.com',
+          endpointFormat: 'chat_completions',
+          retry: {
+            maxAttempts: 3,
+            initialDelayMs: 3000,
+            httpStatusCodes: [429, 503]
+          },
+          models: ['deepseek-chat'],
+          modelProfiles: {}
+        }]
+      },
+      agents: {
+        kun: {
+          retry: {
+            maxAttempts: 3,
+            initialDelayMs: 3000,
+            httpStatusCodes: [429, 503]
+          }
+        }
+      }
+    })
+
+    expect(payload.provider?.providers?.[0]?.retry?.maxAttempts).toBe(3)
+    expect(payload.agents?.kun?.retry?.httpStatusCodes).toEqual([429, 503])
+  })
+
   it('accepts long provider model ids imported from upstream catalogs', () => {
     const longModelId = `openrouter/${'provider-routed-model-id-'.repeat(6)}preview`
 
@@ -350,7 +410,8 @@ describe('app-ipc-schemas', () => {
             }
           },
           imageGeneration: {
-            model: longModelId
+            model: longModelId,
+            quality: 'high'
           }
         }
       },
@@ -364,6 +425,7 @@ describe('app-ipc-schemas', () => {
 
     expect(payload.provider?.providers?.[0]?.models).toEqual([longModelId])
     expect(payload.agents?.kun?.model).toBe(longModelId)
+    expect(payload.agents?.kun?.imageGeneration?.quality).toBe('high')
     expect(payload.schedule?.model).toBe(longModelId)
     expect(payload.workflow?.model).toBe(longModelId)
   })
@@ -583,6 +645,14 @@ describe('app-ipc-schemas', () => {
     ).toThrow()
   })
 
+  it('rejects out-of-range tool output limits', () => {
+    expect(() =>
+      settingsPatchSchema.parse({
+        agents: { kun: { toolOutputLimits: { maxBytes: 128 * 1024 * 1024 } } }
+      })
+    ).toThrow()
+  })
+
   it('rejects unknown settings patch fields', () => {
     expect(() =>
       settingsPatchSchema.parse({
@@ -764,6 +834,18 @@ describe('app-ipc-schemas', () => {
     expect(payload.content).toBe('# Draft')
   })
 
+  it('accepts content-only export payloads', () => {
+    const payload = writeExportPayloadSchema.parse({
+      title: 'Kun answer',
+      workspaceRoot: '/tmp/workspace',
+      format: 'png',
+      content: '# Answer'
+    })
+
+    expect(payload.title).toBe('Kun answer')
+    expect(payload.format).toBe('png')
+  })
+
   it('accepts write rich clipboard payloads', () => {
     const payload = writeRichClipboardPayloadSchema.parse({
       path: '/tmp/workspace/draft.md',
@@ -773,5 +855,33 @@ describe('app-ipc-schemas', () => {
 
     expect(payload.path).toBe('/tmp/workspace/draft.md')
     expect(payload.content).toBe('# Draft')
+  })
+
+  it('accepts workspace image pick payloads and rejects extra fields', () => {
+    const payload = workspaceImagePickPayloadSchema.parse({
+      workspaceRoot: '/tmp/workspace',
+      currentFilePath: '/tmp/workspace/.kun-design/abc/v1.html',
+      imageDirectory: 'img'
+    })
+    expect(payload.workspaceRoot).toBe('/tmp/workspace')
+    expect(payload.currentFilePath).toBe('/tmp/workspace/.kun-design/abc/v1.html')
+    expect(payload.imageDirectory).toBe('img')
+    expect(
+      workspaceImagePickPayloadSchema.parse({
+        workspaceRoot: '/tmp/workspace',
+        imageDirectory: 'img'
+      })
+    ).toEqual({
+      workspaceRoot: '/tmp/workspace',
+      imageDirectory: 'img'
+    })
+    // .strict() must reject unknown keys so settings sync can't be poisoned.
+    expect(() =>
+      workspaceImagePickPayloadSchema.parse({
+        workspaceRoot: '/tmp/workspace',
+        currentFilePath: '/tmp/workspace/v1.html',
+        somethingExtra: 'nope'
+      })
+    ).toThrow()
   })
 })

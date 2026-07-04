@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import {
   DEFAULT_DEEPSEEK_BASE_URL,
   defaultClawSettings,
+  defaultDesignSettings,
   defaultKeyboardShortcuts,
   defaultKunRuntimeSettings,
   defaultModelProviderSettings,
@@ -129,6 +130,7 @@ describe('Kun single-agent regression', () => {
       claw: defaultClawSettings(),
       schedule: defaultScheduleSettings(),
       workflow: defaultWorkflowSettings(),
+      design: defaultDesignSettings(),
       terminal: defaultTerminalSettings(),
       guiUpdate: { channel: 'stable' },
       codePromptPrefix: '',

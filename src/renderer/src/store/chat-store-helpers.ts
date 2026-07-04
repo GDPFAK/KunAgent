@@ -419,11 +419,30 @@ export function mergeComposerPickList(upstreamOk: boolean, upstreamIds: string[]
   return [...ordered].sort((a, b) => a.localeCompare(b))
 }
 
-export function fallbackComposerModel(pickList: readonly string[], runtimeDefault: string): string {
+export function fallbackComposerModel(
+  pickList: readonly string[],
+  runtimeDefault: string,
+  modelGroups: readonly ModelProviderModelGroup[] = []
+): string {
+  const firstProviderModel = firstSelectableProviderModel(pickList, modelGroups)
+  if (firstProviderModel) return firstProviderModel
   const allowed = new Set(pickList)
   const preferred = runtimeDefault.trim()
   if (preferred && preferred.toLowerCase() !== 'auto' && allowed.has(preferred)) return preferred
   return DEFAULT_COMPOSER_MODEL_IDS.find((id) => allowed.has(id)) ?? pickList[0] ?? ''
+}
+
+function firstSelectableProviderModel(
+  pickList: readonly string[],
+  modelGroups: readonly ModelProviderModelGroup[]
+): string {
+  for (const group of modelGroups) {
+    for (const modelId of group.modelIds) {
+      const model = modelId.trim()
+      if (model && composerModelSelectable(pickList, modelGroups, model)) return model
+    }
+  }
+  return ''
 }
 
 export function newClawChannel(

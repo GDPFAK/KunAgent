@@ -15,12 +15,18 @@ import type { ModelClient, ModelRequest, ModelStreamChunk } from '../../ports/mo
  */
 export class MultiProviderModelClient implements ModelClient {
   readonly provider = 'compat-multi'
-  readonly model: string
+  model: string
 
-  private readonly default_: ModelClient
-  private readonly providers: Map<string, ModelClient>
+  private default_: ModelClient
+  private providers: Map<string, ModelClient>
 
   constructor(input: { default: ModelClient; providers?: Map<string, ModelClient> }) {
+    this.default_ = input.default
+    this.providers = input.providers ?? new Map()
+    this.model = input.default.model
+  }
+
+  replace(input: { default: ModelClient; providers?: Map<string, ModelClient> }): void {
     this.default_ = input.default
     this.providers = input.providers ?? new Map()
     this.model = input.default.model

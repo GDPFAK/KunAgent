@@ -17,6 +17,7 @@ import type { ApprovalPolicy } from '../../contracts/policy.js'
 import type { ServeProviderConfig } from '../../config/kun-config.js'
 import type { AttachmentStore } from '../../attachments/attachment-store.js'
 import type { SkillRuntime } from '../../skills/skill-runtime.js'
+import type { InstructionRuntime } from '../../instructions/instruction-runtime.js'
 import type { MemoryStore } from '../../memory/memory-store.js'
 import {
   PLAN_MODE_INSTRUCTION,
@@ -62,6 +63,8 @@ export interface AgentSdkRuntimeFactoryDeps {
   attachmentStore?: AttachmentStore
   /** Skill engine — injects the available-skills catalog + activated skills per turn. */
   skillRuntime?: SkillRuntime
+  /** Native Kun AGENTS.md instruction engine — injects global/workspace instructions per turn. */
+  instructionRuntime?: InstructionRuntime
   /** Long-term memory store — injects relevant memories per turn. */
   memoryStore?: MemoryStore
   /** Interactive-input gate — lets the bridged `user_input` tool surface kun's GUI panel. */
@@ -265,6 +268,7 @@ export function createAgentSdkRuntime(deps: AgentSdkRuntimeFactoryDeps): AgentSd
     async loadTurnContext(threadId, turnId): Promise<SdkTurnContext | null> {
       const thread = await deps.threadStore.get(threadId)
       if (!thread) return null
+      const turn = thread.turns.find((candidate) => candidate.id === turnId)
       const items = await deps.sessionStore.loadItems(threadId)
       const userItem = [...items]
         .reverse()
@@ -276,7 +280,8 @@ export function createAgentSdkRuntime(deps: AgentSdkRuntimeFactoryDeps): AgentSd
       const images = await resolveImages(threadId, thread.workspace, attachmentIds)
       if (!userText.trim() && images.length === 0) return null
 
-      const providerCfg = thread.providerId ? deps.providerConfigs[thread.providerId] : undefined
+      const providerId = turn?.providerId?.trim() || thread.providerId?.trim()
+      const providerCfg = providerId ? deps.providerConfigs[providerId] : undefined
       const token = providerCfg?.apiKey?.trim() || deps.defaultToken?.trim()
       // Plan turns expose create_plan (and narrow kun tools to the plan-allowed
       // set); resolve before listing tools so the bridge sees create_plan.
@@ -310,6 +315,9 @@ export function createAgentSdkRuntime(deps: AgentSdkRuntimeFactoryDeps): AgentSd
       const skillResolution = deps.skillRuntime
         ? await deps.skillRuntime.resolveTurn({ prompt: userText, workspace: thread.workspace })
         : undefined
+      const instructionResolution = deps.instructionRuntime
+        ? await deps.instructionRuntime.resolveTurn({ workspace: thread.workspace })
+        : undefined
 
       let memoryBlocks: string[] = []
       if (deps.memoryStore && userText.trim()) {
@@ -324,9 +332,16 @@ export function createAgentSdkRuntime(deps: AgentSdkRuntimeFactoryDeps): AgentSd
 
       const goalInstruction = planMode ? null : goalContinuationInstruction(thread.goal)
       const todoInstruction = planMode ? null : todoContinuationInstruction(thread.todos)
+      if (instructionResolution) {
+        await deps.turns.updateTurnMetadata(threadId, turnId, {
+          injectedInstructionSources: instructionResolution.sources,
+          instructionInjectionBytes: instructionResolution.injectedBytes
+        })
+      }
 
       const contextInstructions = [
         ...(planMode ? [PLAN_MODE_INSTRUCTION] : []),
+        ...(instructionResolution?.instruction ? [instructionResolution.instruction] : []),
         ...(goalInstruction ? [goalInstruction] : []),
         ...(todoInstruction ? [todoInstruction] : []),
         ...memoryBlocks,
@@ -343,7 +358,7 @@ export function createAgentSdkRuntime(deps: AgentSdkRuntimeFactoryDeps): AgentSd
         // Claude Code only accepts Anthropic models; coerce a thread's non-Claude
         // model (e.g. an old deepseek thread now routed to the subscription) to
         // the runtime default so the turn doesn't fail "model may not exist".
-        model: resolveSdkModel(thread.model, deps.defaultModel),
+        model: resolveSdkModel(turn?.model || thread.model, deps.defaultModel),
         oauthToken: token || undefined,
         ...(images.length ? { images } : {}),
         bridgeableTools,

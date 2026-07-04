@@ -46,13 +46,25 @@ describe('isChatAttachmentUploadEnabled', () => {
     })).toBe(false)
   })
 
-  it('keeps the attachment picker reachable for non-image documents', () => {
+  it('disables the attachment picker when the model cannot accept images', () => {
+    // The composer gates the picker on model image support; the per-attachment
+    // `composerAttachmentModelUnsupported` error surfaces the reason separately.
     expect(isChatAttachmentUploadEnabled({
       runtimeConnection: 'ready',
       route: 'chat',
       mode: 'agent',
-      attachmentStoreAvailable: false,
+      attachmentStoreAvailable: true,
       modelSupportsImageInput: false
+    })).toBe(false)
+  })
+
+  it('enables composer attachments in Design mode assistants', () => {
+    expect(isChatAttachmentUploadEnabled({
+      runtimeConnection: 'ready',
+      route: 'design',
+      mode: 'agent',
+      attachmentStoreAvailable: true,
+      modelSupportsImageInput: true
     })).toBe(true)
   })
 })

@@ -1,0 +1,89 @@
+name: Issue account-age guard
+
+# GitHub has no native setting to restrict issue creation by account age.
+# This workflow reacts to newly opened issues: if the author's GitHub account
+# is younger than MIN_ACCOUNT_AGE_DAYS, the issue is closed automatically with
+# a bilingual explanation. Default threshold: 180 days (~6 months). Maintainers (owner / members / collaborators) and
+# bots are always exempt.
+
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  issues: write
+
+jobs:
+  check-account-age:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Enforce minimum account age
+        uses: actions/github-script@v7
+        env:
+          # 365 days ≈ 1 year. Change this single value to adjust the threshold.
+          MIN_ACCOUNT_AGE_DAYS: "180"
+        with:
+          script: |
+            const minAgeDays = Number(process.env.MIN_ACCOUNT_AGE_DAYS || "365");
+            const issue = context.payload.issue;
+            const author = issue.user.login;
+
+            // Always allow maintainers and bots.
+            const privileged = ["OWNER", "MEMBER", "COLLABORATOR"];
+            if (privileged.includes(issue.author_association) || issue.user.type === "Bot") {
+              core.info(`Allowing @${author} (association=${issue.author_association}, type=${issue.user.type}).`);
+              return;
+            }
+
+            // Look up the account creation date. Fail open: if the lookup fails,
+            // do not close the issue (better to let a real report through).
+            let createdAt;
+            try {
+              const { data: user } = await github.rest.users.getByUsername({ username: author });
+              createdAt = new Date(user.created_at);
+            } catch (err) {
+              core.warning(`Could not fetch @${author}; allowing issue. ${err.message}`);
+              return;
+            }
+
+            const ageDays = (Date.now() - createdAt.getTime()) / (1000 * 60 * 60 * 24);
+            core.info(`@${author} account age: ${ageDays.toFixed(1)} days (minimum ${minAgeDays}).`);
+
+            if (ageDays >= minAgeDays) {
+              return; // Account is old enough — allow.
+            }
+
+            const wholeDays = Math.max(0, Math.floor(ageDays));
+            const { owner, repo } = context.repo;
+            const issue_number = issue.number;
+
+            const body = [
+              `👋 @${author}, thanks for your interest in Kun.`,
+              ``,
+              `To reduce spam, this repository only accepts issues from GitHub accounts older than **${minAgeDays} days** (about 1 year). Your account is currently about **${wholeDays} day(s)** old, so this issue has been closed automatically.`,
+              ``,
+              `If you believe this is a mistake, please reach out through the channels listed in our contribution guide.`,
+              ``,
+              `---`,
+              ``,
+              `👋 @${author}，感谢你关注 Kun。`,
+              ``,
+              `为减少垃圾信息，本仓库仅接受注册时间超过 **${minAgeDays} 天**（约 1 年）的 GitHub 账号创建的 issue。你的账号注册至今约 **${wholeDays} 天**，因此该 issue 已被自动关闭。`,
+              ``,
+              `如果你认为这是误判，请通过贡献指南中的渠道联系我们。`,
+            ].join("\n");
+
+            await github.rest.issues.createComment({ owner, repo, issue_number, body });
+            await github.rest.issues.addLabels({
+              owner,
+              repo,
+              issue_number,
+              labels: ["auto-closed: new-account"],
+            });
+            await github.rest.issues.update({
+              owner,
+              repo,
+              issue_number,
+              state: "closed",
+              state_reason: "not_planned",
+            });

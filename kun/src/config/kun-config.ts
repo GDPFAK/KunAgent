@@ -21,6 +21,10 @@ import {
   MODEL_ENDPOINT_FORMATS,
   normalizeModelEndpointFormat
 } from '../contracts/model-endpoint-format.js'
+import {
+  DEFAULT_TOOL_OUTPUT_MAX_BYTES,
+  DEFAULT_TOOL_OUTPUT_MAX_LINES
+} from '../contracts/tool-output-limits.js'
 import { HooksConfigSchema } from '../hooks/hook-config.js'
 
 export const KUN_CONFIG_FILENAME = 'config.json'
@@ -28,6 +32,21 @@ export const DEFAULT_KUN_MODEL = 'deepseek-v4-pro'
 
 const PositiveInt = z.number().int().positive()
 const PositiveRatio = z.number().positive().max(1)
+
+export const DEFAULT_MODEL_REQUEST_RETRY_CONFIG = {
+  maxAttempts: 0,
+  initialDelayMs: 3_000,
+  httpStatusCodes: [429, 503]
+} as const
+
+export const ModelRequestRetryConfigSchema = z
+  .object({
+    maxAttempts: z.number().int().min(0).max(10).default(DEFAULT_MODEL_REQUEST_RETRY_CONFIG.maxAttempts).optional(),
+    initialDelayMs: z.number().int().min(0).max(600_000).default(DEFAULT_MODEL_REQUEST_RETRY_CONFIG.initialDelayMs).optional(),
+    httpStatusCodes: z.array(z.number().int().min(400).max(599)).max(64).default([...DEFAULT_MODEL_REQUEST_RETRY_CONFIG.httpStatusCodes]).optional()
+  })
+  .strict()
+export type ModelRequestRetryConfig = z.infer<typeof ModelRequestRetryConfigSchema>
 
 export const ModelContextCompactionProfileConfigSchema = z
   .object({
@@ -192,6 +211,18 @@ export const TokenEconomyConfigSchema = z
   })
   .strict()
 
+export const ToolOutputLimitsConfigSchema = z
+  .object({
+    maxLines: PositiveInt.optional(),
+    maxBytes: PositiveInt.optional()
+  })
+  .strict()
+
+export const DEFAULT_TOOL_OUTPUT_LIMITS_CONFIG: Required<ToolOutputLimitsConfig> = {
+  maxLines: DEFAULT_TOOL_OUTPUT_MAX_LINES,
+  maxBytes: DEFAULT_TOOL_OUTPUT_MAX_BYTES
+}
+
 export const StorageConfigSchema = z
   .object({
     backend: z.enum(['hybrid', 'file']).default('hybrid'),
@@ -225,7 +256,9 @@ export const ServeProviderConfigSchema = z
       .preprocess(normalizeModelEndpointFormat, z.enum(MODEL_ENDPOINT_FORMATS))
       .default(DEFAULT_MODEL_ENDPOINT_FORMAT)
       .optional(),
-    modelProxyUrl: z.string().optional()
+    retry: ModelRequestRetryConfigSchema.optional(),
+    modelProxyUrl: z.string().optional(),
+    headers: z.record(z.string(), z.string()).optional()
   })
   .strict()
   .superRefine((cfg, ctx) => {
@@ -252,13 +285,22 @@ export const KunServeConfigSchema = z
       normalizeModelEndpointFormat,
       z.enum(MODEL_ENDPOINT_FORMATS)
     ).default(DEFAULT_MODEL_ENDPOINT_FORMAT).optional(),
+    retry: ModelRequestRetryConfigSchema.optional(),
     model: z.string().min(1).optional(),
     approvalPolicy: ApprovalPolicySchema.default(DEFAULT_APPROVAL_POLICY).optional(),
     sandboxMode: SandboxModeSchema.default(DEFAULT_SANDBOX_MODE).optional(),
     tokenEconomyMode: z.boolean().optional(),
     tokenEconomy: TokenEconomyConfigSchema.optional(),
+    toolOutputLimits: ToolOutputLimitsConfigSchema.optional(),
     insecure: z.boolean().optional(),
     storage: StorageConfigSchema.optional(),
+    /**
+     * Extra HTTP headers merged into every default-client model request
+     * (last, so they win). Used for providers that authenticate with more
+     * than a Bearer key — e.g. Codex needs `ChatGPT-Account-Id` and a
+     * Codex-CLI `User-Agent` alongside the OAuth access token.
+     */
+    headers: z.record(z.string(), z.string()).optional(),
     /**
      * Extra providers the runtime can route to per request. Keys are
      * provider ids (matched against `ModelRequest.providerId`); values
@@ -316,6 +358,7 @@ export type ModelConfig = z.infer<typeof ModelConfigSchema>
 export type ContextCompactionConfig = z.infer<typeof ContextCompactionConfigSchema>
 export type RuntimeTuningConfig = z.infer<typeof RuntimeTuningConfigSchema>
 export type TokenEconomyConfig = z.infer<typeof TokenEconomyConfigSchema>
+export type ToolOutputLimitsConfig = z.infer<typeof ToolOutputLimitsConfigSchema>
 export type StorageConfig = z.infer<typeof StorageConfigSchema>
 
 export type LoadedKunConfig = {

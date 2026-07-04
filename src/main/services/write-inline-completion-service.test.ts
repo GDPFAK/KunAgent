@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
   defaultClawSettings,
+  defaultDesignSettings,
   defaultKeyboardShortcuts,
   defaultKunRuntimeSettings,
   defaultModelProviderSettings,
@@ -59,6 +60,7 @@ function createSettings(patch: Partial<AppSettingsV1['write']['inlineCompletion'
     },
     schedule: defaultScheduleSettings(),
     workflow: defaultWorkflowSettings(),
+    design: defaultDesignSettings(),
     terminal: defaultTerminalSettings(),
     guiUpdate: {
       channel: 'stable'

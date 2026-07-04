@@ -38,6 +38,7 @@ type BashSession = {
   shell: string
   child: ChildProcessWithoutNullStreams
   output: OutputAccumulator
+  outputMaxBytes: number
   startedAt: string
   finishedAt?: string
   exitCode: number | null
@@ -83,6 +84,7 @@ async function bashExecute(
   cwd: string,
   signal: AbortSignal,
   timeoutSeconds: number,
+  outputLimits: { maxLines: number; maxBytes: number },
   onUpdate?: (update: { output: unknown; isError?: boolean }) => Promise<void> | void,
   execOperation?: (
     command: string,
@@ -111,8 +113,8 @@ async function bashExecute(
   let timedOut = false
   let settled = false
   const output = new OutputAccumulator({
-    maxLines: DEFAULT_MAX_LINES,
-    maxBytes: DEFAULT_MAX_BYTES,
+    maxLines: outputLimits.maxLines,
+    maxBytes: outputLimits.maxBytes,
     tempFilePrefix: 'kun-bash'
   })
   let updateDirty = false
@@ -237,10 +239,15 @@ async function bashExecute(
   }
 }
 
-function createOutputAccumulator(): OutputAccumulator {
-  return new OutputAccumulator({
+function createOutputAccumulator(
+  outputLimits: { maxLines: number; maxBytes: number } = {
     maxLines: DEFAULT_MAX_LINES,
-    maxBytes: DEFAULT_MAX_BYTES,
+    maxBytes: DEFAULT_MAX_BYTES
+  }
+): OutputAccumulator {
+  return new OutputAccumulator({
+    maxLines: outputLimits.maxLines,
+    maxBytes: outputLimits.maxBytes,
     tempFilePrefix: 'kun-bash'
   })
 }
@@ -303,6 +310,7 @@ function resultPayload(input: {
   exitCode: number | null
   output: string
   truncated: TextSlice
+  maxBytes: number
   fullOutputPath?: string
 }): BashPayload {
   return {
@@ -310,7 +318,7 @@ function resultPayload(input: {
     cwd: input.cwd,
     shell: input.shell,
     exit_code: input.exitCode,
-    output: appendTruncationNotice(input.output, input.truncated, 'tail'),
+    output: appendTruncationNotice(input.output, input.truncated, 'tail', input.maxBytes),
     full_output_path: input.fullOutputPath ?? null,
     truncation: truncationPayload(input.truncated)
   }
@@ -368,7 +376,7 @@ async function sessionPayload(
     cwd: session.cwd,
     shell: session.shell,
     exit_code: session.exitCode,
-    output: appendTruncationNotice(snapshot.content, truncated, 'tail'),
+    output: appendTruncationNotice(snapshot.content, truncated, 'tail', session.outputMaxBytes),
     full_output_path: snapshot.fullOutputPath ?? null,
     truncation: truncationPayload(truncated),
     session_id: session.id,
@@ -550,6 +558,7 @@ async function startBackgroundBashSession(
     timeoutSeconds: number
     detached: boolean
     dataDir?: string
+    outputLimits: { maxLines: number; maxBytes: number }
   },
   hooks: BashLocalToolOptions['backgroundShell'],
   onUpdate?: (update: { output: unknown; isError?: boolean }) => Promise<void> | void
@@ -577,7 +586,8 @@ async function startBackgroundBashSession(
     cwd: input.cwd,
     shell: shellRuntime.name,
     child,
-    output: createOutputAccumulator(),
+    output: createOutputAccumulator(input.outputLimits),
+    outputMaxBytes: input.outputLimits.maxBytes,
     outputWriter,
     startedAt: new Date().toISOString(),
     exitCode: null,
@@ -660,11 +670,16 @@ async function startBackgroundBashSession(
   throw new Error('startBackgroundBashSession requires detached=true')
 }
 
-function appendTruncationNotice(text: string, truncated: TextSlice, mode: TruncateMode): string {
+function appendTruncationNotice(
+  text: string,
+  truncated: TextSlice,
+  mode: TruncateMode,
+  maxBytes: number
+): string {
   if (!truncated.truncated) return text
   const prefix = text.trimEnd()
   const notice = truncated.firstLineExceedsLimit
-    ? `[first line exceeds ${formatSize(DEFAULT_MAX_BYTES)}; refine the read range or use bash for a byte-limited slice]`
+    ? `[first line exceeds ${formatSize(maxBytes)}; refine the read range or use bash for a byte-limited slice]`
     : `[truncated: showing ${describeKind(mode)} ${truncated.shownLines} of ${truncated.totalLines} lines, ${truncated.shownBytes} of ${truncated.totalBytes} bytes]`
   return prefix ? `${prefix}\n\n${notice}` : notice
 }
@@ -673,6 +688,10 @@ export function createBashLocalTool(options: BashLocalToolOptions = {}): LocalTo
   const bashOps = options.operations
   const shellHooks = options.backgroundShell
   const backgroundShellDataDir = options.backgroundShellDataDir
+  const outputLimits = {
+    maxLines: options.maxLines ?? DEFAULT_MAX_LINES,
+    maxBytes: options.maxBytes ?? DEFAULT_MAX_BYTES
+  }
   const shellRuntime = shellRuntimeInfo()
   return LocalToolHost.defineTool({
     name: 'bash',
@@ -715,7 +734,8 @@ export function createBashLocalTool(options: BashLocalToolOptions = {}): LocalTo
               signal: context.abortSignal,
               timeoutSeconds: timeout,
               detached: true,
-              dataDir: backgroundShellDataDir
+              dataDir: backgroundShellDataDir,
+              outputLimits
             },
             shellHooks,
             onUpdate
@@ -730,6 +750,7 @@ export function createBashLocalTool(options: BashLocalToolOptions = {}): LocalTo
           cwd,
           context.abortSignal,
           timeout,
+          outputLimits,
           onUpdate,
           bashOps?.exec
         )
@@ -740,6 +761,7 @@ export function createBashLocalTool(options: BashLocalToolOptions = {}): LocalTo
           exitCode: result.exitCode ?? 0,
           output: result.output,
           truncated: result.truncated,
+          maxBytes: outputLimits.maxBytes,
           fullOutputPath: result.fullOutputPath
         })
         if (result.exitCode && result.exitCode !== 0) {

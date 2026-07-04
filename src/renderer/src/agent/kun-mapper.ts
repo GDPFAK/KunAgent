@@ -318,6 +318,7 @@ function applyRuntimeDisclosureMeta(
   const activeSkillIds = stringArray(item.activeSkillIds)
   const injectedMemoryIds = stringArray(item.injectedMemoryIds)
   const injectedMemorySummaries = normalizeInjectedMemorySummaries(item.injectedMemorySummaries)
+  const injectedInstructionSources = normalizeInjectedInstructionSources(item.injectedInstructionSources)
   const fileReferences = normalizeUserFileReferences(item.fileReferences)
   const normalizedChild = normalizeChildMetadata(child)
   const displayText = typeof item.displayText === 'string' ? item.displayText.trim() : ''
@@ -333,10 +334,39 @@ function applyRuntimeDisclosureMeta(
   if (activeSkillIds) meta.activeSkillIds = activeSkillIds
   if (injectedMemoryIds) meta.injectedMemoryIds = injectedMemoryIds
   if (injectedMemorySummaries) meta.injectedMemorySummaries = injectedMemorySummaries
+  if (injectedInstructionSources) meta.injectedInstructionSources = injectedInstructionSources
   if (typeof item.skillInjectionBytes === 'number') {
     meta.skillInjectionBytes = item.skillInjectionBytes
   }
+  if (typeof item.instructionInjectionBytes === 'number') {
+    meta.instructionInjectionBytes = item.instructionInjectionBytes
+  }
   if (normalizedChild) meta.child = normalizedChild
+}
+
+function normalizeInjectedInstructionSources(
+  value: unknown
+): Array<{ scope: 'global' | 'workspace'; path: string; bytes: number; truncated?: boolean }> | undefined {
+  if (!Array.isArray(value)) return undefined
+  const sources = value
+    .map((raw) => {
+      if (!raw || typeof raw !== 'object') return null
+      const entry = raw as Record<string, unknown>
+      const scope = entry.scope === 'global' || entry.scope === 'workspace' ? entry.scope : null
+      const path = typeof entry.path === 'string' && entry.path.trim() ? entry.path.trim() : ''
+      const bytes = typeof entry.bytes === 'number' && Number.isFinite(entry.bytes)
+        ? Math.max(0, Math.trunc(entry.bytes))
+        : 0
+      if (!scope || !path) return null
+      return {
+        scope,
+        path,
+        bytes,
+        ...(entry.truncated === true ? { truncated: true } : {})
+      }
+    })
+    .filter((entry): entry is { scope: 'global' | 'workspace'; path: string; bytes: number; truncated?: boolean } => entry !== null)
+  return sources.length > 0 ? sources : undefined
 }
 
 function extractToolSources(item: CoreTurnItemJson): Array<Record<string, string>> | undefined {
@@ -415,12 +445,27 @@ function normalizeGeneratedFileReference(entry: unknown): GeneratedFileReference
   return Object.keys(normalized).length > 0 ? normalized : null
 }
 
+const GENERATED_FILE_TOOL_NAMES = new Set([
+  'generate_image',
+  'generate_speech',
+  'generate_music',
+  'generate_video'
+])
+
+function isGeneratedFileToolName(toolName: string | undefined): boolean {
+  const name = toolName?.trim()
+  if (!name) return false
+  if (GENERATED_FILE_TOOL_NAMES.has(name)) return true
+  const bridgedName = name.split('__').at(-1)
+  return Boolean(bridgedName && GENERATED_FILE_TOOL_NAMES.has(bridgedName))
+}
+
 function extractToolGeneratedFiles(item: CoreTurnItemJson): GeneratedFileReference[] | undefined {
   if (item.kind !== 'tool_result') return undefined
   const payload = payloadFor(item)
   const candidates = [
-    ...(Array.isArray(payload.files) ? payload.files : []),
-    ...(Array.isArray(payload.generatedFiles) ? payload.generatedFiles : [])
+    ...(Array.isArray(payload.generatedFiles) ? payload.generatedFiles : []),
+    ...(isGeneratedFileToolName(item.toolName) && Array.isArray(payload.files) ? payload.files : [])
   ]
   const generatedFiles: GeneratedFileReference[] = []
   const seen = new Set<string>()
@@ -544,6 +589,7 @@ function toolBlockFromItem(item: CoreTurnItemJson, child?: CoreChildRuntimeMetad
     (item.kind === 'tool_result' ? 'tool result' : 'tool')
   const meta: Record<string, unknown> = {
     sourceItemId: item.id,
+    sourceItemKind: item.kind,
     ...(item.callId ? { callId: item.callId } : {}),
     ...(item.toolName ? { toolName: item.toolName } : {})
   }
@@ -1146,33 +1192,46 @@ function runtimeStatusFromEvent(event: CoreRuntimeEventJson): RuntimeStatusEvent
       toolResultCount: typeof event.toolResultCount === 'number' ? event.toolResultCount : 0
     }
   }
-	  if (event.kind === 'tool_catalog_changed') {
-	    const key = event.fingerprint ?? event.seq ?? Date.now()
-	    return {
-	      kind: 'tool_catalog_changed',
-	      itemId: `runtime_status_tool_catalog_${key}`,
-	      turnId: event.turnId,
-	      createdAt: event.timestamp,
-	      ...(event.changeKind ? { changeKind: event.changeKind } : {}),
-	      message: event.message
-	    }
-	  }
-	  if (event.kind === 'tool_storm_suppressed') {
-	    const callId = typeof event.callId === 'string' && event.callId.trim() ? event.callId.trim() : ''
-	    const toolName = typeof event.toolName === 'string' && event.toolName.trim() ? event.toolName.trim() : ''
-	    if (!callId || !toolName) return null
-	    return {
-	      kind: 'tool_storm_suppressed',
-	      itemId: event.itemId ?? `runtime_status_tool_storm_${callId}`,
-	      turnId: event.turnId,
-	      createdAt: event.timestamp,
-	      message: event.message,
-	      toolName,
-	      callId
-	    }
-	  }
-	  return null
-	}
+  if (event.kind === 'model_request_retry') {
+    const turnKey = event.turnId ?? event.threadId ?? event.seq ?? Date.now()
+    return {
+      kind: 'model_request_retry',
+      itemId: `runtime_status_${turnKey}_model_retry`,
+      turnId: event.turnId,
+      createdAt: event.timestamp,
+      status: typeof event.status === 'number' ? event.status : undefined,
+      attempt: typeof event.attempt === 'number' ? event.attempt : undefined,
+      maxAttempts: typeof event.maxAttempts === 'number' ? event.maxAttempts : undefined,
+      delayMs: typeof event.delayMs === 'number' ? event.delayMs : undefined
+    }
+  }
+  if (event.kind === 'tool_catalog_changed') {
+    const key = event.fingerprint ?? event.seq ?? Date.now()
+    return {
+      kind: 'tool_catalog_changed',
+      itemId: `runtime_status_tool_catalog_${key}`,
+      turnId: event.turnId,
+      createdAt: event.timestamp,
+      ...(event.changeKind ? { changeKind: event.changeKind } : {}),
+      message: event.message
+    }
+  }
+  if (event.kind === 'tool_storm_suppressed') {
+    const callId = typeof event.callId === 'string' && event.callId.trim() ? event.callId.trim() : ''
+    const toolName = typeof event.toolName === 'string' && event.toolName.trim() ? event.toolName.trim() : ''
+    if (!callId || !toolName) return null
+    return {
+      kind: 'tool_storm_suppressed',
+      itemId: event.itemId ?? `runtime_status_tool_storm_${callId}`,
+      turnId: event.turnId,
+      createdAt: event.timestamp,
+      message: event.message,
+      toolName,
+      callId
+    }
+  }
+  return null
+}
 
 /**
  * Dispatches a batch of runtime events, coalescing consecutive text and
@@ -1243,16 +1302,13 @@ export async function dispatchKunRuntimeEvent(
       if (status) sink.onRuntimeStatus?.(status)
       return
     }
-	    case 'tool_catalog_changed': {
-	      const status = runtimeStatusFromEvent(event)
-	      if (status) sink.onRuntimeStatus?.(status)
-	      return
-	    }
-	    case 'tool_storm_suppressed': {
-	      const status = runtimeStatusFromEvent(event)
-	      if (status) sink.onRuntimeStatus?.(status)
-	      return
-	    }
+    case 'model_request_retry':
+    case 'tool_catalog_changed':
+    case 'tool_storm_suppressed': {
+      const status = runtimeStatusFromEvent(event)
+      if (status) sink.onRuntimeStatus?.(status)
+      return
+    }
     case 'approval_requested':
       await handleApprovalRequest(event, sink)
       return
@@ -1317,7 +1373,7 @@ export async function dispatchKunRuntimeEvent(
         threadId: event.threadId ?? '',
         ...(event.title !== undefined ? { title: event.title } : {}),
         ...(event.titleAuto !== undefined ? { titleAuto: event.titleAuto } : {}),
-        ...(event.status !== undefined ? { status: event.status } : {})
+        ...(typeof event.status === 'string' ? { status: event.status } : {})
       })
       return
     case 'turn_completed':

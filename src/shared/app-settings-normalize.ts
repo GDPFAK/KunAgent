@@ -14,6 +14,7 @@ import {
   type CheckpointCleanupConfigV1,
   type CheckpointCleanupIntervalDays,
   type ClawSettingsPatchV1,
+  type DesignSettingsPatchV1,
   type GuiUpdateConfigV1,
   type NotificationConfigV1,
   type ScheduleSettingsPatchV1,
@@ -39,6 +40,7 @@ import { normalizeClawSettings } from './app-settings-claw'
 import { normalizeScheduleSettings } from './app-settings-schedule'
 import { normalizeWorkflowSettings } from './app-settings-workflow'
 import { normalizeWriteSettings } from './app-settings-write'
+import { normalizeDesignSettings } from './app-settings-design'
 import { normalizeTerminalSettings, type TerminalSettingsPatchV1 } from './app-settings-terminal'
 
 export function normalizeAppSettings(settings: AppSettingsV1): AppSettingsV1 {
@@ -55,6 +57,7 @@ export function normalizeAppSettings(settings: AppSettingsV1): AppSettingsV1 {
     claw?: ClawSettingsPatchV1
     schedule?: ScheduleSettingsPatchV1
     workflow?: WorkflowSettingsPatchV1
+    design?: DesignSettingsPatchV1
     guiUpdate?: Partial<GuiUpdateConfigV1>
     terminal?: TerminalSettingsPatchV1
   }
@@ -72,7 +75,6 @@ export function normalizeAppSettings(settings: AppSettingsV1): AppSettingsV1 {
     kunPatch: rawMediaPatch
   })
   return {
-    ...migrated,
     version: 1,
     locale: maybeSettings.locale === 'zh' ? 'zh' : 'en',
     theme:
@@ -111,6 +113,7 @@ export function normalizeAppSettings(settings: AppSettingsV1): AppSettingsV1 {
     claw: normalizeClawSettings(maybeSettings.claw),
     schedule: normalizeScheduleSettings(maybeSettings.schedule),
     workflow: normalizeWorkflowSettings(maybeSettings.workflow),
+    design: normalizeDesignSettings(maybeSettings.design),
     terminal: normalizeTerminalSettings(maybeSettings.terminal),
     guiUpdate: {
       channel: normalizeGuiUpdateChannel(

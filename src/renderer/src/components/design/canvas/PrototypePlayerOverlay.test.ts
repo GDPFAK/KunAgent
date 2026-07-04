@@ -1,0 +1,194 @@
+import { createElement } from 'react'
+import { renderToStaticMarkup } from 'react-dom/server'
+import { describe, expect, it } from 'vitest'
+import type { DesignArtifact } from '../../../design/design-types'
+import {
+  PrototypePlayerOverlay,
+  buildPrototypeViewportModeScript,
+  shouldInjectPrototypeNavigationCapture,
+  shouldSyncPrototypePlayerToInitialId
+} from './PrototypePlayerOverlay'
+
+const now = '2026-06-30T00:00:00.000Z'
+
+function htmlArtifact(id: string, title: string, extra: Partial<DesignArtifact> = {}): DesignArtifact {
+  const relativePath = `.kun-design/doc/${id}/v1.html`
+  return {
+    id,
+    kind: 'html',
+    title,
+    relativePath,
+    createdAt: now,
+    updatedAt: now,
+    versions: [{ id: `${id}-v1`, relativePath, createdAt: now, summary: '' }],
+    ...extra
+  }
+}
+
+describe('PrototypePlayerOverlay', () => {
+  it('waits for webview readiness before injecting navigation capture', () => {
+    expect(shouldInjectPrototypeNavigationCapture({
+      open: true,
+      webviewUrl: 'file:///workspace/.kun-design/doc/home/v1.html?rev=1',
+      webviewReady: false,
+      hasExecuteJavaScript: true
+    })).toBe(false)
+    expect(shouldInjectPrototypeNavigationCapture({
+      open: true,
+      webviewUrl: 'file:///workspace/.kun-design/doc/home/v1.html?rev=1',
+      webviewReady: true,
+      hasExecuteJavaScript: true
+    })).toBe(true)
+    expect(shouldInjectPrototypeNavigationCapture({
+      open: false,
+      webviewUrl: 'file:///workspace/.kun-design/doc/home/v1.html?rev=1',
+      webviewReady: true,
+      hasExecuteJavaScript: true
+    })).toBe(false)
+    expect(shouldInjectPrototypeNavigationCapture({
+      open: true,
+      webviewUrl: '',
+      webviewReady: true,
+      hasExecuteJavaScript: true
+    })).toBe(false)
+    expect(shouldInjectPrototypeNavigationCapture({
+      open: true,
+      webviewUrl: 'file:///workspace/.kun-design/doc/home/v1.html?rev=1',
+      webviewReady: true,
+      hasExecuteJavaScript: false
+    })).toBe(false)
+  })
+
+  it('syncs playback to a changed external initial screen while open', () => {
+    expect(shouldSyncPrototypePlayerToInitialId({
+      open: true,
+      initialCurrentId: 'threads',
+      lastInitialCurrentId: 'home',
+      currentId: 'home'
+    })).toBe(true)
+    expect(shouldSyncPrototypePlayerToInitialId({
+      open: true,
+      initialCurrentId: 'threads',
+      lastInitialCurrentId: 'threads',
+      currentId: 'home'
+    })).toBe(false)
+    expect(shouldSyncPrototypePlayerToInitialId({
+      open: true,
+      initialCurrentId: 'threads',
+      lastInitialCurrentId: 'home',
+      currentId: 'threads'
+    })).toBe(false)
+    expect(shouldSyncPrototypePlayerToInitialId({
+      open: false,
+      initialCurrentId: 'threads',
+      lastInitialCurrentId: 'home',
+      currentId: 'home'
+    })).toBe(false)
+  })
+
+  it('builds app viewport chrome CSS that hides native scrollbars', () => {
+    const script = buildPrototypeViewportModeScript('app')
+
+    expect(script).toContain('data-kun-prototype-viewport="app"')
+    expect(script).toContain('scrollbar-width: none')
+    expect(script).toContain('::-webkit-scrollbar')
+    expect(script).toContain('width: 0')
+  })
+
+  it('renders an app-target prototype shell with phone viewport and all screens', () => {
+    const html = renderToStaticMarkup(
+      createElement(PrototypePlayerOverlay, {
+        open: true,
+        workspaceRoot: '/workspace',
+        designTarget: 'app',
+        artifacts: [
+          htmlArtifact('home', 'Home', {
+            prototypeLinks: [
+              {
+                targetTitle: 'Settings',
+                targetArtifactId: 'settings',
+                href: '../settings/v1.html',
+                label: 'Open settings'
+              }
+            ]
+          }),
+          htmlArtifact('settings', 'Settings')
+        ],
+        initialArtifactId: 'home',
+        onClose: () => {}
+      })
+    )
+
+    expect(html).toContain('aspect-ratio:390 / 844')
+    expect(html).toContain('height:100%')
+    expect(html).toContain('.kun-design/doc/home/v1.html - App 390 x 844')
+    expect(html).toContain('aria-label="Prototype viewport"')
+    expect(html).toContain('aria-pressed="true"')
+    expect(html).toContain('rounded-[30px]')
+    expect(html).not.toContain('ring-[6px]')
+    expect(html).toContain('All screens')
+    expect(html).toContain('Home')
+    expect(html).toContain('Settings')
+    expect(html).toContain('.kun-design/doc/home/v1.html')
+    expect(html).toContain('.kun-design/doc/settings/v1.html')
+  })
+
+  it('renders a web-target prototype shell with desktop viewport fallback', () => {
+    const html = renderToStaticMarkup(
+      createElement(PrototypePlayerOverlay, {
+        open: true,
+        workspaceRoot: '/workspace',
+        designTarget: 'web',
+        artifacts: [htmlArtifact('home', 'Home')],
+        initialArtifactId: 'home',
+        onClose: () => {}
+      })
+    )
+
+    expect(html).toContain('aspect-ratio:1280 / 800')
+    expect(html).toContain('width:100%')
+    expect(html).toContain('.kun-design/doc/home/v1.html - Web 1280 x 800')
+    expect(html).toContain('1280 x 800 web prototype')
+  })
+
+  it('renders the current version path instead of stale screen paths', () => {
+    const v1 = '.kun-design/doc/threads/v1.html'
+    const v2 = '.kun-design/doc/threads/v2.html'
+    const html = renderToStaticMarkup(
+      createElement(PrototypePlayerOverlay, {
+        open: true,
+        workspaceRoot: '/workspace',
+        designTarget: 'app',
+        artifacts: [
+          htmlArtifact('home', 'Home'),
+          htmlArtifact('threads', 'Threads', {
+            relativePath: v2,
+            versions: [
+              { id: 'threads-v2', relativePath: v2, createdAt: now, summary: 'Updated interaction pass' },
+              { id: 'threads-v1', relativePath: v1, createdAt: now, summary: 'Initial screen' }
+            ]
+          })
+        ],
+        initialArtifactId: 'threads',
+        onClose: () => {}
+      })
+    )
+
+    expect(html).toContain(`${v2} - App 390 x 844`)
+    expect(html).toContain(`title="${v2}"`)
+  })
+
+  it('does not render when closed', () => {
+    const html = renderToStaticMarkup(
+      createElement(PrototypePlayerOverlay, {
+        open: false,
+        workspaceRoot: '/workspace',
+        designTarget: 'app',
+        artifacts: [htmlArtifact('home', 'Home')],
+        onClose: () => {}
+      })
+    )
+
+    expect(html).toBe('')
+  })
+})

@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import {
   mergeScheduleSettings,
   defaultClawSettings,
+  defaultDesignSettings,
   defaultKeyboardShortcuts,
   defaultKunRuntimeSettings,
   defaultModelProviderSettings,
@@ -53,6 +54,7 @@ function settings(): AppSettingsV1 {
     claw: defaultClawSettings(),
     schedule: defaultScheduleSettings(),
     workflow: defaultWorkflowSettings(),
+    design: defaultDesignSettings(),
     terminal: defaultTerminalSettings(),
     guiUpdate: { channel: 'stable' },
     codePromptPrefix: '',

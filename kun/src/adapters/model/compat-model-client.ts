@@ -10,6 +10,10 @@ import { extractToolResultImages, toolResultTextWithoutImages } from '../../loop
 import { repairToolArguments } from './tool-argument-repair.js'
 import { isDeepSeekHost, probeDeepSeekReachable } from './model-error-probe.js'
 import {
+  DEFAULT_MODEL_REQUEST_RETRY_CONFIG,
+  type ModelRequestRetryConfig
+} from '../../config/kun-config.js'
+import {
   DEFAULT_MODEL_ENDPOINT_FORMAT,
   isCustomModelEndpointFormat,
   modelEndpointPath,
@@ -44,6 +48,8 @@ export type CompatModelClientConfig = {
   nonStreaming?: boolean
   /** Maximum idle time between streaming chunks before the turn fails. */
   streamIdleTimeoutMs?: number
+  /** 流式响应开始前,遇到临时失败或限流响应时使用的 HTTP 重试策略。 */
+  retry?: ModelRequestRetryConfig
   /** Optional model capability resolver used for provider-specific reasoning translation. */
   modelCapabilities?: (model: string) => ModelCapabilityMetadata
   /** Optional troubleshooting sink that captures each request body + raw output. */
@@ -264,18 +270,23 @@ export class CompatModelClient implements ModelClient {
       round.url = redactUrlForLog(url)
     }
     const headers = this.buildHeaders(stream, endpointFormat)
+    const retry = normalizeModelRequestRetryConfig(this.config.retry)
+    const retryStatuses = new Set(retry.httpStatusCodes)
     let result = await this.postChatCompletion(url, headers, body, request.abortSignal)
-    // Retry transient gateway failures (502/503/504) a few times before giving
-    // up. These are upstream load-balancer hiccups (e.g. an ALB returning
-    // "502 Bad Gateway"), not request errors — failing the whole turn on the
-    // first blip is needlessly fragile, especially for flaky providers. No
-    // response body has been streamed yet, so re-POSTing the same request is
-    // safe. Aborts short-circuit the backoff.
-    for (let attempt = 0; attempt < MAX_TRANSIENT_RETRIES; attempt += 1) {
+    for (let attempt = 0; attempt < retry.maxAttempts; attempt += 1) {
       if (result.kind === 'error') break
-      if (result.response.ok || !TRANSIENT_RETRY_STATUSES.has(result.response.status)) break
+      if (result.response.ok || !retryStatuses.has(result.response.status)) break
+      const delayMs = retryDelayMs(result.response, retry.initialDelayMs, attempt)
+      const status = result.response.status
       await result.response.body?.cancel().catch(() => {})
-      const aborted = await sleepWithAbort(TRANSIENT_RETRY_BASE_MS * 2 ** attempt, request.abortSignal)
+      yield {
+        kind: 'retrying',
+        status,
+        attempt: attempt + 1,
+        maxAttempts: retry.maxAttempts,
+        delayMs
+      }
+      const aborted = await sleepWithAbort(delayMs, request.abortSignal)
       if (aborted || request.abortSignal.aborted) {
         yield { kind: 'error', message: 'request was aborted during retry backoff' }
         return
@@ -441,7 +452,7 @@ export class CompatModelClient implements ModelClient {
   }
 
   private async classifyHttpError(status: number, text: string): Promise<{ message: string; code: string }> {
-    const body = text
+    const body = summarizeHttpErrorBody(text)
     if (status === 404) {
       const prefix = body ? `${body} ` : ''
       return {
@@ -564,13 +575,25 @@ export class CompatModelClient implements ModelClient {
     messages: ChatMessage[],
     stream: boolean
   ): Record<string, unknown> {
+    const isCodex = this.isCodexEndpoint()
+    // Codex requires system content in the top-level `instructions` field and
+    // will reject system-role items inside `input`. Split the message list so
+    // system messages go to instructions and the rest go to input.
+    const systemMessages = isCodex ? messages.filter((m) => m.role === 'system') : []
+    const nonSystemMessages = isCodex ? messages.filter((m) => m.role !== 'system') : messages
+    const inputMessages = splitToolImageMessagesForOpenAi(nonSystemMessages)
+    const instructions = systemMessages
+      .map((m) => chatContentToPlainText(m.content).trim())
+      .filter(Boolean)
+      .join('\n\n')
     const body: Record<string, unknown> = {
       model,
       stream,
-      input: messagesToResponsesInput(splitToolImageMessagesForOpenAi(messages))
+      input: messagesToResponsesInput(inputMessages),
+      ...(isCodex ? { instructions: instructions || ' ', store: false } : {})
     }
     const maxTokens = this.resolveMaxTokens(request, model)
-    if (maxTokens !== undefined) {
+    if (maxTokens !== undefined && !isCodex) {
       body.max_output_tokens = maxTokens
     }
     if (request.temperature !== undefined) {
@@ -584,9 +607,16 @@ export class CompatModelClient implements ModelClient {
     }
     const reasoning = responsesReasoningForEffort(
       request.reasoningEffort,
-      this.modelReasoningFor(model)
+      this.modelReasoningFor(model),
+      {
+        maxEffort: isCodex ? 'xhigh' : 'high',
+        includeSummary: isCodex
+      }
     )
-    if (reasoning) body.reasoning = reasoning
+    if (reasoning) {
+      body.reasoning = reasoning
+      if (isCodex) body.include = ['reasoning.encrypted_content']
+    }
     const tools = normalizeToolSpecs(request.tools)
     if (tools.length > 0) {
       body.tools = tools.map((tool) => ({
@@ -596,7 +626,16 @@ export class CompatModelClient implements ModelClient {
         parameters: tool.inputSchema
       }))
     }
+    if (this.isCodexEndpoint()) {
+      const toolsArray = (body.tools ?? []) as Record<string, unknown>[]
+      toolsArray.push({ type: 'image_generation' })
+      body.tools = toolsArray
+    }
     return body
+  }
+
+  private isCodexEndpoint(): boolean {
+    return this.config.baseUrl.includes('chatgpt.com/backend-api/codex')
   }
 
   private buildAnthropicMessagesRequestBody(
@@ -635,10 +674,11 @@ export class CompatModelClient implements ModelClient {
           .filter((item) => item.trim().length > 0)
           .join('\n\n')
       : converted.system
-    if (systemText) {
-      body.system = [
-        { type: 'text', text: systemText, cache_control: { type: 'ephemeral' } }
-      ] satisfies AnthropicContentBlock[]
+    const systemBlocks: AnthropicContentBlock[] = systemText
+      ? [{ type: 'text', text: systemText, cache_control: { type: 'ephemeral' } }]
+      : []
+    if (systemBlocks.length > 0) {
+      body.system = systemBlocks
     }
     if (request.temperature !== undefined) {
       body.temperature = request.temperature
@@ -1175,7 +1215,14 @@ export class CompatModelClient implements ModelClient {
     const item = recordValue(payload, 'item') ?? recordValue(payload, 'output_item')
     if (item) {
       const itemType = recordString(item, 'type')
-      if (itemType === 'function_call' || itemType === 'custom_tool_call') {
+      if (itemType === 'image_generation_call') {
+        if (type === 'response.output_item.done') {
+          const result = recordString(item, 'result')
+          if (result) {
+            chunks.push({ kind: 'image_generation_complete', imageBase64: result, mimeType: 'image/png' })
+          }
+        }
+      } else if (itemType === 'function_call' || itemType === 'custom_tool_call') {
         const callId = recordString(item, 'call_id') || recordString(item, 'id') || indexFallbackCallId(outputIndex, pendingArguments)
         const existing = pendingArguments.get(callId) ?? { index: outputIndex, name: undefined, arguments: '' }
         if (outputIndex !== undefined) {
@@ -1244,6 +1291,8 @@ export class CompatModelClient implements ModelClient {
       } else {
         pendingArguments.set(callId, existing)
       }
+    } else if (type === 'response.image_generation_call.partial_image') {
+      // Partial image data — accumulation is optional; we emit on output_item.done
     } else if (type === 'response.completed') {
       const response = recordValue(payload, 'response') as ResponsesApiResponse | null
       const materialized = this.materializeResponsesOutput(response ?? (payload as ResponsesApiResponse), {
@@ -1907,7 +1956,11 @@ type NormalizedReasoningEffort = ModelReasoningCapability['defaultEffort']
 
 function responsesReasoningForEffort(
   effort: string | undefined,
-  reasoning?: ModelReasoningCapability
+  reasoning?: ModelReasoningCapability,
+  options: {
+    maxEffort?: 'high' | 'xhigh'
+    includeSummary?: boolean
+  } = {}
 ): Record<string, unknown> | null {
   if (reasoning && reasoning.requestProtocol !== 'openai-responses') return null
   const resolved = reasoning
@@ -1915,14 +1968,19 @@ function responsesReasoningForEffort(
     : normalizeReasoningEffortValue(effort)
   if (resolved === 'auto' || resolved === 'off' || !resolved) return null
   const normalized = resolved
+  const payload = (wireEffort: string): Record<string, unknown> => ({
+    effort: wireEffort,
+    ...(options.includeSummary ? { summary: 'auto' } : {})
+  })
   switch (normalized) {
     case 'low':
-      return { effort: 'low' }
+      return payload('low')
     case 'medium':
-      return { effort: 'medium' }
+      return payload('medium')
     case 'high':
+      return payload('high')
     case 'max':
-      return { effort: 'high' }
+      return payload(options.maxEffort ?? 'high')
     default:
       return null
   }
@@ -1968,6 +2026,21 @@ function redactUrlForLog(url: string): string {
 
 function summarizeForLog(text: string): string {
   const normalized = text.replace(/\s+/g, ' ').trim()
+  return normalized.length > 1_000 ? `${normalized.slice(0, 1_000)}...` : normalized
+}
+
+function summarizeHttpErrorBody(text: string): string {
+  const normalized = text.replace(/\s+/g, ' ').trim()
+  if (!normalized) return ''
+  if (/<html[\s>]/i.test(normalized)) {
+    if (/Enable JavaScript and cookies to continue/i.test(normalized)) {
+      return 'provider returned an HTML challenge page (Enable JavaScript and cookies to continue). Check provider authentication/session and Endpoint format.'
+    }
+    const title = /<title[^>]*>(.*?)<\/title>/i.exec(normalized)?.[1]?.trim()
+    return title
+      ? `provider returned an HTML response (${title})`
+      : 'provider returned an HTML response'
+  }
   return normalized.length > 1_000 ? `${normalized.slice(0, 1_000)}...` : normalized
 }
 
@@ -2332,11 +2405,55 @@ function normalizeReasoningEffortValue(effort: string | undefined): NormalizedRe
   }
 }
 
-// Transient upstream gateway statuses worth retrying — load balancers and
-// reverse proxies return these for momentary backend unavailability.
-const TRANSIENT_RETRY_STATUSES = new Set([502, 503, 504])
-const MAX_TRANSIENT_RETRIES = 2
-const TRANSIENT_RETRY_BASE_MS = 500
+function normalizeModelRequestRetryConfig(input: ModelRequestRetryConfig | undefined): {
+  maxAttempts: number
+  initialDelayMs: number
+  httpStatusCodes: number[]
+} {
+  const defaults = DEFAULT_MODEL_REQUEST_RETRY_CONFIG
+  return {
+    maxAttempts: boundedNonNegativeInteger(input?.maxAttempts, defaults.maxAttempts, 10),
+    initialDelayMs: boundedNonNegativeInteger(input?.initialDelayMs, defaults.initialDelayMs, 600_000),
+    httpStatusCodes: normalizeRetryHttpStatusCodes(input?.httpStatusCodes, defaults.httpStatusCodes)
+  }
+}
+
+function normalizeRetryHttpStatusCodes(input: unknown, fallback: readonly number[]): number[] {
+  const values = Array.isArray(input) ? input : fallback
+  const codes = new Set<number>()
+  for (const raw of values) {
+    const code = typeof raw === 'number' ? raw : Number(raw)
+    if (!Number.isInteger(code) || code < 400 || code > 599) continue
+    codes.add(code)
+  }
+  return codes.size > 0 ? [...codes].sort((a, b) => a - b) : [...fallback]
+}
+
+function boundedNonNegativeInteger(value: unknown, fallback: number, max: number): number {
+  const num = typeof value === 'number' ? value : Number(value)
+  if (!Number.isFinite(num)) return fallback
+  return Math.min(max, Math.max(0, Math.round(num)))
+}
+
+function retryDelayMs(response: Response, initialDelayMs: number, attempt: number): number {
+  const retryAfterMs = parseRetryAfterMs(response.headers.get('retry-after'))
+  if (retryAfterMs !== undefined) return retryAfterMs
+  const exponential = Math.min(600_000, initialDelayMs * 2 ** attempt)
+  if (exponential <= 0) return 0
+  return Math.round(exponential * (0.8 + Math.random() * 0.4))
+}
+
+function parseRetryAfterMs(value: string | null): number | undefined {
+  const trimmed = value?.trim()
+  if (!trimmed) return undefined
+  const seconds = Number(trimmed)
+  if (Number.isFinite(seconds) && seconds >= 0) {
+    return Math.min(600_000, Math.round(seconds * 1000))
+  }
+  const dateMs = Date.parse(trimmed)
+  if (!Number.isFinite(dateMs)) return undefined
+  return Math.min(600_000, Math.max(0, dateMs - Date.now()))
+}
 
 /** Sleep `ms`, resolving early to `true` if the signal aborts first. */
 function sleepWithAbort(ms: number, signal: AbortSignal): Promise<boolean> {

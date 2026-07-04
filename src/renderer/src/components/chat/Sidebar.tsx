@@ -64,6 +64,7 @@ type Props = {
   onToggleConnectPhone: () => void
   onCodeOpen: () => void
   onWriteOpen: () => void
+  onDesignOpen: () => void
   onScheduleOpen: () => void
   onWorkflowOpen: () => void
   onNewConversation: () => void
@@ -97,6 +98,7 @@ export function Sidebar({
   onToggleConnectPhone,
   onCodeOpen,
   onWriteOpen,
+  onDesignOpen,
   onScheduleOpen,
   onWorkflowOpen,
   onNewConversation
@@ -157,13 +159,6 @@ export function Sidebar({
               ariaLabel={t('focusModeToggleLabel')}
             />
           </div>
-          <SidebarCommandRow
-            icon={<Smartphone className="h-4 w-4" strokeWidth={1.75} />}
-            label={t('claw')}
-            onClick={onToggleConnectPhone}
-            active={connectPhoneSidebarOpen}
-            variant="footer"
-          />
           <div className="flex items-center gap-1">
             <div className="min-w-0 flex-1">
               <SidebarCommandRow
@@ -173,6 +168,14 @@ export function Sidebar({
                 variant="footer"
               />
             </div>
+            <SidebarIconButton
+              title={t('claw')}
+              ariaLabel={t('claw')}
+              onClick={onToggleConnectPhone}
+              active={connectPhoneSidebarOpen}
+            >
+              <Smartphone className="h-4 w-4" strokeWidth={1.75} />
+            </SidebarIconButton>
             <SidebarIconButton
               title={isDarkMode ? t('switchToLight') : t('switchToDark')}
               ariaLabel={t('toggleTheme')}
@@ -192,7 +195,9 @@ export function Sidebar({
         <WorkspaceModeTabs
           activeView={activeView}
           onCodeOpen={onCodeOpen}
+          onWorkflowOpen={onWorkflowOpen}
           onWriteOpen={onWriteOpen}
+          onDesignOpen={onDesignOpen}
         />
 
         {activeView !== 'claw' && activeView !== 'schedule' && activeView !== 'workflow' ? (
@@ -234,12 +239,6 @@ export function Sidebar({
           label={t('schedule')}
           onClick={onScheduleOpen}
           active={activeView === 'schedule'}
-        />
-        <SidebarCommandRow
-          icon={<Workflow className="h-4 w-4" strokeWidth={1.75} />}
-          label={t('workflow')}
-          onClick={onWorkflowOpen}
-          active={activeView === 'workflow'}
         />
       </div>
 

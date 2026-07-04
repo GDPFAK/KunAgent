@@ -24,6 +24,7 @@ import {
   MessageCircleMore,
   Mic,
   Minimize2,
+  Monitor,
   Paperclip,
   PauseCircle,
   Pencil,
@@ -37,6 +38,7 @@ import {
   Square,
   Target,
   Trash2,
+  Type as TypeIcon,
   X
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
@@ -111,9 +113,11 @@ import { useComposerDraft } from './use-composer-draft'
 import { useSpeechToTextSettings, useVoiceDictation } from './use-voice-dictation'
 import { VoiceRecordingStrip } from './VoiceRecordingStrip'
 import type { ComposerChangedFile } from '../../lib/composer-change-summary'
+import type { DesignComposerContext } from '../../design/design-composer-context'
 
 export type { ComposerFileReference } from '../../lib/composer-file-references'
 export type { ComposerExecutionSettings } from './FloatingComposerExecutionPicker'
+export type { DesignComposerContext } from '../../design/design-composer-context'
 
 const CONTEXT_CAPACITY_RING_SIZE = 24
 const CONTEXT_CAPACITY_RING_STROKE = 2.5
@@ -159,8 +163,10 @@ type Props = {
   attachmentUploadEnabled?: boolean
   attachmentUploadBusy?: boolean
   attachmentUploadError?: string | null
+  contextChips?: DesignComposerContext[]
   fileReferenceEnabled?: boolean
   fileReferences?: ComposerFileReference[]
+  extraFileMentionCandidates?: ComposerFileReference[]
   webAccessAvailable?: boolean
   executionSettings?: ComposerExecutionSettings | null
   executionSettingsApplying?: boolean
@@ -183,9 +189,11 @@ type Props = {
   onPickAttachments?: (files: File[]) => void
   onPasteClipboardImage?: (options?: { silentNoImage?: boolean }) => void | Promise<void>
   onRemoveAttachment?: (id: string) => void
+  onRemoveContextChip?: (id: string) => void
   onAddFileReference?: (reference: ComposerFileReference) => void
   onPickFileReferences?: () => void
   onOpenFileReferencePicker?: () => void
+  onOpenDesignReferencePicker?: () => void
   onRemoveFileReference?: (relativePath: string) => void
   onSend: () => void
   onInterrupt: (options?: { discard?: boolean }) => void
@@ -223,6 +231,7 @@ type SkillCommand = NonNullable<Props['skillCommands']>[number]
 const EMPTY_CONTEXT_BLOCKS: ChatBlock[] = []
 const EMPTY_MODEL_GROUPS: ModelProviderModelGroup[] = []
 const EMPTY_ATTACHMENTS: AttachmentReference[] = []
+const EMPTY_CONTEXT_CHIPS: DesignComposerContext[] = []
 const EMPTY_FILE_REFERENCES: ComposerFileReference[] = []
 const EMPTY_CHANGED_FILES: ComposerChangedFile[] = []
 const EMPTY_SKILL_COMMANDS: SkillCommand[] = []
@@ -487,8 +496,10 @@ export function FloatingComposer({
   attachmentUploadEnabled = false,
   attachmentUploadBusy = false,
   attachmentUploadError = null,
+  contextChips = EMPTY_CONTEXT_CHIPS,
   fileReferenceEnabled = false,
   fileReferences = EMPTY_FILE_REFERENCES,
+  extraFileMentionCandidates = EMPTY_FILE_REFERENCES,
   executionSettings = null,
   executionSettingsApplying = false,
   changedFiles = EMPTY_CHANGED_FILES,
@@ -498,9 +509,11 @@ export function FloatingComposer({
   onPickAttachments,
   onPasteClipboardImage,
   onRemoveAttachment,
+  onRemoveContextChip,
   onAddFileReference,
   onPickFileReferences,
   onOpenFileReferencePicker,
+  onOpenDesignReferencePicker,
   onRemoveFileReference,
   onSend,
   onInterrupt,
@@ -622,6 +635,7 @@ export function FloatingComposer({
   )
   const canPickAttachment = canCompose && attachmentUploadEnabled && !attachmentUploadBusy
   const canPickFileReference = canCompose && fileReferenceEnabled && Boolean(effectiveWorkspaceRoot) && Boolean(onOpenFileReferencePicker)
+  const canPickDesignReference = canCompose && fileReferenceEnabled && Boolean(onOpenDesignReferencePicker)
   const canPickLocalFileReference = canCompose && fileReferenceEnabled && Boolean(onPickFileReferences)
   const showIntentToolbar = !compact && route === 'chat'
   const showComposerMenuButton = showIntentToolbar
@@ -631,7 +645,7 @@ export function FloatingComposer({
   const canRunReview = canCompose && route !== 'claw' && Boolean(onReviewCommand)
   const canToggleWorktreeMode = canCompose && route !== 'claw' && Boolean(onToggleWorktreeMode)
   const canOpenComposerMenu = showComposerMenuButton
-    && (canPickFileReference || canPickLocalFileReference || canTogglePlanMode || canCreateNewThread || canOpenGoalPanel || canRunReview || canToggleWorktreeMode)
+    && (canPickFileReference || canPickDesignReference || canPickLocalFileReference || canTogglePlanMode || canCreateNewThread || canOpenGoalPanel || canRunReview || canToggleWorktreeMode)
   const showToolbarStartControls = showComposerMenuButton
   const showExecutionSettingsPicker = showIntentToolbar
     && Boolean(executionSettings)
@@ -1067,10 +1081,11 @@ export function FloatingComposer({
       ])
         .then(([index, pathSuggestions]) => {
           if (cancelled) return
-          const candidates = mergeMentionCandidates(
-            [...index.directories, ...index.files],
-            pathSuggestions
+          const indexedCandidates = mergeMentionCandidates(
+            extraFileMentionCandidates,
+            [...index.directories, ...index.files]
           )
+          const candidates = mergeMentionCandidates(indexedCandidates, pathSuggestions)
           setFileMentionSuggestions(
             filterWorkspaceFileMentionSuggestions(candidates, query, fileReferences)
           )
@@ -1087,7 +1102,13 @@ export function FloatingComposer({
       cancelled = true
       window.clearTimeout(timer)
     }
-  }, [activeFileMention, effectiveWorkspaceRoot, fileReferences, showFileMentionMenu])
+  }, [
+    activeFileMention,
+    effectiveWorkspaceRoot,
+    extraFileMentionCandidates,
+    fileReferences,
+    showFileMentionMenu
+  ])
 
   useEffect(() => {
     if (!composerMenuOpen && !goalPanelOpen) return
@@ -1283,6 +1304,13 @@ export function FloatingComposer({
     if (!canPickFileReference) return
     setComposerMenuOpen(false)
     onOpenFileReferencePicker?.()
+    draft.focusComposer()
+  }
+
+  const handleDesignReferenceMenuClick = (): void => {
+    if (!canPickDesignReference) return
+    setComposerMenuOpen(false)
+    onOpenDesignReferencePicker?.()
     draft.focusComposer()
   }
 
@@ -1704,6 +1732,17 @@ export function FloatingComposer({
                 <span className="min-w-0 flex-1 truncate">{t('composerBrowseWorkspaceFiles')}</span>
               </button>
             ) : null}
+            {fileReferenceEnabled ? (
+              <button
+                type="button"
+                disabled={!canPickDesignReference}
+                onClick={handleDesignReferenceMenuClick}
+                className="ds-no-drag flex h-8 w-full items-center gap-2 px-3 text-left transition hover:bg-ds-hover hover:text-ds-ink disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:bg-transparent disabled:hover:text-ds-muted"
+              >
+                <Folder className="h-3.5 w-3.5 shrink-0" strokeWidth={1.9} />
+                <span className="min-w-0 flex-1 truncate">{t('composerBrowseDesignDocs')}</span>
+              </button>
+            ) : null}
             {attachmentUploadEnabled ? (
               <>
                 {fileReferenceEnabled ? <div className="my-1 h-px bg-ds-border-muted/70" /> : null}
@@ -2074,6 +2113,46 @@ export function FloatingComposer({
                   ) : null}
                 </div>
               </div>
+            </div>
+          ) : null}
+          {contextChips.length > 0 ? (
+            <div className="flex flex-wrap items-center gap-2 px-1">
+              {contextChips.map((chip) => {
+                const Icon =
+                  chip.kind === 'design-target' || chip.kind === 'canvas-selection'
+                    ? Target
+                    : chip.kind === 'html-element'
+                      ? TypeIcon
+                      : Monitor
+                const title = chip.detail ? `${chip.label} - ${chip.detail}` : chip.label
+                const removable = chip.removable !== false && Boolean(onRemoveContextChip)
+                return (
+                  <span
+                    key={chip.id}
+                    className="ds-no-drag inline-flex h-7 max-w-full items-center gap-1.5 rounded-lg border border-accent/25 bg-accent/10 px-2 text-[12px] font-medium text-ds-muted"
+                    title={title}
+                  >
+                    <Icon className="h-3.5 w-3.5 shrink-0 text-accent" strokeWidth={1.8} />
+                    <span className="max-w-52 truncate text-ds-ink">{chip.label}</span>
+                    {chip.detail ? (
+                      <span className="hidden max-w-44 truncate text-ds-faint sm:inline">
+                        {chip.detail}
+                      </span>
+                    ) : null}
+                    {removable ? (
+                      <button
+                        type="button"
+                        onClick={() => onRemoveContextChip?.(chip.id)}
+                        className="rounded-full p-0.5 text-ds-faint transition hover:bg-ds-hover hover:text-ds-ink"
+                        aria-label={t('composerRemoveContext', 'Remove context')}
+                        title={t('composerRemoveContext', 'Remove context')}
+                      >
+                        <X className="h-3 w-3" strokeWidth={2} />
+                      </button>
+                    ) : null}
+                  </span>
+                )
+              })}
             </div>
           ) : null}
           <textarea

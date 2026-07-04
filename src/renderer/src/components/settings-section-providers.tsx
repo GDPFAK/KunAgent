@@ -29,6 +29,7 @@ import {
   MODEL_PROVIDER_PRESETS,
   TOKEN_PLAN_PROVIDER_ID_SUFFIX,
   defaultMiniMaxMediaGenerationKunPatch,
+  defaultModelRequestRetrySettings,
   defaultModelProviderSettings,
   getModelProviderPreset,
   modelProviderPresetProfile,
@@ -44,10 +45,12 @@ import {
   ChevronDown,
   Clapperboard,
   Download,
+  ExternalLink,
   Image as ImageIcon,
   KeyRound,
   Loader2,
   Lock,
+  LogIn,
   Mic,
   Music2,
   PlugZap,
@@ -80,7 +83,8 @@ const MODEL_ENDPOINT_FORMAT_LABEL_KEYS: Record<ModelEndpointFormat, string> = {
 
 const IMAGE_GENERATION_PROTOCOL_LABEL_KEYS: Record<ImageGenerationProtocol, string> = {
   'openai-images': 'imageGenProtocolOpenAi',
-  'minimax-image': 'imageGenProtocolMiniMax'
+  'minimax-image': 'imageGenProtocolMiniMax',
+  'codex-responses-image': 'imageGenProtocolCodex'
 }
 
 const SPEECH_TO_TEXT_PROTOCOL_LABEL_KEYS: Partial<Record<SpeechToTextProtocol, string>> = {
@@ -309,12 +313,337 @@ type ProbeState = {
 
 function providerPresetRequiresApiKey(provider: ModelProviderProfileV1): boolean {
   if (provider.id === 'litellm') return false
+  if (isCodexProvider(provider.id)) return false
   return Boolean(getModelProviderPreset(provider.id) || tokenPlanPresetForProfileId(provider.id))
+}
+
+function isCodexProvider(id: string): boolean {
+  return id === 'codex'
+}
+
+function parseCodexEmail(apiKey: string): string | undefined {
+  if (!apiKey.startsWith('{')) return undefined
+  try {
+    const parsed = JSON.parse(apiKey) as Record<string, unknown>
+    if (parsed.kind === 'codex-oauth' && typeof parsed.email === 'string') return parsed.email
+    if (parsed.kind === 'codex-oauth') return parsed.accountId as string
+  } catch { /* ignore */ }
+  return undefined
+}
+
+type CodexLoginPhase = 'idle' | 'browser' | 'device-starting' | 'polling' | 'error'
+
+function CodexLoginSection({
+  provider,
+  onCredentialChange,
+  t
+}: {
+  provider: ModelProviderProfileV1
+  onCredentialChange: (apiKey: string) => void
+  t: (key: string, params?: Record<string, unknown>) => string
+}): ReactElement {
+  const [phase, setPhase] = useState<CodexLoginPhase>('idle')
+  const [userCode, setUserCode] = useState('')
+  const [verifyUrl, setVerifyUrl] = useState('')
+  const [error, setError] = useState('')
+  const [notice, setNotice] = useState<InlineNotice | null>(null)
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const loginRunRef = useRef(0)
+  const codexEmail = parseCodexEmail(provider.apiKey)
+  const connected = Boolean(codexEmail)
+
+  const clearPoll = (): void => {
+    if (pollRef.current) clearInterval(pollRef.current)
+    pollRef.current = null
+  }
+
+  const beginLoginRun = (): number => {
+    clearPoll()
+    loginRunRef.current += 1
+    return loginRunRef.current
+  }
+
+  const isCurrentLoginRun = (runId: number): boolean => loginRunRef.current === runId
+
+  useEffect(() => {
+    return () => {
+      if (pollRef.current) clearInterval(pollRef.current)
+      loginRunRef.current += 1
+    }
+  }, [])
+
+  const startDeviceCodeLogin = async ({
+    runId = beginLoginRun(),
+    fallbackNotice = null
+  }: {
+    runId?: number
+    fallbackNotice?: InlineNotice | null
+  } = {}): Promise<void> => {
+    if (typeof window.kunGui?.startCodexAuth !== 'function') {
+      if (!isCurrentLoginRun(runId)) return
+      setPhase('error')
+      setError('Codex 登录不可用，请重启应用')
+      setNotice(null)
+      return
+    }
+    setPhase('device-starting')
+    setError('')
+    setNotice(fallbackNotice)
+    try {
+      const result = await window.kunGui.startCodexAuth()
+      if (!isCurrentLoginRun(runId)) return
+      if (!result.ok) {
+        setPhase('error')
+        setError(result.message)
+        setNotice(null)
+        return
+      }
+      setUserCode(result.userCode)
+      setVerifyUrl(result.url)
+      setPhase('polling')
+      const deviceCode = result.deviceCode
+      const uc = result.userCode
+      const interval = Math.max(result.interval, 2) * 1000
+      clearPoll()
+      pollRef.current = setInterval(async () => {
+        if (!isCurrentLoginRun(runId)) {
+          clearPoll()
+          return
+        }
+        if (typeof window.kunGui?.pollCodexAuth !== 'function') return
+        try {
+          const poll = await window.kunGui.pollCodexAuth(deviceCode, uc)
+          if (!isCurrentLoginRun(runId)) return
+          if (poll.done) {
+            clearPoll()
+            setNotice(null)
+            onCredentialChange(JSON.stringify(poll.credentials))
+            setPhase('idle')
+          } else if (poll.error) {
+            clearPoll()
+            setPhase('error')
+            setError(poll.error)
+            setNotice(null)
+          }
+        } catch (pollError) {
+          if (!isCurrentLoginRun(runId)) return
+          clearPoll()
+          setPhase('error')
+          setError(pollError instanceof Error ? pollError.message : String(pollError))
+          setNotice(null)
+        }
+      }, interval)
+    } catch (err) {
+      if (!isCurrentLoginRun(runId)) return
+      setPhase('error')
+      setError(err instanceof Error ? err.message : String(err))
+      setNotice(null)
+    }
+  }
+
+  const startBrowserLogin = async (): Promise<void> => {
+    const runId = beginLoginRun()
+    if (typeof window.kunGui?.startCodexBrowserAuth !== 'function') {
+      setPhase('error')
+      setError('Codex 浏览器登录不可用，请重启应用')
+      setNotice(null)
+      return
+    }
+    setPhase('browser')
+    setError('')
+    setNotice(null)
+    try {
+      const result = await window.kunGui.startCodexBrowserAuth()
+      if (!isCurrentLoginRun(runId)) return
+      if (result.ok) {
+        setNotice(null)
+        onCredentialChange(JSON.stringify(result.credentials))
+        setPhase('idle')
+      } else if (result.code === 'port_in_use') {
+        await startDeviceCodeLogin({
+          runId,
+          fallbackNotice: {
+            tone: 'info',
+            message: t('codexLoginPortBusyFallback')
+          }
+        })
+      } else {
+        setPhase('error')
+        setError(result.message)
+      }
+    } catch (err) {
+      if (!isCurrentLoginRun(runId)) return
+      setPhase('error')
+      setError(err instanceof Error ? err.message : String(err))
+      setNotice(null)
+    }
+  }
+
+  const cancelLogin = (): void => {
+    loginRunRef.current += 1
+    clearPoll()
+    setPhase('idle')
+    setError('')
+    setNotice(null)
+  }
+
+  const disconnect = (): void => {
+    loginRunRef.current += 1
+    clearPoll()
+    onCredentialChange('')
+    setPhase('idle')
+    setUserCode('')
+    setVerifyUrl('')
+    setNotice(null)
+  }
+
+  const openVerifyUrl = (): void => {
+    if (!verifyUrl) return
+    if (typeof window.kunGui?.openExternal === 'function') {
+      void window.kunGui.openExternal(verifyUrl).catch(() => {
+        window.open(verifyUrl, '_blank', 'noopener,noreferrer')
+      })
+      return
+    }
+    window.open(verifyUrl, '_blank', 'noopener,noreferrer')
+  }
+
+  if (connected) {
+    return (
+      <div className="flex items-center gap-2">
+        <span className="inline-block h-2 w-2 rounded-full bg-emerald-500" />
+        <span className="text-[13px] text-ds-ink">{codexEmail}</span>
+        <button
+          type="button"
+          className="ml-auto rounded-lg px-3 py-1.5 text-[12px] font-medium text-ds-muted hover:bg-ds-hover"
+          onClick={disconnect}
+        >
+          {t('codexDisconnect')}
+        </button>
+      </div>
+    )
+  }
+
+  if (phase === 'browser') {
+    return (
+      <div className="grid gap-2">
+        <p className="text-[13px] text-ds-muted">{t('codexBrowserOpened')}</p>
+        <div className="flex items-center gap-1.5 text-[12px] text-ds-muted">
+          <Loader2 className="h-3 w-3 animate-spin" />
+          {t('codexWaitingAuth')}
+        </div>
+        <button
+          type="button"
+          className="w-fit text-[12px] font-medium text-ds-muted hover:text-ds-ink"
+          onClick={cancelLogin}
+        >
+          {t('codexCancel')}
+        </button>
+      </div>
+    )
+  }
+
+  if (phase === 'device-starting') {
+    return (
+      <div className="grid gap-2">
+        {notice ? <InlineNoticeView notice={notice} /> : null}
+        <div className="flex items-center gap-1.5 text-[12px] text-ds-muted">
+          <Loader2 className="h-3 w-3 animate-spin" />
+          {t('codexPreparingDeviceLogin')}
+        </div>
+        <button
+          type="button"
+          className="w-fit text-[12px] font-medium text-ds-muted hover:text-ds-ink"
+          onClick={cancelLogin}
+        >
+          {t('codexCancel')}
+        </button>
+      </div>
+    )
+  }
+
+  if (phase === 'polling') {
+    return (
+      <div className="grid gap-2">
+        {notice ? <InlineNoticeView notice={notice} /> : null}
+        <p className="text-[13px] text-ds-muted">{t('codexEnterCode')}</p>
+        <div className="flex flex-wrap items-center gap-2">
+          <code className="rounded-lg bg-ds-hover px-3 py-1.5 text-[16px] font-mono font-bold tracking-widest text-ds-ink">
+            {userCode}
+          </code>
+          <button
+            type="button"
+            className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-accent/10 px-3 py-1.5 text-[12px] font-medium text-accent transition hover:bg-accent/20 disabled:cursor-not-allowed disabled:opacity-60"
+            onClick={openVerifyUrl}
+            disabled={!verifyUrl}
+          >
+            <ExternalLink className="h-3.5 w-3.5" strokeWidth={1.9} />
+            {t('codexOpenBrowser')}
+          </button>
+        </div>
+        <div className="flex items-center gap-1.5 text-[12px] text-ds-muted">
+          <Loader2 className="h-3 w-3 animate-spin" />
+          {t('codexWaitingAuth')}
+        </div>
+        <button
+          type="button"
+          className="w-fit text-[12px] font-medium text-ds-muted hover:text-ds-ink"
+          onClick={cancelLogin}
+        >
+          {t('codexCancel')}
+        </button>
+      </div>
+    )
+  }
+
+  return (
+    <div className="grid gap-2">
+      <button
+        type="button"
+        className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-accent px-4 py-2.5 text-[14px] font-semibold text-white shadow-sm transition hover:bg-accent/90"
+        onClick={startBrowserLogin}
+      >
+        <LogIn className="h-4 w-4" strokeWidth={1.9} />
+        {t('codexLoginButton')}
+      </button>
+      <button
+        type="button"
+        className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-ds-border bg-ds-card px-4 py-2 text-[12px] font-medium text-ds-muted transition hover:bg-ds-hover"
+        onClick={() => void startDeviceCodeLogin()}
+      >
+        <KeyRound className="h-3.5 w-3.5" strokeWidth={1.9} />
+        {t('codexLoginDeviceCodeFallback')}
+      </button>
+      {phase === 'error' && error ? (
+        <InlineNoticeView notice={{ tone: 'error', message: error }} />
+      ) : null}
+    </div>
+  )
 }
 
 const fieldLabelClass = 'grid gap-1.5 text-[12px] font-semibold text-ds-muted'
 const textInputClass =
   'w-full min-w-0 rounded-xl border border-ds-border bg-ds-card px-3 py-2 text-[14px] font-normal text-ds-ink shadow-sm focus:border-accent/40 focus:outline-none focus:ring-1 focus:ring-accent/30'
+const ENABLED_MODEL_REQUEST_RETRY_ATTEMPTS = 3
+
+function retryStatusCodesText(codes: readonly number[] | undefined): string {
+  return (codes?.length ? codes : defaultModelRequestRetrySettings().httpStatusCodes).join(',')
+}
+
+function providerRetrySettings(provider: ModelProviderProfileV1) {
+  return provider.retry ?? defaultModelRequestRetrySettings()
+}
+
+function parseRetryStatusCodes(value: string): number[] {
+  const codes = new Set<number>()
+  for (const part of value.split(/[\s,]+/)) {
+    const code = Number(part.trim())
+    if (Number.isInteger(code) && code >= 400 && code <= 599) codes.add(code)
+  }
+  return codes.size > 0
+    ? [...codes].sort((a, b) => a - b)
+    : defaultModelRequestRetrySettings().httpStatusCodes
+}
 
 function DetailSection({
   title,
@@ -507,6 +836,7 @@ export function ProvidersSettingsSection({ ctx }: { ctx: Record<string, any> }):
   const activeProvider =
     displayProviders.find((item) => item.id === selectedProviderId) ??
     modelProviders[0]
+  const activeRetry = activeProvider ? providerRetrySettings(activeProvider) : defaultModelRequestRetrySettings()
   const isDraftActive = Boolean(draftProvider && activeProvider?.id === draftProvider.id)
   const canEditActiveProviderId = Boolean(
     activeProvider &&
@@ -735,6 +1065,7 @@ export function ProvidersSettingsSection({ ctx }: { ctx: Record<string, any> }):
       apiKey: '',
       baseUrl: 'https://api.example.com/v1',
       endpointFormat: 'chat_completions',
+      retry: defaultModelRequestRetrySettings(),
       models: [],
       modelProfiles: {}
     })
@@ -1292,7 +1623,13 @@ export function ProvidersSettingsSection({ ctx }: { ctx: Record<string, any> }):
                   </div>
                 </DetailSection>
                 <DetailSection title={t('modelProviderSectionConnection')}>
-                  {isAgentSdkProvider(activeProvider) ? (
+                  {isCodexProvider(activeProvider.id) ? (
+                    <CodexLoginSection
+                      provider={activeProvider}
+                      onCredentialChange={(apiKey) => updateModelProvider(activeProvider.id, { apiKey })}
+                      t={t}
+                    />
+                  ) : isAgentSdkProvider(activeProvider) ? (
                     <ClaudeSubscriptionSection
                       provider={activeProvider}
                       onTokenChange={(token) => updateModelProvider(activeProvider.id, { apiKey: token })}
@@ -1301,34 +1638,36 @@ export function ProvidersSettingsSection({ ctx }: { ctx: Record<string, any> }):
                     />
                   ) : (
                     <>
-                  <label className={fieldLabelClass}>
-                    {t('modelProviderApiKey')}
-                    <SecretInput
-                      value={activeProvider.apiKey}
-                      onChange={(value) => updateModelProvider(activeProvider.id, { apiKey: value })}
-                      visible={showApiKey}
-                      onToggleVisibility={() => setShowApiKey((value: boolean) => !value)}
-                      placeholder={t('modelProviderApiKeyPlaceholder')}
-                      autoComplete="off"
-                      showLabel={t('showSecret')}
-                      hideLabel={t('hideSecret')}
-                    />
-                  </label>
-                  <label className={fieldLabelClass}>
-                    {t('modelProviderBaseUrl')}
-                    <input
-                      className={textInputClass}
-                      value={activeProvider.baseUrl}
-                      placeholder={t('baseUrlPlaceholder')}
-                      spellCheck={false}
-                      onChange={(e) => updateModelProvider(activeProvider.id, { baseUrl: e.target.value })}
-                    />
-                    {activeBaseUrlInvalid ? (
-                      <span className="text-[12px] font-normal text-amber-600 dark:text-amber-300">
-                        {t('modelProviderInvalidUrl')}
-                      </span>
-                    ) : null}
-                  </label>
+                      <label className={fieldLabelClass}>
+                        {t('modelProviderApiKey')}
+                        <SecretInput
+                          value={activeProvider.apiKey}
+                          onChange={(value) => updateModelProvider(activeProvider.id, { apiKey: value })}
+                          visible={showApiKey}
+                          onToggleVisibility={() => setShowApiKey((value: boolean) => !value)}
+                          placeholder={t('modelProviderApiKeyPlaceholder')}
+                          autoComplete="off"
+                          showLabel={t('showSecret')}
+                          hideLabel={t('hideSecret')}
+                        />
+                      </label>
+                      <label className={fieldLabelClass}>
+                        {t('modelProviderBaseUrl')}
+                        <input
+                          className={textInputClass}
+                          value={activeProvider.baseUrl}
+                          placeholder={t('baseUrlPlaceholder')}
+                          spellCheck={false}
+                          onChange={(e) => updateModelProvider(activeProvider.id, { baseUrl: e.target.value })}
+                        />
+                        {activeBaseUrlInvalid ? (
+                          <span className="text-[12px] font-normal text-amber-600 dark:text-amber-300">
+                            {t('modelProviderInvalidUrl')}
+                          </span>
+                        ) : null}
+                      </label>
+                    </>
+                  )}
                   {activeTokenPlanRegions.length > 0 ? (
                     <div className="flex flex-wrap items-center gap-1.5">
                       <span className="text-[12px] font-semibold text-ds-muted">
@@ -1372,6 +1711,7 @@ export function ProvidersSettingsSection({ ctx }: { ctx: Record<string, any> }):
                     <select
                       className={selectControlClass}
                       value={activeProvider.endpointFormat}
+                      disabled={isCodexProvider(activeProvider.id) || isAgentSdkProvider(activeProvider)}
                       onChange={(e) => updateModelProvider(activeProvider.id, {
                         endpointFormat: e.target.value as ModelEndpointFormat
                       })}
@@ -1383,13 +1723,90 @@ export function ProvidersSettingsSection({ ctx }: { ctx: Record<string, any> }):
                       ))}
                     </select>
                   </label>
-                  {activeProvider.endpointFormat === 'custom_endpoint' ? (
+                  {isCodexProvider(activeProvider.id) ? (
+                    <p className="text-[12px] leading-5 text-ds-muted">
+                      {t('codexEndpointLocked')}
+                    </p>
+                  ) : isAgentSdkProvider(activeProvider) ? (
+                    <p className="text-[12px] leading-5 text-ds-muted">
+                      {t('claudeEndpointLocked')}
+                    </p>
+                  ) : activeProvider.endpointFormat === 'custom_endpoint' ? (
                     <p className="text-[12px] leading-5 text-ds-muted">
                       {t('modelEndpointCustomEndpointDesc')}
                     </p>
                   ) : null}
-                    </>
-                  )}
+                </DetailSection>
+                <DetailSection
+                  title={t('modelProviderRetrySection')}
+                  action={
+                    <Toggle
+                      checked={activeRetry.maxAttempts > 0}
+                      onChange={(enabled) => updateModelProvider(activeProvider.id, {
+                        retry: {
+                          ...activeRetry,
+                          maxAttempts: enabled ? ENABLED_MODEL_REQUEST_RETRY_ATTEMPTS : 0
+                        }
+                      })}
+                    />
+                  }
+                >
+                  {activeRetry.maxAttempts > 0 ? (
+                    <div className="grid gap-3">
+                      <p className="text-[12px] leading-5 text-ds-faint">
+                        {t('modelProviderRetryStatusCodesHint')}
+                      </p>
+                      <div className="grid gap-3 md:grid-cols-3">
+                        <label className={fieldLabelClass}>
+                          {t('modelProviderRetryMaxAttempts')}
+                          <input
+                            type="number"
+                            min={1}
+                            max={10}
+                            step={1}
+                            className={textInputClass}
+                            value={activeRetry.maxAttempts}
+                            onChange={(e) => updateModelProvider(activeProvider.id, {
+                              retry: {
+                                ...activeRetry,
+                                maxAttempts: Math.min(10, Math.max(1, Math.round(Number(e.target.value) || 1)))
+                              }
+                            })}
+                          />
+                        </label>
+                        <label className={fieldLabelClass}>
+                          {t('modelProviderRetryInitialDelayMs')}
+                          <input
+                            type="number"
+                            min={0}
+                            max={600000}
+                            step={100}
+                            className={textInputClass}
+                            value={activeRetry.initialDelayMs}
+                            onChange={(e) => updateModelProvider(activeProvider.id, {
+                              retry: {
+                                ...activeRetry,
+                                initialDelayMs: Math.min(600_000, Math.max(0, Math.round(Number(e.target.value) || 0)))
+                              }
+                            })}
+                          />
+                        </label>
+                        <label className={fieldLabelClass}>
+                          {t('modelProviderRetryStatusCodes')}
+                          <input
+                            className={textInputClass}
+                            value={retryStatusCodesText(activeRetry.httpStatusCodes)}
+                            onChange={(e) => updateModelProvider(activeProvider.id, {
+                              retry: {
+                                ...activeRetry,
+                                httpStatusCodes: parseRetryStatusCodes(e.target.value)
+                              }
+                            })}
+                          />
+                        </label>
+                      </div>
+                    </div>
+                  ) : null}
                 </DetailSection>
                 <DetailSection
                   title={`${t('modelProviderModels')} · ${providerModelCount(activeProvider)}`}

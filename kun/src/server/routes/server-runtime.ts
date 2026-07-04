@@ -12,6 +12,10 @@ import type { RuntimeEventRecorder } from '../../services/runtime-event-recorder
 import type { LlmDebugRecorder } from '../../services/llm-debug-recorder.js'
 import type { RuntimeInfoResponse } from '../../contracts/runtime-info.js'
 import type {
+  RuntimeConfigApplyRequest,
+  RuntimeConfigApplyResponse
+} from '../../contracts/runtime-config.js'
+import type {
   McpOAuthAuthorizeResult,
   McpOAuthClearResult,
   McpOAuthDiagnostic,
@@ -26,6 +30,7 @@ import type {
   VideoGenDiagnostic
 } from '../../adapters/tool/media-gen-tool-provider.js'
 import type { SkillRuntimeDiagnostics } from '../../skills/skill-runtime.js'
+import type { InstructionRuntimeDiagnostics } from '../../instructions/instruction-runtime.js'
 import type { AttachmentDiagnostics } from '../../contracts/attachments.js'
 import type { AttachmentStore } from '../../attachments/attachment-store.js'
 import type { MemoryDiagnostics } from '../../contracts/memory.js'
@@ -36,6 +41,7 @@ import type { BackgroundShellRuntime } from '../../services/background-shell-run
 import type { ModelClient } from '../../ports/model-client.js'
 import type { RolesConfig } from '../../config/kun-config.js'
 import type { ImmutablePrefix } from '../../cache/immutable-prefix.js'
+import type { PublisherTrustStore } from '../../supplychain/publisher-trust-store.js'
 
 export type RuntimeToolDiagnostics = {
   providers: ToolProviderPolicy[]
@@ -44,6 +50,7 @@ export type RuntimeToolDiagnostics = {
   mcpSearch?: McpSearchRuntimeDiagnostic
   webProviders: WebProviderDiagnostic[]
   skills: SkillRuntimeDiagnostics
+  instructions?: InstructionRuntimeDiagnostics
   attachments: AttachmentDiagnostics
   memory: MemoryDiagnostics
   imageGen?: ImageGenDiagnostic[]
@@ -79,6 +86,7 @@ export type ServerRuntime = {
    */
   delegationRuntime?: DelegationRuntime
   backgroundShellRuntime?: BackgroundShellRuntime
+  supplyChainTrust?: PublisherTrustStore
   /**
    * Default ModelClient + model id for one-shot completions outside the
    * agent loop (e.g. AI-generated subagent profiles). Optional so test
@@ -110,12 +118,14 @@ export type ServerRuntime = {
     reviewItemId: string
     target: ReviewTarget
     model?: string
+    providerId?: string
   }): Promise<'completed' | 'failed' | 'aborted'> | void
   runtimeToken: string
   insecure: boolean
   allocateSeq: (threadId: string) => number
   nowIso: () => string
   info(): RuntimeInfoResponse
+  applyConfig(request: RuntimeConfigApplyRequest): Promise<RuntimeConfigApplyResponse>
   toolDiagnostics?(): RuntimeToolDiagnostics | Promise<RuntimeToolDiagnostics>
   mcpOAuth?(): McpOAuthDiagnostic[] | Promise<McpOAuthDiagnostic[]>
   clearMcpOAuth?(serverId?: string): Promise<McpOAuthClearResult>

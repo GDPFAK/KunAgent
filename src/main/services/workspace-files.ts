@@ -1,4 +1,4 @@
-import { clipboard } from 'electron'
+import { BrowserWindow, clipboard, dialog } from 'electron'
 import {
   mkdir,
   open as openFile,
@@ -32,6 +32,10 @@ import type {
   WorkspaceFileTarget,
   WorkspaceFileWritePayload,
   WorkspaceFileWriteResult,
+  WorkspaceImageBytesSavePayload,
+  WorkspaceImageBytesSaveResult,
+  WorkspaceImagePickPayload,
+  WorkspaceImagePickResult,
   WorkspaceImageReadResult,
   WorkspacePdfReadResult
 } from '../../shared/workspace-file'
@@ -61,6 +65,7 @@ const WORKSPACE_IMAGE_MIME_BY_EXT = new Map([
   ['.jpeg', 'image/jpeg'],
   ['.gif', 'image/gif'],
   ['.webp', 'image/webp'],
+  ['.svg', 'image/svg+xml'],
   ['.bmp', 'image/bmp'],
   ['.avif', 'image/avif'],
   ['.ico', 'image/x-icon']
@@ -202,10 +207,22 @@ export async function readWorkspacePdf(
 export async function writeWorkspaceFile(
   payload: WorkspaceFileWritePayload
 ): Promise<WorkspaceFileWriteResult> {
+  // Atomic write: stage into a sibling `.tmp` then `rename` over the target.
+  // On POSIX (and NTFS via Win32 MoveFileEx with REPLACE_EXISTING, which Node uses)
+  // this is atomic within a single filesystem, so a crash mid-write leaves the
+  // previous version intact rather than producing a half-written file.
   try {
     const targetPath = await resolveTargetPathWithinWorkspace(payload.path, payload.workspaceRoot)
     await mkdir(dirname(targetPath), { recursive: true })
-    await writeFile(targetPath, payload.content, 'utf8')
+    const tmpPath = `${targetPath}.${randomUUID()}.tmp`
+    try {
+      await writeFile(tmpPath, payload.content, 'utf8')
+      await rename(tmpPath, targetPath)
+    } catch (writeError) {
+      // Best-effort cleanup; ignore if the tmp file isn't there.
+      await unlink(tmpPath).catch(() => undefined)
+      throw writeError
+    }
     return {
       ok: true,
       path: targetPath,
@@ -267,6 +284,100 @@ export async function createWorkspaceDirectory(
 function buildWorkspaceImageName(now = new Date()): string {
   const iso = now.toISOString().replace(/[-:]/g, '').replace(/\..+$/, '').replace('T', '-')
   return `pasted-image-${iso}-${randomUUID().slice(0, 8)}.png`
+}
+
+function buildPickedImageName(ext: string, now = new Date()): string {
+  const iso = now.toISOString().replace(/[-:]/g, '').replace(/\..+$/, '').replace('T', '-')
+  const safeExt = /^\.[a-z0-9]{1,8}$/i.test(ext) ? ext.toLowerCase() : '.png'
+  return `image-${iso}-${randomUUID().slice(0, 8)}${safeExt}`
+}
+
+function buildAnnotatedImageName(now = new Date()): string {
+  const iso = now.toISOString().replace(/[-:]/g, '').replace(/\..+$/, '').replace('T', '-')
+  return `annotated-${iso}-${randomUUID().slice(0, 8)}.png`
+}
+
+/** Directory the design agent's `generate_image` writes to (and reads references from). */
+const GENERATED_IMAGE_DIR = '.deepseekgui-images'
+
+function readUInt24LE(buffer: Buffer, offset: number): number {
+  return buffer[offset] + (buffer[offset + 1] << 8) + (buffer[offset + 2] << 16)
+}
+
+function imageDimensionsFromBuffer(
+  buffer: Buffer,
+  ext: string
+): { width: number; height: number } | null {
+  const lowerExt = ext.toLowerCase()
+
+  if (
+    lowerExt === '.png' &&
+    buffer.length >= 24 &&
+    buffer[0] === 0x89 &&
+    buffer.toString('ascii', 1, 4) === 'PNG'
+  ) {
+    return {
+      width: buffer.readUInt32BE(16),
+      height: buffer.readUInt32BE(20)
+    }
+  }
+
+  if (
+    lowerExt === '.gif' &&
+    buffer.length >= 10 &&
+    (buffer.toString('ascii', 0, 6) === 'GIF87a' || buffer.toString('ascii', 0, 6) === 'GIF89a')
+  ) {
+    return {
+      width: buffer.readUInt16LE(6),
+      height: buffer.readUInt16LE(8)
+    }
+  }
+
+  if (lowerExt === '.webp' && buffer.length >= 30 && buffer.toString('ascii', 0, 4) === 'RIFF') {
+    const chunk = buffer.toString('ascii', 12, 16)
+    if (chunk === 'VP8X' && buffer.length >= 30) {
+      return {
+        width: readUInt24LE(buffer, 24) + 1,
+        height: readUInt24LE(buffer, 27) + 1
+      }
+    }
+  }
+
+  if (
+    (lowerExt === '.jpg' || lowerExt === '.jpeg') &&
+    buffer.length >= 4 &&
+    buffer[0] === 0xff &&
+    buffer[1] === 0xd8
+  ) {
+    let offset = 2
+    while (offset + 9 < buffer.length) {
+      if (buffer[offset] !== 0xff) {
+        offset += 1
+        continue
+      }
+      while (buffer[offset] === 0xff) offset += 1
+      const marker = buffer[offset]
+      offset += 1
+      if (marker === 0xd9 || marker === 0xda) break
+      if (offset + 2 > buffer.length) break
+      const length = buffer.readUInt16BE(offset)
+      if (length < 2 || offset + length > buffer.length) break
+      const isSof =
+        (marker >= 0xc0 && marker <= 0xc3) ||
+        (marker >= 0xc5 && marker <= 0xc7) ||
+        (marker >= 0xc9 && marker <= 0xcb) ||
+        (marker >= 0xcd && marker <= 0xcf)
+      if (isSof && length >= 7) {
+        return {
+          height: buffer.readUInt16BE(offset + 3),
+          width: buffer.readUInt16BE(offset + 5)
+        }
+      }
+      offset += length
+    }
+  }
+
+  return null
 }
 
 function buildClipboardTempImagePath(now = new Date()): string {
@@ -339,6 +450,111 @@ export async function saveWorkspaceClipboardImage(
       ok: true,
       path: targetPath,
       markdownPath: normalizePathSeparators(relative(dirname(currentFilePath), targetPath)),
+      createdAt: new Date().toISOString()
+    }
+  } catch (error) {
+    return {
+      ok: false,
+      message: error instanceof Error ? error.message : String(error)
+    }
+  }
+}
+
+/**
+ * Save raw image bytes (base64) into the workspace's generated-image directory.
+ * The design-canvas annotation editor flattens the picture + the user's markup
+ * into a PNG and calls this; the returned `workspaceRelativePath` is then used
+ * both as the shape's `imageUrl` and as the `generate_image` reference path, so
+ * it must land inside the workspace (where the reference resolver looks).
+ */
+export async function saveWorkspaceImageBytes(
+  payload: WorkspaceImageBytesSavePayload
+): Promise<WorkspaceImageBytesSaveResult> {
+  try {
+    const buffer = Buffer.from(payload.dataBase64, 'base64')
+    if (!buffer.length) {
+      return { ok: false, message: 'Image data is empty.' }
+    }
+
+    const imageDirectory = payload.imageDirectory?.trim() || GENERATED_IMAGE_DIR
+    const imageDir = await resolveTargetPathWithinWorkspace(imageDirectory, payload.workspaceRoot)
+    await mkdir(imageDir, { recursive: true })
+
+    const targetPath = await resolveTargetPathWithinWorkspace(
+      join(imageDir, buildAnnotatedImageName()),
+      payload.workspaceRoot
+    )
+    await writeFile(targetPath, buffer)
+
+    const workspacePath = await canonicalPath(resolve(expandHomePath(payload.workspaceRoot)))
+    return {
+      ok: true,
+      path: targetPath,
+      workspaceRelativePath: normalizePathSeparators(relative(workspacePath, targetPath)),
+      createdAt: new Date().toISOString()
+    }
+  } catch (error) {
+    return {
+      ok: false,
+      message: error instanceof Error ? error.message : String(error)
+    }
+  }
+}
+
+export async function pickAndSaveWorkspaceImage(
+  payload: WorkspaceImagePickPayload,
+  options?: { parentWindow?: BrowserWindow | null }
+): Promise<WorkspaceImagePickResult> {
+  try {
+    const parentWindow = options?.parentWindow ?? null
+    const result = parentWindow
+      ? await dialog.showOpenDialog(parentWindow, {
+          title: 'Pick an image',
+          properties: ['openFile'],
+          filters: [
+            { name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'avif'] }
+          ]
+        })
+      : await dialog.showOpenDialog({
+          title: 'Pick an image',
+          properties: ['openFile'],
+          filters: [
+            { name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'avif'] }
+          ]
+        })
+    if (result.canceled || result.filePaths.length === 0) {
+      return { ok: false, canceled: true }
+    }
+    const sourcePath = result.filePaths[0]
+    const buffer = await readFile(sourcePath)
+    if (!buffer.length) {
+      return { ok: false, message: 'Selected image is empty.' }
+    }
+    const imageDirectory = payload.imageDirectory?.trim() || WORKSPACE_IMAGE_DIR
+    const imageDir = await resolveTargetPathWithinWorkspace(imageDirectory, payload.workspaceRoot)
+    await mkdir(imageDir, { recursive: true })
+    const ext = extensionFromName(sourcePath)
+    const targetPath = await resolveTargetPathWithinWorkspace(
+      join(imageDir, buildPickedImageName(ext)),
+      payload.workspaceRoot
+    )
+    await writeFile(targetPath, buffer)
+    const workspacePath = await canonicalPath(resolve(expandHomePath(payload.workspaceRoot)))
+    const workspaceRelativePath = normalizePathSeparators(relative(workspacePath, targetPath))
+    const currentFilePath = payload.currentFilePath
+      ? await resolveOpenTargetPath(payload.currentFilePath, payload.workspaceRoot, {
+          allowBasenameFallback: false
+        })
+      : null
+    const dimensions = imageDimensionsFromBuffer(buffer, ext)
+    return {
+      ok: true,
+      path: targetPath,
+      relativePath: currentFilePath
+        ? normalizePathSeparators(relative(dirname(currentFilePath), targetPath))
+        : workspaceRelativePath,
+      workspaceRelativePath,
+      ...(dimensions ? { width: dimensions.width, height: dimensions.height } : {}),
       createdAt: new Date().toISOString()
     }
   } catch (error) {

@@ -3,16 +3,16 @@
 This document describes how the Kun desktop app should now be organized around one dedicated runtime,
 `Kun`, that serves the GUI through a single HTTP/SSE boundary.
 The conclusion is clear up front: the GUI keeps one agent with the only ID
-`kun`; Code, Write, and Connect phone all flow through the same `kun serve`
+`kun`; Code, Design, Write, and Connect phone all flow through the same `kun serve`
 HTTP/SSE boundary.
-Historical runtimes, painting/design entry points, runtime diagnostics panel,
+Historical runtimes, legacy painting/design starter entry points, runtime diagnostics panel,
 and agent switching are no longer shown as primary product surfaces.
 
 ## Target boundary
 
 ```text
 Renderer (React + Zustand)
-  Code / Write / Connect phone UI
+  Code / Design / Write / Connect phone UI
         |
         | window.kunGui.runtimeRequest(path, method, body)
         | window.kunGui.startSse(threadId, sinceSeq)
@@ -125,7 +125,9 @@ kept removed:
 - Settings provider selector: `Settings -> Agents` directly edits Kun config including:
   `binaryPath`, `port`, `autoStart`, `apiKey`, `baseUrl`, `runtimeToken`, `dataDir`,
   `model`, `approvalPolicy`, `sandboxMode`, `insecure`.
-- Painting/Design starter card is removed; only Code, Write, and Connect phone remain.
+- Legacy painting/design starter cards stay removed. The first-class workspace
+  entry points are Code, Design, and Write; Connect phone and automation keep
+  their own routes.
 
 ## Main / preload responsibilities to remove
 
@@ -157,7 +159,7 @@ Saved settings should now be just:
       "autoStart": true,
       "apiKey": "",
       "baseUrl": "https://api.deepseek.com/beta",
-      "runtimeToken": "",
+      "runtimeToken": "<generated-local-token>",
       "dataDir": "~/.kun/data",
       "model": "deepseek-v4-pro",
       "approvalPolicy": "auto",
@@ -179,11 +181,15 @@ from old settings:
 - Legacy Connect phone fields (internally still named Claw) `agentThreadIds` are collapsed
   to `agentThreadIds.kun`; per-provider maps are not retained.
 
-## Code / Write / Connect phone flows under Kun
+## Code / Design / Write / Connect phone flows under Kun
 
 - Code: `KunRuntimeProvider` handles list/create thread, send turn,
   steer, interrupt, compact, approval, and SSE mapping.
   Chat UI does not directly know about old providers.
+- Design: the design workspace creates or reuses Kun threads, persists drafts,
+  prototypes, and design graphs under `.kun-design/`, iterates through the
+  canvas, and can publish `DESIGN_SYSTEM.md` before opening a fresh Code thread
+  to implement the approved design.
 - Write: writing assistant and inline completion share the same Kun API key/base URL.
   Write thread registry identifies write threads as Kun threads only, with no legacy-runtime distinction.
 - Connect phone: scheduled tasks, Feishu/Lark/WeChat, and IM webhooks create or reuse Kun threads.
@@ -230,7 +236,7 @@ Legacy UI entrypoints should not reappear:
 - `ConnectionStatusBar`
 - `RuntimeDiagnosticsDialog`
 - `RuntimeInsightsPanel`
-- Design/Painting starter card
+- Legacy Design/Painting starter card outside Design mode
 
 ## Design constraints
 
@@ -263,11 +269,13 @@ Manual smoke checks:
 
 1. Open the Kun desktop app.
 2. Code can create a new session, send messages, stream output, and use approval/interruption.
-3. Write opens writing space; inline completion and inline selected-text assistant share API key.
-4. Connect phone can save settings, run manual tasks, and write thread IDs back to Kun mapping.
-5. `Settings -> Agents` shows only Kun, with no provider switch, runtime diagnostics,
+3. Design opens the canvas, can create or iterate a design artifact, preview/export
+   the prototype, and hand the approved design to a fresh Code thread.
+4. Write opens writing space; inline completion and inline selected-text assistant share API key.
+5. Connect phone can save settings, run manual tasks, and write thread IDs back to Kun mapping.
+6. `Settings -> Agents` shows only Kun, with no provider switch, runtime diagnostics,
    or historical provider blocks.
-6. If `GET /v1/usage?group_by=thread` returns history, home and footer no longer show
+7. If `GET /v1/usage?group_by=thread` returns history, home and footer no longer show
    blank “No usage yet”, but show token, turn, cache-hit indicators.
-7. Thread search, archive, fork/resume, and request_user_input answer/cancel flows all operate
+8. Thread search, archive, fork/resume, and request_user_input answer/cancel flows all operate
    through Kun HTTP paths.

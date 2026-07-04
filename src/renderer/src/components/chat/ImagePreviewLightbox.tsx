@@ -1,4 +1,4 @@
-import { useEffect, useId, useState, type ReactElement } from 'react'
+import { useEffect, useId, useState, type CSSProperties, type ReactElement } from 'react'
 import { createPortal } from 'react-dom'
 import { Download, Minus, Plus, X } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
@@ -22,6 +22,14 @@ const ZOOM_STEP = 0.25
 
 function clampZoom(value: number): number {
   return Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, value))
+}
+
+export function imagePreviewSizingStyle(zoom: number): CSSProperties {
+  const boundedZoom = clampZoom(zoom)
+  return {
+    maxWidth: `${boundedZoom * 100}%`,
+    maxHeight: `${boundedZoom * 100}%`
+  }
 }
 
 export function ImagePreviewLightbox({
@@ -62,14 +70,8 @@ export function ImagePreviewLightbox({
 
   const zoomPercent = `${Math.round(zoom * 100)}%`
   const canDownload = !downloadDisabled && (typeof onDownload === 'function' || Boolean(downloadHref))
-  const imageClass =
-    zoom === 1
-      ? 'max-h-full max-w-full object-contain'
-      : 'max-w-none object-contain'
-  const imageStyle =
-    zoom === 1
-      ? undefined
-      : { width: `${zoom * 100}%` }
+  const imageClass = 'h-auto w-auto shrink-0 object-contain'
+  const imageStyle = imagePreviewSizingStyle(zoom)
 
   const downloadControl = onDownload ? (
     <button

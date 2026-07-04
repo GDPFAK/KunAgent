@@ -4,6 +4,9 @@ import {
   DEFAULT_MUSIC_GENERATION_PROTOCOL,
   DEFAULT_MODEL_ENDPOINT_FORMAT,
   DEFAULT_MODEL_PROVIDER_ID,
+  DEFAULT_MODEL_REQUEST_RETRY_HTTP_STATUS_CODES,
+  DEFAULT_MODEL_REQUEST_RETRY_INITIAL_DELAY_MS,
+  DEFAULT_MODEL_REQUEST_RETRY_MAX_ATTEMPTS,
   NETWORK_PROXY_PROTOCOLS,
   DEFAULT_SPEECH_TO_TEXT_PROTOCOL,
   DEFAULT_TEXT_TO_SPEECH_PROTOCOL,
@@ -36,6 +39,7 @@ import {
   type ModelProviderReasoningCapabilityV1,
   type ModelProviderProfilePatchV1,
   type ModelProviderProfileV1,
+  type ModelRequestRetrySettingsV1,
   type ModelProviderSettingsPatchV1,
   type ModelProviderSettingsV1,
   type NetworkProxySettingsV1,
@@ -135,7 +139,13 @@ export function mergeModelProviderSettings(
 ): ModelProviderSettingsV1 {
   return normalizeModelProviderSettings({
     ...current,
-    ...(patch ?? {})
+    ...(patch ?? {}),
+    proxy: patch?.proxy
+      ? {
+          ...current.proxy,
+          ...patch.proxy
+        }
+      : current.proxy
   })
 }
 
@@ -785,6 +795,22 @@ function resolveProviderCapabilityModel(configuredModel: string, providerModels:
     : providerModels[0] ?? model
 }
 
+function resolveImageProviderCapabilityModel(
+  configuredModel: string,
+  image: ModelProviderImageCapabilityV1
+): string {
+  const fallback =
+    image.protocol === 'codex-responses-image' && image.models.includes('gpt-image-2')
+      ? 'gpt-image-2'
+      : image.models[0] ?? ''
+  const model = configuredModel.trim()
+  if (!model) return fallback
+  if (image.models.length === 0) return model
+  return image.models.some((providerModel) => providerModel.trim().toLowerCase() === model.toLowerCase())
+    ? model
+    : fallback || model
+}
+
 function tokenPlanPresetForProvider(provider: Pick<ModelProviderProfileV1, 'id'>) {
   if (!provider.id.endsWith(TOKEN_PLAN_PROVIDER_ID_SUFFIX)) return null
   const preset = getModelProviderPreset(provider.id.slice(0, -TOKEN_PLAN_PROVIDER_ID_SUFFIX.length))
@@ -827,7 +853,7 @@ export function resolveKunImageGenerationSettings(settings: AppSettingsV1): KunI
     protocol: image.protocol,
     baseUrl: resolveProviderCapabilityBaseUrl(provider, image, 'image'),
     apiKey: provider.apiKey.trim(),
-    model: resolveProviderCapabilityModel(imageGeneration.model, image.models)
+    model: resolveImageProviderCapabilityModel(imageGeneration.model, image)
   }
 }
 
@@ -855,6 +881,7 @@ export function resolveKunRuntimeSettings(settings: AppSettingsV1): KunRuntimeSe
         ? normalizeDeepseekBaseUrl(runtimeBaseUrl)
         : normalizeDeepseekBaseUrl(providerBaseUrl),
     endpointFormat: provider.endpointFormat,
+    retry: provider.retry ?? defaultModelRequestRetrySettings(),
     imageGeneration: resolveKunImageGenerationSettings(settings),
     speechToText: resolveKunSpeechToTextSettings(settings),
     textToSpeech: resolveKunTextToSpeechSettings(settings),
@@ -872,6 +899,7 @@ function defaultModelProviderProfile(apiKey: string, baseUrl: string): ModelProv
     apiKey: apiKey.trim(),
     baseUrl: normalizeModelProviderBaseUrl(baseUrl),
     endpointFormat: DEFAULT_MODEL_ENDPOINT_FORMAT,
+    retry: defaultModelRequestRetrySettings(),
     models: [...DEFAULT_COMPOSER_MODEL_IDS],
     modelProfiles: {
       'deepseek-v4-pro': deepseekTextModelProfile(),
@@ -907,6 +935,7 @@ function normalizeModelProviderProfile(
     apiKey: typeof input?.apiKey === 'string' ? input.apiKey.trim() : '',
     baseUrl,
     endpointFormat: normalizeModelEndpointFormat(input?.endpointFormat),
+    retry: normalizeModelRequestRetrySettings(input?.retry),
     ...(input?.kind === 'agent-sdk' ? { kind: 'agent-sdk' as const } : {}),
     models,
     modelProfiles,
@@ -916,6 +945,42 @@ function normalizeModelProviderProfile(
     ...(music ? { music } : {}),
     ...(video ? { video } : {})
   })
+}
+
+export function defaultModelRequestRetrySettings(): ModelRequestRetrySettingsV1 {
+  return {
+    maxAttempts: DEFAULT_MODEL_REQUEST_RETRY_MAX_ATTEMPTS,
+    initialDelayMs: DEFAULT_MODEL_REQUEST_RETRY_INITIAL_DELAY_MS,
+    httpStatusCodes: [...DEFAULT_MODEL_REQUEST_RETRY_HTTP_STATUS_CODES]
+  }
+}
+
+export function normalizeModelRequestRetrySettings(
+  input: Partial<ModelRequestRetrySettingsV1> | undefined
+): ModelRequestRetrySettingsV1 {
+  const defaults = defaultModelRequestRetrySettings()
+  return {
+    maxAttempts: boundedNonNegativeInteger(input?.maxAttempts, defaults.maxAttempts, 10),
+    initialDelayMs: boundedNonNegativeInteger(input?.initialDelayMs, defaults.initialDelayMs, 600_000),
+    httpStatusCodes: normalizeRetryHttpStatusCodes(input?.httpStatusCodes, defaults.httpStatusCodes)
+  }
+}
+
+function normalizeRetryHttpStatusCodes(input: unknown, fallback: readonly number[]): number[] {
+  const values = Array.isArray(input) ? input : fallback
+  const codes = new Set<number>()
+  for (const raw of values) {
+    const code = typeof raw === 'number' ? raw : Number(raw)
+    if (!Number.isInteger(code) || code < 400 || code > 599) continue
+    codes.add(code)
+  }
+  return codes.size > 0 ? [...codes].sort((a, b) => a - b) : [...fallback]
+}
+
+function boundedNonNegativeInteger(value: unknown, fallback: number, max = Number.MAX_SAFE_INTEGER): number {
+  const num = typeof value === 'number' ? value : Number(value)
+  if (!Number.isFinite(num)) return fallback
+  return Math.min(max, Math.max(0, Math.round(num)))
 }
 
 function deepseekTextModelProfile(): ModelProviderModelProfileV1 {
@@ -933,8 +998,8 @@ function deepseekTextModelProfile(): ModelProviderModelProfileV1 {
 /**
  * Stored provider settings may predate the capability metadata in the presets
  * (older saves carry empty modelProfiles). For known preset providers the
- * preset is the source of truth, so its profiles override stale stored ones;
- * stored profiles for models the preset does not know are kept.
+ * preset fills missing profiles, while stored profiles win so model edits made
+ * in Settings keep surviving normalization.
  */
 function withPresetModelProfiles(
   providerId: string,
@@ -944,7 +1009,7 @@ function withPresetModelProfiles(
   const presetProfiles = presetModelProfilesForProvider(providerId)
   if (!presetProfiles) return stored
   const knownModelKeys = new Set(models.map(normalizeModelKey).filter(Boolean))
-  const merged = { ...stored }
+  const merged: Record<string, ModelProviderModelProfileV1> = {}
   for (const [rawModelId, presetProfile] of Object.entries(presetProfiles)) {
     const modelId = normalizeModelKey(rawModelId)
     if (!modelId) continue
@@ -954,7 +1019,7 @@ function withPresetModelProfiles(
     }
     merged[modelId] = normalizeModelProviderModelProfile(presetProfile)
   }
-  return merged
+  return { ...merged, ...stored }
 }
 
 function presetModelProfilesForProvider(
@@ -1124,7 +1189,9 @@ function normalizeModelProviderImageCapability(
 }
 
 export function normalizeImageGenerationProtocol(value: unknown): ImageGenerationProtocol {
-  return value === 'minimax-image' ? 'minimax-image' : DEFAULT_IMAGE_GENERATION_PROTOCOL
+  if (value === 'minimax-image') return 'minimax-image'
+  if (value === 'codex-responses-image') return 'codex-responses-image'
+  return DEFAULT_IMAGE_GENERATION_PROTOCOL
 }
 
 function normalizeModelProviderSpeechCapability(

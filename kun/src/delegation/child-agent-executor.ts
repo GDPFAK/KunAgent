@@ -23,6 +23,7 @@ import type { SessionStore } from '../ports/session-store.js'
 import type { ThreadStore } from '../ports/thread-store.js'
 import type { ToolHost } from '../ports/tool-host.js'
 import type { SkillRuntime } from '../skills/skill-runtime.js'
+import type { InstructionRuntime } from '../instructions/instruction-runtime.js'
 import { RuntimeEventRecorder } from '../services/runtime-event-recorder.js'
 import { ThreadService } from '../services/thread-service.js'
 import { TurnService } from '../services/turn-service.js'
@@ -43,6 +44,7 @@ export type ChildAgentExecutorOptions = {
   nowIso?: () => string
   modelCapabilities?: (model: string) => ModelCapabilityMetadata
   skillRuntime?: SkillRuntime
+  instructionRuntime?: InstructionRuntime
   memoryStore?: MemoryStore
   artifactStore?: ArtifactStore
   /**
@@ -160,6 +162,7 @@ export function createChildAgentExecutor(options: ChildAgentExecutorOptions): Ch
       ...(blockedSkillIds ? { blockedSkillIds } : {}),
       ...(options.modelCapabilities ? { modelCapabilities: options.modelCapabilities } : {}),
       ...(options.skillRuntime ? { skillRuntime: options.skillRuntime } : {}),
+      ...(options.instructionRuntime ? { instructionRuntime: options.instructionRuntime } : {}),
       ...(options.memoryStore ? { memoryStore: options.memoryStore } : {}),
       ...(options.artifactStore ? { artifactStore: options.artifactStore } : {}),
       ...(options.contextCompaction ? { contextCompaction: options.contextCompaction } : {}),
@@ -205,6 +208,7 @@ export function createChildAgentExecutor(options: ChildAgentExecutorOptions): Ch
         model,
         mode: 'agent',
         reasoningEffort: normalizeRoleReasoningEffort(input.reasoningEffort),
+        ...(input.guiDesignCanvas ? { guiDesignCanvas: true } : {}),
         // Children have no GUI surface to answer structured input prompts.
         disableUserInput: true
       }

@@ -5,6 +5,7 @@ import {
   relativeWorkspacePath,
   type ComposerFileReference
 } from './composer-file-references'
+import { designDocumentComposerFileReferences } from '../design/design-document-file-reference'
 
 const FILE_MENTION_TEXT_EXTENSIONS = new Set([
   '.astro',
@@ -81,6 +82,7 @@ const FILE_MENTION_MAX_DIRECTORIES = 200
 const FILE_MENTION_MAX_FILES = 1600
 const FILE_MENTION_MAX_DIRECTORY_SUGGESTIONS = 400
 const FILE_MENTION_CACHE_TTL_MS = 30_000
+const DESIGN_DOCUMENTS_INDEX_PATH = '.kun-design/documents.json'
 
 export type WorkspaceFileIndex = {
   files: ComposerFileReference[]
@@ -89,6 +91,52 @@ export type WorkspaceFileIndex = {
 }
 
 const workspaceFileIndexCache = new Map<string, WorkspaceFileIndex | Promise<WorkspaceFileIndex>>()
+
+type DesignDocumentIndexJson = {
+  id?: unknown
+  title?: unknown
+  order?: unknown
+  createdAt?: unknown
+}
+
+function normalizePathFragment(value: string): string {
+  return value.trim().replaceAll('\\', '/').replace(/\/+/g, '/').replace(/^\/+|\/+$/g, '')
+}
+
+function parseDesignDocumentDirectoryReferences(raw: string, workspaceRoot: string): ComposerFileReference[] {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw)
+  } catch {
+    return []
+  }
+  if (!parsed || typeof parsed !== 'object') return []
+  const documents = (parsed as { documents?: unknown }).documents
+  if (!Array.isArray(documents)) return []
+  const normalized = documents
+    .map((entry, fallbackOrder) => {
+      if (!entry || typeof entry !== 'object') return null
+      const source = entry as DesignDocumentIndexJson
+      if (typeof source.id !== 'string') return null
+      const id = normalizePathFragment(source.id)
+      if (!id || id.includes('/')) return null
+      const title = typeof source.title === 'string' && source.title.trim() ? source.title.trim() : id
+      const order = typeof source.order === 'number' && Number.isFinite(source.order) ? source.order : fallbackOrder
+      const createdAt = typeof source.createdAt === 'string' ? source.createdAt : ''
+      return { id, title, order, createdAt }
+    })
+    .filter((entry): entry is { id: string; title: string; order: number; createdAt: string } => entry !== null)
+    .sort((left, right) => left.order - right.order || left.createdAt.localeCompare(right.createdAt))
+  return designDocumentComposerFileReferences(normalized, workspaceRoot)
+}
+
+async function loadDesignDocumentDirectoryReferences(workspaceRoot: string): Promise<ComposerFileReference[]> {
+  if (typeof window.kunGui?.readWorkspaceFile !== 'function') return []
+  const result = await window.kunGui
+    .readWorkspaceFile({ workspaceRoot, path: DESIGN_DOCUMENTS_INDEX_PATH })
+    .catch(() => null)
+  return result && result.ok ? parseDesignDocumentDirectoryReferences(result.content, workspaceRoot) : []
+}
 
 export function isMentionableWorkspaceFile(entry: WorkspaceEntry): boolean {
   if (entry.type !== 'file') return false
@@ -146,7 +194,12 @@ async function buildWorkspaceFileIndex(root: string): Promise<WorkspaceFileIndex
     }
   }
 
-  return { files, directories, loadedAt: Date.now() }
+  const designDocumentDirectories = await loadDesignDocumentDirectoryReferences(root)
+  return {
+    files,
+    directories: mergeMentionCandidates(designDocumentDirectories, directories),
+    loadedAt: Date.now()
+  }
 }
 
 export async function loadWorkspaceFileIndex(workspaceRoot: string): Promise<WorkspaceFileIndex> {
@@ -175,6 +228,58 @@ export function filesUnderDirectory(
   dirRelativePath: string
 ): ComposerFileReference[] {
   return files.filter((file) => isFileWithinDirectory(file.relativePath, dirRelativePath))
+}
+
+export async function loadWorkspaceDirectoryContextFiles(
+  workspaceRoot: string,
+  dirRelativePath: string,
+  limit: number
+): Promise<ComposerFileReference[]> {
+  const root = workspaceRoot.trim()
+  const maxFiles = Math.max(0, Math.floor(limit))
+  if (!root || maxFiles <= 0 || typeof window.kunGui?.listWorkspaceDirectory !== 'function') return []
+
+  const files: ComposerFileReference[] = []
+  const queue: Array<{ path: string; depth: number }> = [
+    { path: normalizePathFragment(dirRelativePath), depth: 0 }
+  ]
+  const seenDirectories = new Set<string>()
+
+  while (
+    queue.length > 0 &&
+    seenDirectories.size < FILE_MENTION_MAX_DIRECTORIES &&
+    files.length < maxFiles
+  ) {
+    const current = queue.shift()
+    if (!current) break
+    const currentPath = current.path || root
+    const key = currentPath.toLowerCase()
+    if (seenDirectories.has(key)) continue
+    seenDirectories.add(key)
+
+    const result = await window.kunGui
+      .listWorkspaceDirectory({ workspaceRoot: root, path: currentPath })
+      .catch(() => null)
+    if (!result || !result.ok) continue
+
+    for (const entry of result.entries) {
+      if (entry.type === 'directory') {
+        if (FILE_MENTION_IGNORED_DIRS.has(entry.name.toLowerCase())) continue
+        if (current.depth < FILE_MENTION_MAX_DEPTH) {
+          queue.push({
+            path: relativeWorkspacePath(entry.path, root),
+            depth: current.depth + 1
+          })
+        }
+        continue
+      }
+      if (!isMentionableWorkspaceFile(entry)) continue
+      files.push(referenceFromEntry(entry, root, 'file'))
+      if (files.length >= maxFiles) break
+    }
+  }
+
+  return files
 }
 
 const workspaceMentionDirectoryCache = new Map<

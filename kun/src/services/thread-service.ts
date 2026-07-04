@@ -750,6 +750,7 @@ function rebuildTurnsFromItems(input: {
       activeSkillIds: [],
       injectedMemoryIds: [],
       injectedMemorySummaries: [],
+      injectedInstructionSources: [],
       createdAt: input.now,
       finishedAt: input.now,
       items: []
@@ -769,6 +770,7 @@ function rebuildTurnsFromItems(input: {
       activeSkillIds: [],
       injectedMemoryIds: [],
       injectedMemorySummaries: [],
+      injectedInstructionSources: [],
       createdAt: items[0]?.createdAt ?? input.now,
       finishedAt: input.now,
       items

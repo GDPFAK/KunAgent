@@ -130,6 +130,10 @@ let composerModelLoadPromise: Promise<void> | null = null
 
 export const useChatStore = create<ChatState>((set, get) => ({
   ...createInitialChatStoreState(i18n.t('common:workingDirectory')),
+  // Shared high-water mark de-duplicating delta replays across concurrent SSE
+  // sinks on long turns (design-rail duplicate-text fix). Not part of develop's
+  // split initial-state helper, so it's appended here.
+  liveDeltaSeqFloor: 0,
 
   ...createClawActions({
     set,

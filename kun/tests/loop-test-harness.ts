@@ -17,6 +17,7 @@ import { createThreadRecord } from '../src/domain/thread.js'
 import { createImmutablePrefix } from '../src/cache/immutable-prefix.js'
 import type { ModelClient, ModelRequest, ModelStreamChunk } from '../src/ports/model-client.js'
 import type { SkillRuntime } from '../src/skills/skill-runtime.js'
+import type { InstructionRuntime } from '../src/instructions/instruction-runtime.js'
 import type { AttachmentStore } from '../src/attachments/attachment-store.js'
 import type { ModelCapabilityMetadata } from '../src/contracts/capabilities.js'
 import type { MemoryStore } from '../src/memory/memory-store.js'
@@ -77,6 +78,7 @@ export function makeHarness(
     /** Pre-built tool host (e.g. with a delegation-kind provider). Overrides `tools`. */
     toolHost?: LocalToolHost
     skillRuntime?: SkillRuntime
+    instructionRuntime?: InstructionRuntime
     attachmentStore?: AttachmentStore
     memoryStore?: MemoryStore
     modelCapabilities?: (model: string) => ModelCapabilityMetadata
@@ -139,6 +141,7 @@ export function makeHarness(
     nowIso,
     nowMs,
     ...(options.skillRuntime ? { skillRuntime: options.skillRuntime } : {}),
+    ...(options.instructionRuntime ? { instructionRuntime: options.instructionRuntime } : {}),
     ...(options.attachmentStore ? { attachmentStore: options.attachmentStore } : {}),
     ...(options.memoryStore ? { memoryStore: options.memoryStore } : {}),
     ...(options.modelCapabilities ? { modelCapabilities: options.modelCapabilities } : {}),

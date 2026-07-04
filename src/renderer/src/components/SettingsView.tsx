@@ -48,6 +48,7 @@ import { useSettingsGuiUpdate } from './use-settings-gui-update'
 import {
   DEFAULT_WORKSPACE_ROOT,
   coerceRendererSettings,
+  diffSettingsPatch,
   hasValidPort,
   listSettingsText,
   mergeSettings,
@@ -55,6 +56,7 @@ import {
 } from './settings-utils'
 import { loadKunDiagnostics } from '../lib/load-kun-diagnostics'
 import { SETTINGS_CHANGED_EVENT, emitRendererSettingsChanged } from '../lib/keyboard-shortcut-settings'
+import { confirmDialog } from '../lib/confirm-dialog'
 import { GeneralSettingsSection } from './settings-section-general'
 
 const ProvidersSettingsSection = lazy(() =>
@@ -62,6 +64,9 @@ const ProvidersSettingsSection = lazy(() =>
 )
 const WriteSettingsSection = lazy(() =>
   import('./settings-section-write').then((module) => ({ default: module.WriteSettingsSection }))
+)
+const DesignSettingsSection = lazy(() =>
+  import('./settings-section-design').then((module) => ({ default: module.DesignSettingsSection }))
 )
 const MediaGenerationSettingsSection = lazy(() =>
   import('./settings-section-media-generation').then((module) => ({ default: module.MediaGenerationSettingsSection }))
@@ -122,7 +127,7 @@ function SettingsSectionFallback(): ReactElement {
   )
 }
 
-type SettingsCategory = 'general' | 'providers' | 'write' | 'mediaGeneration' | 'speechToText' | 'agents' | 'archives' | 'permissions' | 'worktree' | 'memory' | 'shortcuts' | 'easterEgg' | 'claw' | 'updates' | 'debug' | 'terminal'
+type SettingsCategory = 'general' | 'providers' | 'write' | 'design' | 'mediaGeneration' | 'speechToText' | 'agents' | 'archives' | 'permissions' | 'worktree' | 'memory' | 'shortcuts' | 'easterEgg' | 'claw' | 'updates' | 'debug' | 'terminal'
 type SaveStatus = 'idle' | 'saving' | 'saved' | 'error'
 type SettingsPatch = AppSettingsPatch
 type InlineNotice = {
@@ -194,6 +199,7 @@ export function SettingsView(): ReactElement {
   // exits that bypass goBack() (Esc, route changes, closing settings) don't
   // drop the last edit made within the 450ms debounce window (issue #602).
   const pendingSnapshotRef = useRef<AppSettingsV1 | null>(null)
+  const persistedSettingsRef = useRef<AppSettingsV1 | null>(null)
   const flushOnUnmountRef = useRef<() => void>(() => {})
   const agentsSectionRef = useRef<HTMLDivElement | null>(null)
   const skillSectionRef = useRef<HTMLDivElement | null>(null)
@@ -247,7 +253,11 @@ export function SettingsView(): ReactElement {
     void rendererRuntimeClient
       .getSettings({ forceRefresh: true })
       .then((s) => {
-        if (!cancelled) setForm(coerceRendererSettings(s))
+        if (!cancelled) {
+          const next = coerceRendererSettings(s)
+          persistedSettingsRef.current = next
+          setForm(next)
+        }
       })
       .catch((e: unknown) => {
         if (!cancelled) setLoadError(e instanceof Error ? e.message : String(e))
@@ -286,7 +296,11 @@ export function SettingsView(): ReactElement {
   useEffect(() => {
     const onSettingsChanged = (event: Event): void => {
       const next = (event as CustomEvent<AppSettingsV1>).detail
-      if (next) setForm(coerceRendererSettings(next))
+      if (next) {
+        const coerced = coerceRendererSettings(next)
+        persistedSettingsRef.current = coerced
+        setForm(coerced)
+      }
     }
     window.addEventListener(SETTINGS_CHANGED_EVENT, onSettingsChanged)
     return () => window.removeEventListener(SETTINGS_CHANGED_EVENT, onSettingsChanged)
@@ -343,6 +357,10 @@ export function SettingsView(): ReactElement {
       setCategory('write')
       return
     }
+    if (settingsSection === 'design') {
+      setCategory('design')
+      return
+    }
     if (settingsSection === 'imageGeneration') {
       setCategory('mediaGeneration')
       return
@@ -392,6 +410,7 @@ export function SettingsView(): ReactElement {
       settingsSection === 'general' ||
       settingsSection === 'providers' ||
       settingsSection === 'write' ||
+      settingsSection === 'design' ||
       settingsSection === 'imageGeneration' ||
       settingsSection === 'mediaGeneration' ||
       settingsSection === 'speechToText' ||
@@ -407,7 +426,7 @@ export function SettingsView(): ReactElement {
     }
     if (!agentsSectionReady) return
     const refs: Record<
-      Exclude<SettingsRouteSection, 'general' | 'providers' | 'write' | 'imageGeneration' | 'mediaGeneration' | 'speechToText' | 'archives' | 'claw' | 'shortcuts' | 'easterEgg' | 'updates' | 'terminal'>,
+      Exclude<SettingsRouteSection, 'general' | 'providers' | 'write' | 'design' | 'imageGeneration' | 'mediaGeneration' | 'speechToText' | 'archives' | 'claw' | 'shortcuts' | 'easterEgg' | 'updates' | 'terminal'>,
       HTMLDivElement | null
     > = {
       agents: agentsSectionRef.current,
@@ -647,11 +666,11 @@ export function SettingsView(): ReactElement {
     }
   }
 
-  const disableMemoryRecord = async (memoryId: string): Promise<void> => {
+  const setMemoryRecordDisabled = async (memoryId: string, disabled: boolean): Promise<void> => {
     const provider = getProvider()
     if (typeof provider.updateMemory !== 'function') return
     try {
-      const memory = await provider.updateMemory(memoryId, { disabled: true }, {
+      const memory = await provider.updateMemory(memoryId, { disabled }, {
         workspace: memoryMutationWorkspace(memoryId)
       })
       setMemoryRecords((records) => records.map((record) => record.id === memoryId ? memory : record))
@@ -663,7 +682,25 @@ export function SettingsView(): ReactElement {
     }
   }
 
+  const disableMemoryRecord = async (memoryId: string): Promise<void> => {
+    const confirmed = await confirmDialog(
+      t('memoryDisableConfirm'),
+      t('memoryDisableConfirmDetail')
+    )
+    if (!confirmed) return
+    await setMemoryRecordDisabled(memoryId, true)
+  }
+
+  const restoreMemoryRecord = async (memoryId: string): Promise<void> => {
+    await setMemoryRecordDisabled(memoryId, false)
+  }
+
   const deleteMemoryRecord = async (memoryId: string): Promise<void> => {
+    const confirmed = await confirmDialog(
+      t('memoryDeleteConfirm'),
+      t('memoryDeleteConfirmDetail')
+    )
+    if (!confirmed) return
     const provider = getProvider()
     if (typeof provider.deleteMemory !== 'function') return
     try {
@@ -695,13 +732,21 @@ export function SettingsView(): ReactElement {
     setSaveError(null)
 
     try {
+      const expandedSnapshot = expandSettingsHomePathsForUse(snapshot, settingsHomeDir, settingsPlatform)
+      const expandedBase = expandSettingsHomePathsForUse(
+        persistedSettingsRef.current ?? snapshot,
+        settingsHomeDir,
+        settingsPlatform
+      )
+      const patch = diffSettingsPatch(expandedBase, expandedSnapshot)
       const next = coerceRendererSettings(
-        await rendererRuntimeClient.setSettings(
-          expandSettingsHomePathsForUse(snapshot, settingsHomeDir, settingsPlatform)
-        )
+        Object.keys(patch).length > 0
+          ? await rendererRuntimeClient.setSettings(patch)
+          : await rendererRuntimeClient.getSettings({ forceRefresh: true })
       )
       if (version !== draftVersion.current) return
 
+      persistedSettingsRef.current = next
       setForm(next)
       emitRendererSettingsChanged(next)
       await applyI18n(next.locale)
@@ -774,10 +819,18 @@ export function SettingsView(): ReactElement {
     const snapshot = pendingSnapshotRef.current
     pendingSnapshotRef.current = null
     if (!snapshot || !hasValidPort(snapshot)) return
+    const expandedSnapshot = expandSettingsHomePathsForUse(snapshot, settingsHomeDir, settingsPlatform)
+    const expandedBase = expandSettingsHomePathsForUse(
+      persistedSettingsRef.current ?? snapshot,
+      settingsHomeDir,
+      settingsPlatform
+    )
+    const patch = diffSettingsPatch(expandedBase, expandedSnapshot)
     void rendererRuntimeClient
-      .setSettings(expandSettingsHomePathsForUse(snapshot, settingsHomeDir, settingsPlatform))
+      .setSettings(patch)
       .then((saved) => {
         const next = coerceRendererSettings(saved)
+        persistedSettingsRef.current = next
         emitRendererSettingsChanged(next)
         // App-wide effects the normal save path runs, so a last-moment locale or
         // UI-token edit still takes effect immediately rather than on next start.
@@ -1087,6 +1140,7 @@ export function SettingsView(): ReactElement {
     createMemoryRecord,
     updateMemoryRecord,
     disableMemoryRecord,
+    restoreMemoryRecord,
     deleteMemoryRecord,
     pickClawWorkspace,
     resetClawWorkspaceToDefault,
@@ -1161,6 +1215,7 @@ export function SettingsView(): ReactElement {
           <Suspense fallback={<SettingsSectionFallback />}>
             {category === 'providers' ? <ProvidersSettingsSection ctx={settingsSectionContext} /> : null}
             {category === 'write' ? <WriteSettingsSection ctx={settingsSectionContext} /> : null}
+            {category === 'design' ? <DesignSettingsSection ctx={settingsSectionContext} /> : null}
             {category === 'mediaGeneration' ? <MediaGenerationSettingsSection ctx={settingsSectionContext} /> : null}
             {category === 'speechToText' ? <SpeechToTextSettingsSection ctx={settingsSectionContext} /> : null}
             {category === 'agents' ? (

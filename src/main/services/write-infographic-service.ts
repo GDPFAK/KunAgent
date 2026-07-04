@@ -24,6 +24,7 @@ import {
   type ImageGenClient
 } from '../../../kun/src/adapters/tool/image-gen-tool-provider.js'
 import { detectImage } from '../../../kun/src/attachments/attachment-store.js'
+import { resolveCodexOAuthApiKey } from '../codex-auth'
 
 // Matches WORKSPACE_IMAGE_DIR in workspace-files.ts so infographics land in
 // the same workspace-level folder as pasted images.
@@ -142,7 +143,12 @@ export async function requestWriteInfographic(
   }
 
   const kind: WriteInfographicKind = request.kind ?? 'infographic'
-  const client = options.client ?? createImageGenClient(imageGeneration)
+  const imageAuth = resolveCodexOAuthApiKey(imageGeneration.apiKey)
+  const client = options.client ?? createImageGenClient({
+    ...imageGeneration,
+    apiKey: imageAuth.apiKey,
+    ...(imageAuth.headers ? { headers: imageAuth.headers } : {})
+  })
   // An explicit defaultSize wins: users set it when their provider only
   // accepts fixed sizes (e.g. gpt-image's 1024x1536). Otherwise use an
   // aspect ratio that suits the image kind.
@@ -165,6 +171,7 @@ export async function requestWriteInfographic(
         maxPromptChars: imagePromptMaxChars(imageGeneration)
       }),
       model: imageGeneration.model.trim(),
+      quality: imageGeneration.quality,
       ...(size && size !== 'auto' ? { size } : {}),
       timeoutMs: imageGeneration.timeoutMs,
       signal: AbortSignal.timeout(imageGeneration.timeoutMs)

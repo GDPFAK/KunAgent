@@ -23,14 +23,34 @@ const LEFT_PANEL_MIN = 280
 const LEFT_PANEL_MAX = 480
 const RIGHT_PANEL_MIN = 280
 const RIGHT_PANEL_MAX = 760
+const CODE_CANVAS_MAIN_MIN_WIDTH = 360
+const CODE_CANVAS_RIGHT_PANEL_MAX = Number.POSITIVE_INFINITY
 const SIDEBAR_HARD_MIN = 180
 const MAIN_MIN_WIDTH = 560
 const PANEL_RESIZE_HANDLE_WIDTH = 5
+// The code/chat workspace pins a fixed-width vertical action rail at the far
+// right edge; reserve its width so the resizable panels don't overrun it.
+export const RAIL_WIDTH = 48
 // Bottom terminal drawer sizing. The drawer lives below the chat stage and
 // resizes vertically, so it has its own clamps instead of the column widths.
 const TERMINAL_HEIGHT_DEFAULT = 360
 const TERMINAL_HEIGHT_MIN = 220
 const TERMINAL_HEIGHT_MAX = 760
+
+export type WorkbenchWidthConstraints = {
+  mainMinWidth: number
+  rightPanelMax: number
+}
+
+const DEFAULT_WIDTH_CONSTRAINTS: WorkbenchWidthConstraints = {
+  mainMinWidth: MAIN_MIN_WIDTH,
+  rightPanelMax: RIGHT_PANEL_MAX
+}
+
+const CODE_CANVAS_WIDTH_CONSTRAINTS: WorkbenchWidthConstraints = {
+  mainMinWidth: CODE_CANVAS_MAIN_MIN_WIDTH,
+  rightPanelMax: CODE_CANVAS_RIGHT_PANEL_MAX
+}
 
 function clampWidth(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value))
@@ -72,12 +92,23 @@ function persistRightPanelMode(mode: RightPanelMode): void {
   }
 }
 
-function fitWorkbenchWidths(
+export function workbenchWidthConstraintsForRightPanel(
+  route: AppRoute,
+  rightPanelMode: RightPanelMode
+): WorkbenchWidthConstraints {
+  if (route === 'chat' && rightPanelMode === 'canvas') return CODE_CANVAS_WIDTH_CONSTRAINTS
+  return DEFAULT_WIDTH_CONSTRAINTS
+}
+
+export function fitWorkbenchWidths(
   containerWidth: number,
   leftWidth: number,
   rightWidth: number,
-  panels: { leftPanelVisible: boolean; rightPanelVisible: boolean }
+  panels: { leftPanelVisible: boolean; rightPanelVisible: boolean },
+  constraints: WorkbenchWidthConstraints = DEFAULT_WIDTH_CONSTRAINTS
 ): { left: number; right: number } {
+  const mainMinWidth = constraints.mainMinWidth
+  const rightPanelMax = constraints.rightPanelMax
   const handleWidth =
     (panels.leftPanelVisible ? PANEL_RESIZE_HANDLE_WIDTH : 0) +
     (panels.rightPanelVisible ? PANEL_RESIZE_HANDLE_WIDTH : 0)
@@ -87,15 +118,15 @@ function fitWorkbenchWidths(
     if (!panels.rightPanelVisible) {
       return {
         left: clampWidth(leftWidth, LEFT_PANEL_MIN, LEFT_PANEL_MAX),
-        right: clampWidth(rightWidth, RIGHT_PANEL_MIN, RIGHT_PANEL_MAX)
+        right: clampWidth(rightWidth, RIGHT_PANEL_MIN, rightPanelMax)
       }
     }
-    const safeContainer = Math.max(usableWidth, MAIN_MIN_WIDTH + SIDEBAR_HARD_MIN)
+    const safeContainer = Math.max(usableWidth, mainMinWidth + SIDEBAR_HARD_MIN)
     const rightFloor =
-      safeContainer - MAIN_MIN_WIDTH >= RIGHT_PANEL_MIN ? RIGHT_PANEL_MIN : SIDEBAR_HARD_MIN
+      safeContainer - mainMinWidth >= RIGHT_PANEL_MIN ? RIGHT_PANEL_MIN : SIDEBAR_HARD_MIN
     const rightCeil = Math.min(
-      RIGHT_PANEL_MAX,
-      Math.max(rightFloor, safeContainer - MAIN_MIN_WIDTH)
+      rightPanelMax,
+      Math.max(rightFloor, safeContainer - mainMinWidth)
     )
     return {
       left: clampWidth(leftWidth, LEFT_PANEL_MIN, LEFT_PANEL_MAX),
@@ -105,24 +136,24 @@ function fitWorkbenchWidths(
 
   const safeContainer = Math.max(
     usableWidth,
-    MAIN_MIN_WIDTH + SIDEBAR_HARD_MIN + (panels.rightPanelVisible ? SIDEBAR_HARD_MIN : 0)
+    mainMinWidth + SIDEBAR_HARD_MIN + (panels.rightPanelVisible ? SIDEBAR_HARD_MIN : 0)
   )
   if (!panels.rightPanelVisible) {
     const leftFloor =
-      safeContainer - MAIN_MIN_WIDTH >= LEFT_PANEL_MIN ? LEFT_PANEL_MIN : SIDEBAR_HARD_MIN
+      safeContainer - mainMinWidth >= LEFT_PANEL_MIN ? LEFT_PANEL_MIN : SIDEBAR_HARD_MIN
     const leftCeil = Math.min(
       LEFT_PANEL_MAX,
-      Math.max(leftFloor, safeContainer - MAIN_MIN_WIDTH)
+      Math.max(leftFloor, safeContainer - mainMinWidth)
     )
     return {
       left: clampWidth(leftWidth, leftFloor, leftCeil),
-      right: clampWidth(rightWidth, RIGHT_PANEL_MIN, RIGHT_PANEL_MAX)
+      right: clampWidth(rightWidth, RIGHT_PANEL_MIN, rightPanelMax)
     }
   }
 
   const availableSides = Math.max(
     SIDEBAR_HARD_MIN * 2,
-    safeContainer - MAIN_MIN_WIDTH
+    safeContainer - mainMinWidth
   )
   const leftFloor =
     availableSides - SIDEBAR_HARD_MIN >= LEFT_PANEL_MIN ? LEFT_PANEL_MIN : SIDEBAR_HARD_MIN
@@ -130,7 +161,7 @@ function fitWorkbenchWidths(
     availableSides - SIDEBAR_HARD_MIN >= RIGHT_PANEL_MIN ? RIGHT_PANEL_MIN : SIDEBAR_HARD_MIN
 
   let nextLeft = clampWidth(leftWidth, leftFloor, LEFT_PANEL_MAX)
-  let nextRight = clampWidth(rightWidth, rightFloor, RIGHT_PANEL_MAX)
+  let nextRight = clampWidth(rightWidth, rightFloor, rightPanelMax)
 
   if (nextLeft + nextRight > availableSides) {
     const overflow = nextLeft + nextRight - availableSides
@@ -144,7 +175,7 @@ function fitWorkbenchWidths(
 
   const maxLeft = Math.min(LEFT_PANEL_MAX, availableSides - rightFloor)
   nextLeft = clampWidth(nextLeft, leftFloor, Math.max(leftFloor, maxLeft))
-  const maxRight = Math.min(RIGHT_PANEL_MAX, availableSides - nextLeft)
+  const maxRight = Math.min(rightPanelMax, availableSides - nextLeft)
   nextRight = clampWidth(nextRight, rightFloor, Math.max(rightFloor, maxRight))
 
   return { left: nextLeft, right: nextRight }
@@ -152,6 +183,8 @@ function fitWorkbenchWidths(
 
 export function useWorkbenchLayout({
   activeThreadId,
+  designAssistantOpen,
+  designImplementOpen,
   latestAutoOpenDevPreviewUrl,
   latestDevPreviewUrl,
   route,
@@ -159,6 +192,8 @@ export function useWorkbenchLayout({
   writeAssistantOpen
 }: {
   activeThreadId: string | null
+  designAssistantOpen: boolean
+  designImplementOpen: boolean
   latestAutoOpenDevPreviewUrl: string | null
   latestDevPreviewUrl: string | null
   route: AppRoute
@@ -183,7 +218,12 @@ export function useWorkbenchLayout({
   const shellRef = useRef<HTMLDivElement | null>(null)
   const previewThreadId = useRef<string | null>(activeThreadId)
   const autoOpenedPreviewUrlRef = useRef<string | null>(null)
-  const rightPanelVisible = route === 'write' ? writeAssistantOpen : rightPanelMode !== null
+  const rightPanelVisible = route === 'write'
+    ? writeAssistantOpen
+    : route === 'design'
+      ? designAssistantOpen || designImplementOpen
+      : rightPanelMode !== null
+  const widthConstraints = workbenchWidthConstraintsForRightPanel(route, rightPanelMode)
 
   useEffect(() => {
     persistWidth(LEFT_PANEL_WIDTH_KEY, leftSidebarWidth)
@@ -244,13 +284,15 @@ export function useWorkbenchLayout({
   }, [latestAutoOpenDevPreviewUrl, route])
 
   useEffect(() => {
-    if (route !== 'write') return
+    if (route !== 'write' && route !== 'design') return
     if (rightPanelMode !== null) setRightPanelMode(null)
   }, [route, rightPanelMode])
 
   useLayoutEffect(() => {
     const sync = (): void => {
-      const containerWidth = shellRef.current?.clientWidth ?? window.innerWidth
+      const containerWidth =
+        (shellRef.current?.clientWidth ?? window.innerWidth) -
+        (route === 'write' || route === 'design' ? 0 : RAIL_WIDTH)
       const next = fitWorkbenchWidths(
         containerWidth,
         leftSidebarWidth,
@@ -258,7 +300,8 @@ export function useWorkbenchLayout({
         {
           leftPanelVisible: !leftSidebarCollapsed,
           rightPanelVisible
-        }
+        },
+        widthConstraints
       )
       if (next.left !== leftSidebarWidth) setLeftSidebarWidth(next.left)
       if (next.right !== rightSidebarWidth) setRightSidebarWidth(next.right)
@@ -266,10 +309,23 @@ export function useWorkbenchLayout({
     sync()
     window.addEventListener('resize', sync)
     return () => window.removeEventListener('resize', sync)
-  }, [leftSidebarCollapsed, leftSidebarWidth, rightPanelVisible, rightSidebarWidth])
+  }, [
+    leftSidebarCollapsed,
+    leftSidebarWidth,
+    rightPanelMode,
+    rightPanelVisible,
+    rightSidebarWidth,
+    route,
+    widthConstraints
+  ])
 
   const toggleRightPanelMode = (nextMode: Exclude<RightPanelMode, null>): void => {
+    const willOpen = rightPanelMode !== nextMode
     setRightPanelMode((current) => (current === nextMode ? null : nextMode))
+    // The canvas wants room — bump the panel to the wider preview width on open.
+    if (willOpen && nextMode === 'canvas') {
+      setRightSidebarWidth((width) => Math.max(width, CODE_PANEL_PREFERRED))
+    }
   }
 
   const toggleLeftSidebar = (): void => {
@@ -295,7 +351,9 @@ export function useWorkbenchLayout({
     document.body.style.userSelect = 'none'
 
     const onMove = (moveEvent: PointerEvent): void => {
-      const containerWidth = shellRef.current?.clientWidth ?? window.innerWidth
+      const containerWidth =
+        (shellRef.current?.clientWidth ?? window.innerWidth) -
+        (route === 'write' || route === 'design' ? 0 : RAIL_WIDTH)
       const delta = moveEvent.clientX - startX
       const next = fitWorkbenchWidths(
         containerWidth,
@@ -304,7 +362,8 @@ export function useWorkbenchLayout({
         {
           leftPanelVisible: true,
           rightPanelVisible
-        }
+        },
+        widthConstraints
       )
       setLeftSidebarWidth(next.left)
       if (next.right !== rightSidebarWidth) setRightSidebarWidth(next.right)
@@ -333,7 +392,9 @@ export function useWorkbenchLayout({
     document.body.style.userSelect = 'none'
 
     const onMove = (moveEvent: PointerEvent): void => {
-      const containerWidth = shellRef.current?.clientWidth ?? window.innerWidth
+      const containerWidth =
+        (shellRef.current?.clientWidth ?? window.innerWidth) -
+        (route === 'write' || route === 'design' ? 0 : RAIL_WIDTH)
       const delta = moveEvent.clientX - startX
       const next = fitWorkbenchWidths(
         containerWidth,
@@ -342,7 +403,8 @@ export function useWorkbenchLayout({
         {
           leftPanelVisible: !leftSidebarCollapsed,
           rightPanelVisible: true
-        }
+        },
+        widthConstraints
       )
       if (next.left !== leftSidebarWidth) setLeftSidebarWidth(next.left)
       setRightSidebarWidth(next.right)

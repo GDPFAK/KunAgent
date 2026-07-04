@@ -2,6 +2,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { NormalizedThread } from '../agent/types'
 import { rendererRuntimeClient } from '../agent/runtime-client'
 import type { ChatState, ChatStoreGet, ChatStoreSet } from './chat-store-types'
+import type { BrowserStorageLike } from '../lib/browser-storage'
+import {
+  emptyDesignThreadRegistry,
+  markDesignThread,
+  saveDesignThreadRegistry
+} from '../design/design-thread-registry'
 
 const registryMock = vi.hoisted(() => ({
   getProvider: vi.fn()
@@ -34,6 +40,18 @@ function thread(overrides: Partial<NormalizedThread> & Pick<NormalizedThread, 'i
     workspace: overrides.workspace,
     ...(overrides.status ? { status: overrides.status } : {}),
     ...(overrides.archived !== undefined ? { archived: overrides.archived } : {})
+  }
+}
+
+class MemoryStorage implements BrowserStorageLike {
+  private readonly values = new Map<string, string>()
+
+  getItem(key: string): string | null {
+    return this.values.get(key) ?? null
+  }
+
+  setItem(key: string, value: string): void {
+    this.values.set(key, value)
   }
 }
 
@@ -186,6 +204,142 @@ describe('chat-store navigation workspace selection', () => {
     await expect(harness.actions.selectWorkspaceRoot('   ')).resolves.toBeNull()
     expect(setSettings).not.toHaveBeenCalled()
     expect(harness.state.activeThreadId).toBe('thr_default')
+  })
+
+  it('openCode does not keep a registered design thread active in Code mode', async () => {
+    const storage = new MemoryStorage()
+    saveDesignThreadRegistry(
+      markDesignThread(
+        '/Users/zxy/project',
+        'login',
+        'thr_design',
+        emptyDesignThreadRegistry()
+      ),
+      storage
+    )
+    vi.stubGlobal('window', { localStorage: storage })
+    const harness = buildHarness()
+    harness.state.activeThreadId = 'thr_design'
+    harness.state.workspaceRoot = '/Users/zxy/project'
+    harness.state.threads = [
+      thread({
+        id: 'thr_design',
+        title: 'Design Assistant',
+        workspace: '/Users/zxy/project',
+        updatedAt: '2026-06-12T10:00:00.000Z'
+      }),
+      thread({
+        id: 'thr_code',
+        title: 'Code task',
+        workspace: '/Users/zxy/project',
+        updatedAt: '2026-06-12T09:00:00.000Z'
+      })
+    ]
+
+    await harness.actions.openCode()
+
+    expect(harness.state.route).toBe('chat')
+    expect(harness.selectThread).toHaveBeenCalledWith('thr_code')
+  })
+
+  it('openCode does not keep a legacy design assistant thread active in Code mode', async () => {
+    const storage = new MemoryStorage()
+    storage.setItem(
+      'kun.design-assistant.threadRegistry.v1',
+      JSON.stringify({ '/Users/zxy/project': 'thr_legacy_design' })
+    )
+    vi.stubGlobal('window', { localStorage: storage })
+    const harness = buildHarness()
+    harness.state.activeThreadId = 'thr_legacy_design'
+    harness.state.workspaceRoot = '/Users/zxy/project'
+    harness.state.threads = [
+      thread({
+        id: 'thr_legacy_design',
+        title: 'Design Assistant',
+        workspace: '/Users/zxy/project',
+        updatedAt: '2026-06-12T10:00:00.000Z'
+      }),
+      thread({
+        id: 'thr_code',
+        title: 'Code task',
+        workspace: '/Users/zxy/project',
+        updatedAt: '2026-06-12T09:00:00.000Z'
+      })
+    ]
+
+    await harness.actions.openCode()
+
+    expect(harness.state.route).toBe('chat')
+    expect(harness.selectThread).toHaveBeenCalledWith('thr_code')
+  })
+
+  it('openCode clears an internal design workspace thread when no Code thread is available', async () => {
+    const harness = buildHarness()
+    harness.state.activeThreadId = 'thr_design'
+    harness.state.workspaceRoot = '/Users/zxy/project'
+    harness.state.blocks = [
+      { kind: 'user', id: 'u1', text: 'design this' },
+      { kind: 'assistant', id: 'a1', text: 'Done' }
+    ]
+    harness.state.threads = [
+      thread({
+        id: 'thr_design',
+        title: 'Design Assistant',
+        workspace: '/Users/zxy/.kun/design-workspace',
+        updatedAt: '2026-06-12T10:00:00.000Z'
+      })
+    ]
+
+    await harness.actions.openCode()
+
+    expect(harness.state.route).toBe('chat')
+    expect(harness.state.activeThreadId).toBeNull()
+    expect(harness.state.blocks).toEqual([])
+    expect(harness.selectThread).not.toHaveBeenCalled()
+  })
+
+  it('openDesign does not keep a code thread active in Design mode', () => {
+    const harness = buildHarness()
+    harness.state.activeThreadId = 'thr_code'
+    harness.state.route = 'chat'
+    harness.state.busy = true
+    harness.state.blocks = [
+      { kind: 'user', id: 'u1', text: 'hello' },
+      { kind: 'assistant', id: 'a1', text: 'How can I help?' }
+    ]
+    harness.state.threads = [
+      thread({
+        id: 'thr_code',
+        title: 'Code task',
+        workspace: '/Users/zxy/project'
+      })
+    ]
+
+    harness.actions.openDesign()
+
+    expect(harness.state.route).toBe('design')
+    expect(harness.state.activeThreadId).toBeNull()
+    expect(harness.state.blocks).toEqual([])
+    expect(harness.state.busy).toBe(false)
+    expect(harness.state.watchTurnCompletion).toEqual({ thr_code: true })
+    expect(harness.selectThread).not.toHaveBeenCalled()
+  })
+
+  it('clearActiveThreadSelection clears stale blocks and watches a running thread', () => {
+    const harness = buildHarness()
+    harness.state.activeThreadId = 'thr_old_design'
+    harness.state.busy = true
+    harness.state.blocks = [
+      { kind: 'user', id: 'u1', text: 'old design request' },
+      { kind: 'assistant', id: 'a1', text: 'old design answer' }
+    ]
+
+    harness.actions.clearActiveThreadSelection()
+
+    expect(harness.state.activeThreadId).toBeNull()
+    expect(harness.state.blocks).toEqual([])
+    expect(harness.state.busy).toBe(false)
+    expect(harness.state.watchTurnCompletion).toEqual({ thr_old_design: true })
   })
 })
 

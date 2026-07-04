@@ -226,6 +226,20 @@ describe('chat-store Claw helpers', () => {
     expect(fallbackComposerModel([], '')).toBe('')
   })
 
+  it('falls back to the first selectable provider model before built-in defaults', () => {
+    const groups: ModelProviderModelGroup[] = [{
+      providerId: 'minimax',
+      label: 'MiniMax',
+      modelIds: ['MiniMax-M3', 'MiniMax-M2']
+    }]
+
+    expect(fallbackComposerModel(
+      ['MiniMax-M3', 'MiniMax-M2', 'deepseek-v4-pro'],
+      'deepseek-v4-pro',
+      groups
+    )).toBe('MiniMax-M3')
+  })
+
   it('resolves context windows from the selected provider model profile', () => {
     const modelGroups: ModelProviderModelGroup[] = [
       {

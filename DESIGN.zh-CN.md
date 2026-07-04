@@ -288,7 +288,7 @@ i18n:
 brand:
   product_name: "Kun"
   tagline: "把 Kun 的本地智能体能力带进桌面窗口"
-  hero_kw: [Code, Write, Connect phone]
+  hero_kw: [Code, Design, Write, Connect phone]
   pillars:
     - "本地优先 (Local-first): settings, sessions, logs all on disk; model calls use your own DeepSeek API key."
     - "可观察 (Observable): every tool call, file change, reasoning step surfaces in the UI."
@@ -363,11 +363,12 @@ The product is **not** another chat shell. It exists to let a real
 agent do real work in a real project on a real machine, with the
 human staying in the loop on every mutating call.
 
-**Two workbenches plus connected entry points, one runtime:**
+**Three workspaces plus connected entry points, one runtime:**
 
 | Surface | Job to be done |
 | --- | --- |
 | **Code** | Bound to a local repo, drives the agent through tool calls, file changes, commands, and review. |
+| **Design** | Generates and iterates UI drafts, interactive HTML prototypes, design graphs, and a shared design system that can hand off to Code. |
 | **Write** | A long-form writing space: Markdown files, FIM completion, selection-scoped inline agent. |
 | **Connect phone** | Background automation: Feishu / Lark channels, webhook / relay, scheduled tasks. Internal route and storage names still use `claw` for compatibility. |
 
@@ -381,7 +382,7 @@ settings (API key, base URL, model), and the same visual system.
 These six rules are not aspirations — they are how the product is
 already built. New screens must follow them, not re-interpret them.
 
-1. **One runtime, one boundary.** Code, Write, and Connect phone all call
+1. **One runtime, one boundary.** Code, Design, Write, and Connect phone all call
    `kun serve` over `127.0.0.1:port`. The renderer never
    embeds an agent loop and never speaks a second protocol. This
    keeps upgrades and debugging boring.
@@ -664,12 +665,12 @@ If any box is unchecked, fix it before merging.
 ```text
 ┌─────────────────────────────────────────────────────────────┐
 │ Renderer (React 19 + Zustand 5)                             │
-│  AppShell  →  Workbench  →  (Code | Write | Connect phone) UI│
+│  AppShell  →  Workbench  →  (Code | Design | Write | Connect phone) UI│
 │       │                                                      │
-│       │ window.dsGui.runtimeRequest / startSse              │
+│       │ window.kunGui.runtimeRequest / startSse             │
 │       ▼                                                      │
 │ Preload (contextBridge, contextIsolated)                    │
-│  dsGui.* IPC surface                                         │
+│  kunGui.* IPC surface                                        │
 │       │                                                      │
 │       ▼                                                      │
 │ Main process (Node)                                          │
@@ -896,10 +897,10 @@ next replay skips them).
   file/git/editor helpers, Write services, IPC handlers, logger,
   GUI updater, macOS/Windows code-signing glue.
 - **Preload** (`src/preload/`) — `contextBridge` surface.
-  Exposes a typed `window.dsGui` API to the renderer. No Node
+  Exposes a typed `window.kunGui` API to the renderer. No Node
   access leaks into the renderer.
 - **Renderer** (`src/renderer/`) — Chromium process. React 19
-  SPA. Runs Code / Write / Connect phone UIs.
+  SPA. Runs Code / Design / Write / Connect phone UIs.
 
 ### 6.2 Module layout
 
@@ -917,7 +918,7 @@ src/
     logger.ts                       # structured logger
     resolve-kun-binary.ts     # CLI / dev-script / packaged binary resolver
   preload/
-    index.ts                        # contextBridge surface (window.dsGui)
+    index.ts                        # contextBridge surface (window.kunGui)
     index.d.ts                      # API type definitions
   shared/                           # types + constants shared by main and renderer
   renderer/
@@ -926,6 +927,7 @@ src/
       AppShell.tsx                  # routes Workbench / Settings / InitialSetup
       agent/                        # AgentProvider interface + Kun impl
       components/                   # Workbench, Settings, ChangeInspector, …
+      design/                       # Design-mode canvas, artifacts, prompts, graph, persistence
       hooks/
       lib/                          # formatters, helpers, plan store, etc.
       locales/{zh,en}/              # i18n
@@ -934,9 +936,9 @@ src/
       write/                        # Write-mode workspace, inline edit, RAG
 ```
 
-### 6.3 The dsGui API surface
+### 6.3 The kunGui API surface
 
-`window.dsGui` is the only thing the renderer is allowed to call
+`window.kunGui` is the only thing the renderer is allowed to call
 on the system. It includes:
 
 - `runtimeRequest(path, method, body)` — generic JSON request to
@@ -964,7 +966,7 @@ on the system. It includes:
   `checkGuiUpdate`, `downloadGuiUpdate`, `installGuiUpdate`,
   `onGuiUpdateState`, `logError`, `getLogPath`, `openLogDir`).
 
-Every method on this surface is typed in `src/shared/ds-gui-api.ts`
+Every method on this surface is typed in `src/shared/kun-gui-api.ts`
 and validated at the IPC boundary by Zod schemas in
 `src/main/ipc/app-ipc-schemas.ts`.
 
@@ -998,11 +1000,12 @@ application/json` header.
 ```text
 App
   └── AppShell  (Suspense)
-        ├── Workbench          (routes: chat / claw / write / plugins / schedule; claw = Connect phone)
+        ├── Workbench          (routes: chat / design / write / claw / plugins / schedule; claw = Connect phone)
         │     ├── Sidebar      (left, drag-resizable, 268 px)
         │     ├── Topbar       (translucent glass strip)
         │     ├── Center column
         │     │     ├── MessageTimeline  (Code / Connect phone)
+        │     │     ├── DesignWorkspaceView (Design)
         │     │     └── WriteWorkspaceView (Write)
         │     ├── Right inspector  (optional, 360 px)
         │     │     ├── ChangeInspector
@@ -1011,6 +1014,8 @@ App
         │     │     ├── PlanPanel
         │     │     ├── WorkspaceFilePreviewPanel
         │     │     ├── WriteAssistantPanel
+        │     │     ├── DesignAssistantPanel
+        │     │     ├── DesignImplementPanel
         │     │     └── SddAssistantPanel
         │     ├── PluginMarketplaceView  (route = 'plugins')
         │     └── ScheduleTasksView      (route = 'schedule')
@@ -1086,15 +1091,19 @@ block kind has its own renderer:
 ### 7.5 Workbench routes, one store
 
 The store distinguishes the main workbench and entry routes through `route`
-(`chat`, `write`, `claw`, `plugins`, `schedule`) plus thread metadata.
-The Code / Write mode switcher lives in the sidebar; Connect phone uses the
-legacy `claw` route internally. Switching does not change the runtime contract,
-only which renderer and local workflow state the store pulls in.
+(`chat`, `design`, `write`, `claw`, `plugins`, `schedule`, `workflow`) plus
+thread metadata. The Code / Design / Write mode switcher lives in the sidebar;
+Connect phone uses the legacy `claw` route internally. Switching does not change
+the runtime contract, only which renderer and local workflow state the store pulls in.
 
 - **Code** — default mode, full agent flow, workspace roots,
   todo panel, changes inspector, plan panel, file preview, and dev browser.
+- **Design** — design-thread registry isolates design sessions from Code, Write,
+  and Connect phone sessions. Artifacts persist under `.kun-design/`, the canvas
+  previews interactive HTML prototypes and graph outputs, and approved designs can
+  publish `DESIGN_SYSTEM.md` before opening a fresh Code thread.
 - **Write** — write-thread registry isolates Write sessions
-  from Code / Connect phone sessions. Uses the same Kun but a
+  from Code / Design / Connect phone sessions. Uses the same Kun but a
   separate `WRITE_ASSISTANT_THREAD_TITLE` namespace. Inline
   completion and selected-text agent go through dedicated
   main-process services.
@@ -1111,6 +1120,8 @@ only which renderer and local workflow state the store pulls in.
 | --- | --- | --- | --- |
 | Settings | OS app-data dir | JSON | `JsonSettingsStore` (main) |
 | Session list / workbench layout | `localStorage` | JSON | Renderer |
+| Design thread registry | `localStorage` | JSON | Renderer |
+| Design artifacts | workspace `.kun-design/` | HTML / PNG / JSON / Markdown | Renderer + Kun |
 | Write thread registry | `localStorage` | JSON | Renderer |
 | Connect phone channels | OS app-data dir | JSON | `JsonSettingsStore` |
 | Threads / turns / events | `~/.deepseekgui/kun` | JSON + JSONL | Kun |
@@ -1232,7 +1243,7 @@ postmortem timing.
   workspace inspector and the file/tool adapters.
 - **Renderer isolation** — `contextIsolation: true`, no
   `nodeIntegration`, no `webviewTag` exposure. The renderer
-  only sees the `window.dsGui` API surface.
+  only sees the `window.kunGui` API surface.
 - **External links** — `openExternal` is the only way to leave
   the app; URLs are validated against an allow-list.
 - **Markdown rendering** — `rehype-harden` strips unsafe
@@ -1334,7 +1345,7 @@ If any check fails, the change is not ready.
 | Child process | `src/main/kun-process.ts` |
 | Settings | `src/main/settings-store.ts`, `src/shared/app-settings.ts` |
 | IPC | `src/main/ipc/register-app-ipc-handlers.ts`, `src/main/ipc/app-ipc-schemas.ts` |
-| dsGui API | `src/preload/index.ts`, `src/shared/ds-gui-api.ts` |
+| kunGui API | `src/preload/index.ts`, `src/shared/kun-gui-api.ts` |
 | Agent provider | `src/renderer/src/agent/kun-runtime.ts` |
 | DTO mapping | `src/renderer/src/agent/kun-mapper.ts` |
 | App shell | `src/renderer/src/AppShell.tsx` |

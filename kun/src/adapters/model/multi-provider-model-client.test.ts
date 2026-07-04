@@ -110,4 +110,55 @@ describe('MultiProviderModelClient', () => {
     expect((router.configFor('minimax-token-plan') as { endpointFormat?: string }).endpointFormat).toBe('messages')
     expect((router.configFor('unknown-provider') as { baseUrl?: string }).baseUrl).toBe('https://default.example/v1')
   })
+
+  it('routes new requests through replaced default and provider clients', async () => {
+    const oldDefaultCalls: CapturedCall[] = []
+    const newDefaultCalls: CapturedCall[] = []
+    const oldProviderCalls: CapturedCall[] = []
+    const newProviderCalls: CapturedCall[] = []
+    const router = new MultiProviderModelClient({
+      default: new CompatModelClient({
+        baseUrl: 'https://old-default.example/v1',
+        apiKey: 'sk-old-default',
+        model: 'old-default',
+        fetchImpl: fakeFetch(oldDefaultCalls)
+      }),
+      providers: new Map([
+        ['hot-provider', new CompatModelClient({
+          baseUrl: 'https://old-provider.example/v1',
+          apiKey: 'sk-old-provider',
+          model: 'old-provider',
+          fetchImpl: fakeFetch(oldProviderCalls)
+        })]
+      ])
+    })
+
+    await drain(router.stream(request('old-provider', 'hot-provider')))
+    router.replace({
+      default: new CompatModelClient({
+        baseUrl: 'https://new-default.example/v1',
+        apiKey: 'sk-new-default',
+        model: 'new-default',
+        fetchImpl: fakeFetch(newDefaultCalls)
+      }),
+      providers: new Map([
+        ['hot-provider', new CompatModelClient({
+          baseUrl: 'https://new-provider.example/v1',
+          apiKey: 'sk-new-provider',
+          model: 'new-provider',
+          fetchImpl: fakeFetch(newProviderCalls)
+        })]
+      ])
+    })
+
+    await drain(router.stream(request('new-default')))
+    await drain(router.stream(request('new-provider', 'hot-provider')))
+
+    expect(router.model).toBe('new-default')
+    expect(oldProviderCalls).toHaveLength(1)
+    expect(oldDefaultCalls).toHaveLength(0)
+    expect(newDefaultCalls).toHaveLength(1)
+    expect(newProviderCalls).toHaveLength(1)
+    expect(newProviderCalls[0].authorization).toBe('Bearer sk-new-provider')
+  })
 })

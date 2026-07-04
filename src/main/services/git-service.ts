@@ -2,7 +2,7 @@ import { execFile } from 'node:child_process'
 import { randomBytes } from 'node:crypto'
 import { access, mkdir, realpath } from 'node:fs/promises'
 import { homedir } from 'node:os'
-import { basename, join } from 'node:path'
+import { basename, join, normalize } from 'node:path'
 import { promisify } from 'node:util'
 import type {
   GitBranchesResult,
@@ -77,6 +77,10 @@ function resolveBranchWorktreeRoot(worktreeRoot?: string): string {
   return worktreeRoot?.trim() || join(homedir(), '.kun', 'worktrees')
 }
 
+function normalizeGitPath(path: string): string {
+  return normalize(path)
+}
+
 async function allocateBranchWorktreePath(
   sourceRepositoryRoot: string,
   worktreeRoot?: string
@@ -96,7 +100,7 @@ async function getPrimaryWorktreeRoot(cwd: string, fallback: string): Promise<st
     const { stdout } = await runGit(cwd, ['worktree', 'list', '--porcelain'])
     const line = stdout.split('\n').find((item) => item.startsWith('worktree '))
     const root = line?.slice('worktree '.length).trim()
-    return root || fallback
+    return root ? normalizeGitPath(root) : fallback
   } catch {
     return fallback
   }
@@ -120,7 +124,7 @@ function parseWorktreeListPorcelain(stdout: string): GitBranchWorktreeRow[] {
   let branch: string | null = null
   let head = ''
   const flush = (): void => {
-    if (path) rows.push({ path, branch, head })
+    if (path) rows.push({ path: normalizeGitPath(path), branch, head })
     path = ''
     branch = null
     head = ''
@@ -171,7 +175,7 @@ export async function getGitBranches(workspaceRoot: string): Promise<GitBranches
     return { ok: false, reason: 'no_workspace', message: 'No working directory selected.' }
   }
   try {
-    const repositoryRoot = (await runGit(cwd, ['rev-parse', '--show-toplevel'])).stdout.trim()
+    const repositoryRoot = normalizeGitPath((await runGit(cwd, ['rev-parse', '--show-toplevel'])).stdout.trim())
     const currentRaw = (await runGit(cwd, ['branch', '--show-current'])).stdout.trim()
     const currentBranch = currentRaw || null
     const branchLines = (await runGit(cwd, ['branch', '--format=%(refname:short)'])).stdout
@@ -261,7 +265,7 @@ export async function checkoutGitBranchWorktree(
   if (!cwd) return { ok: false, reason: 'no_workspace', message: 'No working directory selected.' }
   if (!branch) return { ok: false, reason: 'error', message: 'Branch name is required.' }
   try {
-    const currentRepositoryRoot = (await runGit(cwd, ['rev-parse', '--show-toplevel'])).stdout.trim()
+    const currentRepositoryRoot = normalizeGitPath((await runGit(cwd, ['rev-parse', '--show-toplevel'])).stdout.trim())
     const sourceRepositoryRoot = await getPrimaryWorktreeRoot(cwd, currentRepositoryRoot)
     const wtPath = await allocateBranchWorktreePath(sourceRepositoryRoot, worktreeRoot)
     const worktreeBranch = await allocateDerivedWorktreeBranch(cwd)
@@ -286,7 +290,7 @@ export async function createGitBranchWorktree(
   if (!branch) return { ok: false, reason: 'error', message: 'Branch name is required.' }
   try {
     await runGit(cwd, ['check-ref-format', '--branch', branch])
-    const currentRepositoryRoot = (await runGit(cwd, ['rev-parse', '--show-toplevel'])).stdout.trim()
+    const currentRepositoryRoot = normalizeGitPath((await runGit(cwd, ['rev-parse', '--show-toplevel'])).stdout.trim())
     const sourceRepositoryRoot = await getPrimaryWorktreeRoot(cwd, currentRepositoryRoot)
     const wtPath = await allocateBranchWorktreePath(sourceRepositoryRoot, worktreeRoot)
     await mkdir(join(wtPath, '..'), { recursive: true })
@@ -304,13 +308,15 @@ export async function listGitBranchWorktrees(
   const cwd = await resolveGitCwd(workspaceRoot)
   if (!cwd) return { ok: false, reason: 'no_workspace', message: 'No working directory selected.' }
   try {
-    const currentRepositoryRoot = (await runGit(cwd, ['rev-parse', '--show-toplevel'])).stdout.trim()
+    const currentRepositoryRoot = normalizeGitPath((await runGit(cwd, ['rev-parse', '--show-toplevel'])).stdout.trim())
     const sourceRepositoryRoot = await getPrimaryWorktreeRoot(cwd, currentRepositoryRoot)
-    const root = await realpath(resolveBranchWorktreeRoot(worktreeRoot)).catch(() => resolveBranchWorktreeRoot(worktreeRoot))
+    const root = normalizeGitPath(
+      await realpath(resolveBranchWorktreeRoot(worktreeRoot)).catch(() => resolveBranchWorktreeRoot(worktreeRoot))
+    )
     const { stdout } = await runGit(cwd, ['worktree', 'list', '--porcelain'])
     const worktrees = parseWorktreeListPorcelain(stdout)
       .filter((row) => row.path !== sourceRepositoryRoot)
-      .filter((row) => row.path === root || row.path.startsWith(`${root}/`))
+      .filter((row) => row.path === root || row.path.startsWith(`${root}\\`) || row.path.startsWith(`${root}/`))
     return {
       ok: true,
       repositoryRoot: sourceRepositoryRoot,

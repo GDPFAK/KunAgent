@@ -49,6 +49,53 @@ class SummaryModel implements ModelClient {
   }
 }
 
+describe('TurnService startTurn', () => {
+  it('persists per-turn provider ids for model routing', async () => {
+    const sessionStore = new InMemorySessionStore()
+    const threadStore = new InMemoryThreadStore()
+    const eventBus = new InMemoryEventBus()
+    const nowIso = () => '2026-06-18T00:00:00.000Z'
+    const events = new RuntimeEventRecorder({
+      eventBus,
+      sessionStore,
+      allocateSeq: (threadId) => eventBus.allocateSeq(threadId),
+      nowIso
+    })
+    const service = new TurnService({
+      threadStore,
+      sessionStore,
+      events,
+      inflight: new InflightTracker(),
+      steering: new SteeringQueue(),
+      compactor: new ContextCompactor(),
+      ids: new SequentialIdGenerator(),
+      nowIso
+    })
+    await threadStore.upsert(createThreadRecord({
+      id: 'thr_provider_turn',
+      title: 'Provider turn',
+      workspace: '/tmp/workspace',
+      model: 'deepseek-v4-pro'
+    }))
+
+    const started = await service.startTurn({
+      threadId: 'thr_provider_turn',
+      request: {
+        prompt: 'hello',
+        model: 'mimo-v2.5',
+        providerId: 'xiaomi-token-plan'
+      }
+    })
+
+    const thread = await threadStore.get('thr_provider_turn')
+    const turn = thread?.turns.find((item) => item.id === started.turnId)
+    expect(turn).toMatchObject({
+      model: 'mimo-v2.5',
+      providerId: 'xiaomi-token-plan'
+    })
+  })
+})
+
 describe('TurnService compact', () => {
   it('uses model summaries for manual compaction while preserving visible history', async () => {
     const sessionStore = new InMemorySessionStore()

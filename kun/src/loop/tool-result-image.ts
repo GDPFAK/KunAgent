@@ -141,6 +141,71 @@ function stripImagesFromOutput(output: unknown): unknown {
  * cheap (they only ever see a handful of base64 payloads). Operates on a
  * copy — the persisted session log is untouched.
  */
+/**
+ * How many of the most recent generated images to forward back to the model so a
+ * vision-capable design agent can SEE what it produced and self-review/regenerate.
+ * Small on purpose — the just-generated one for the current turn is the priority.
+ */
+export const MAX_FORWARDED_GENERATED_IMAGES = 1
+
+/** True for a successful generate_image tool result (no base64 persisted on it). */
+export function isGeneratedImageToolResult(item: TurnItem | undefined): boolean {
+  return Boolean(item) && item!.kind === 'tool_result' && item!.toolName === 'generate_image' && item!.isError !== true
+}
+
+/**
+ * Return a COPY of `history` where the most recent N successful generate_image
+ * results are augmented — IN MEMORY ONLY — into the model-visible image shape
+ * (`kind:'image'` + base64), reading the bytes via `resolve` (the caller wires it
+ * to the already-persisted attachment store / disk file). The persisted tool
+ * output is NEVER mutated, so the deliberate "no base64 in generate_image output"
+ * guard stays intact; the base64 lives only in this transient request copy.
+ * Reusing `kind:'image'` means the four downstream layers (model client vision
+ * forwarding, token estimate, economy, hygiene) handle it with zero extra wiring.
+ */
+export async function rehydrateGeneratedImagesForForward(
+  history: TurnItem[],
+  resolve: (output: Record<string, unknown>) => Promise<ToolResultImage | null>,
+  maxForwarded: number = MAX_FORWARDED_GENERATED_IMAGES
+): Promise<TurnItem[]> {
+  const keep = Math.max(0, Math.floor(maxForwarded))
+  if (keep === 0) return history
+  const targets: number[] = []
+  for (let index = history.length - 1; index >= 0 && targets.length < keep; index -= 1) {
+    if (isGeneratedImageToolResult(history[index])) targets.push(index)
+  }
+  if (targets.length === 0) return history
+  const resolved = new Map<number, ToolResultImage>()
+  await Promise.all(
+    targets.map(async (index) => {
+      const item = history[index]
+      if (item.kind !== 'tool_result' || !isRecord(item.output)) return
+      try {
+        const image = await resolve(item.output)
+        if (image) resolved.set(index, image)
+      } catch {
+        // graceful: a scope miss / missing file just means "no image forwarded"
+      }
+    })
+  )
+  if (resolved.size === 0) return history
+  return history.map((item, index) => {
+    const image = resolved.get(index)
+    if (!image || item.kind !== 'tool_result' || !isRecord(item.output)) return item
+    return {
+      ...item,
+      output: {
+        ...item.output,
+        kind: 'image',
+        mime_type: image.mimeType,
+        data_base64: image.dataBase64,
+        ...(image.width !== undefined ? { width: image.width } : {}),
+        ...(image.height !== undefined ? { height: image.height } : {})
+      }
+    }
+  })
+}
+
 export function capToolResultImages(history: TurnItem[], maxKept: number): TurnItem[] {
   const keep = Math.max(0, Math.floor(maxKept))
   const imageIndexes: number[] = []

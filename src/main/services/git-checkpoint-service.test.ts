@@ -22,6 +22,8 @@ beforeEach(async () => {
   execFileSync('git', ['init', '-b', 'main', repoRoot], { stdio: 'pipe' })
   execFileSync('git', ['-C', repoRoot, 'config', 'user.email', 'test@example.com'], { stdio: 'pipe' })
   execFileSync('git', ['-C', repoRoot, 'config', 'user.name', 'Test'], { stdio: 'pipe' })
+  execFileSync('git', ['-C', repoRoot, 'config', 'core.autocrlf', 'false'], { stdio: 'pipe' })
+  execFileSync('git', ['-C', repoRoot, 'config', 'core.eol', 'lf'], { stdio: 'pipe' })
   await writeFile(join(repoRoot, 'tracked.txt'), 'base\n')
   await writeFile(join(repoRoot, 'staged.txt'), 'staged base\n')
   execFileSync('git', ['-C', repoRoot, 'add', '.'], { stdio: 'pipe' })

@@ -56,6 +56,12 @@ const api = {
     ipcRenderer.invoke('claw:im-install:poll', { provider, deviceCode }),
   connectTelegramBot: (botToken, allowedChatIds) =>
     ipcRenderer.invoke('claw:im-install:telegram-token', { botToken, allowedChatIds }),
+  startCodexAuth: () =>
+    ipcRenderer.invoke('codex:auth:start'),
+  pollCodexAuth: (deviceCode, userCode) =>
+    ipcRenderer.invoke('codex:auth:poll', { deviceCode, userCode }),
+  startCodexBrowserAuth: () =>
+    ipcRenderer.invoke('codex:auth:browser'),
   pickWorkspaceDirectory: (defaultPath) =>
     ipcRenderer.invoke('workspace:pick-directory', defaultPath),
   pickLocalFiles: (defaultPath) =>
@@ -163,6 +169,10 @@ const api = {
     ipcRenderer.invoke('file:create-workspace-directory', payload),
   saveWorkspaceClipboardImage: (payload) =>
     ipcRenderer.invoke('file:save-workspace-clipboard-image', payload),
+  pickWorkspaceImage: (payload) =>
+    ipcRenderer.invoke('file:pick-workspace-image', payload),
+  saveWorkspaceImageBytes: (payload) =>
+    ipcRenderer.invoke('file:save-workspace-image-bytes', payload),
   readClipboardImage: () =>
     ipcRenderer.invoke('clipboard:read-image'),
   getPathForFile: (file) =>
@@ -185,6 +195,10 @@ const api = {
   },
   exportWriteDocument: (payload) =>
     ipcRenderer.invoke('write:export', payload),
+  exportMemoryMarkdown: (payload) =>
+    ipcRenderer.invoke('memory:export-markdown', payload),
+  exportDesignPrototype: (payload) =>
+    ipcRenderer.invoke('design:export-prototype', payload),
   copyWriteDocumentAsRichText: (payload) =>
     ipcRenderer.invoke('write:copy-rich-text', payload),
   requestWriteInlineCompletion: (payload) =>

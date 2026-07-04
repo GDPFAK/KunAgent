@@ -18,6 +18,7 @@ let updater: MockUpdater
 let nativeUpdater: EventEmitter
 let originalEnv: NodeJS.ProcessEnv
 let appVersion: string
+let appIsPackaged: boolean
 let mockedFiles: Map<string, string>
 let showMessageBox: ReturnType<typeof vi.fn>
 let openExternal: ReturnType<typeof vi.fn>
@@ -43,6 +44,7 @@ beforeEach(() => {
   updater = createUpdater()
   nativeUpdater = new EventEmitter()
   appVersion = '0.1.0'
+  appIsPackaged = true
   mockedFiles = new Map()
   showMessageBox = vi.fn().mockResolvedValue({ response: 1 })
   openExternal = vi.fn().mockResolvedValue(undefined)
@@ -59,7 +61,9 @@ beforeEach(() => {
   }))
   vi.doMock('electron', () => ({
     app: {
-      isPackaged: true,
+      get isPackaged() {
+        return appIsPackaged
+      },
       getAppPath: () => '/tmp/deepseek-gui-updater-test-app',
       getPath: () => '/tmp/deepseek-gui-updater-test-user-data',
       getVersion: () => appVersion,
@@ -265,6 +269,35 @@ describe('showPostUpdateReleaseNotes', () => {
     })
   })
 
+  it('does not show or overwrite release-note state in development', async () => {
+    appIsPackaged = false
+    appVersion = '0.1.0'
+    mockedFiles.set(versionStatePath, JSON.stringify({ lastSeenVersion: '0.2.0' }))
+    const module = await import('./gui-updater')
+    module.initializeGuiUpdater(() => null, () => 'stable')
+
+    await module.showPostUpdateReleaseNotes()
+
+    expect(showMessageBox).not.toHaveBeenCalled()
+    expect(JSON.parse(mockedFiles.get(versionStatePath) ?? '{}')).toEqual({
+      lastSeenVersion: '0.2.0'
+    })
+  })
+
+  it('does not show release notes when launching an older version', async () => {
+    appVersion = '0.1.0'
+    mockedFiles.set(versionStatePath, JSON.stringify({ lastSeenVersion: '0.2.0' }))
+    const module = await import('./gui-updater')
+    module.initializeGuiUpdater(() => null, () => 'stable')
+
+    await module.showPostUpdateReleaseNotes()
+
+    expect(showMessageBox).not.toHaveBeenCalled()
+    expect(JSON.parse(mockedFiles.get(versionStatePath) ?? '{}')).toEqual({
+      lastSeenVersion: '0.2.0'
+    })
+  })
+
   it('shows downloaded release notes once after the version changes', async () => {
     appVersion = '0.2.0'
     mockedFiles.set(
@@ -293,9 +326,30 @@ describe('showPostUpdateReleaseNotes', () => {
         buttons: ['查看更新日志', '稍后']
       })
     )
-    expect(openExternal).toHaveBeenCalledWith('https://deepseek-gui.com/changelog')
+    expect(openExternal).toHaveBeenCalledWith(
+      'https://github.com/KunAgent/Kun/blob/master/release/release-v0.2.0.md'
+    )
     expect(JSON.parse(mockedFiles.get(versionStatePath) ?? '{}')).toEqual({
       lastSeenVersion: '0.2.0'
     })
+  })
+
+  it('substitutes the version in a configured changelog URL', async () => {
+    process.env.KUN_CHANGELOG_URL = 'https://example.com/release/release-{version}.md'
+    appVersion = '0.2.1'
+    mockedFiles.set(
+      versionStatePath,
+      JSON.stringify({
+        lastSeenVersion: '0.2.0',
+        pendingUpdate: { version: '0.2.1' }
+      })
+    )
+    showMessageBox.mockResolvedValue({ response: 0 })
+    const module = await import('./gui-updater')
+    module.initializeGuiUpdater(() => null, () => 'stable')
+
+    await module.showPostUpdateReleaseNotes()
+
+    expect(openExternal).toHaveBeenCalledWith('https://example.com/release/release-v0.2.1.md')
   })
 })

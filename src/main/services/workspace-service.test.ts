@@ -10,13 +10,16 @@ vi.mock('electron', () => ({
   clipboard: {
     readImage: vi.fn()
   },
+  dialog: {
+    showOpenDialog: vi.fn()
+  },
   shell: {
     openPath: vi.fn(),
     showItemInFolder: vi.fn()
   }
 }))
 
-import { clipboard } from 'electron'
+import { clipboard, dialog } from 'electron'
 
 import {
   createWorkspaceDirectory,
@@ -29,6 +32,7 @@ import {
   readWorkspacePdf,
   renameWorkspaceEntry,
   resolveWorkspaceFile,
+  pickAndSaveWorkspaceImage,
   saveWorkspaceClipboardImage,
   writeWorkspaceFile
 } from './workspace-service'
@@ -40,6 +44,7 @@ describe('workspace-service boundary checks', () => {
 
   beforeEach(async () => {
     vi.mocked(clipboard.readImage).mockReset()
+    vi.mocked(dialog.showOpenDialog).mockReset()
     rootDir = await mkdtemp(join(tmpdir(), 'ds-gui-workspace-'))
     workspaceRoot = join(rootDir, 'workspace')
     outsideFile = join(rootDir, 'outside.txt')
@@ -242,6 +247,65 @@ describe('workspace-service boundary checks', () => {
     expect(result.path).toBe(await realpath(imagePath))
     expect(result.mimeType).toBe('image/png')
     expect(result.dataUrl).toBe('data:image/png;base64,iVBORw==')
+  })
+
+  it('picks workspace images with both html-relative and workspace-relative paths', async () => {
+    const sourceImage = join(rootDir, 'source.png')
+    const currentFilePath = join(workspaceRoot, '.kun-design', 'screen-a', 'v1.html')
+    await mkdir(dirname(currentFilePath), { recursive: true })
+    await writeFile(currentFilePath, '<!doctype html>', 'utf8')
+    await writeFile(
+      sourceImage,
+      Buffer.from([
+        0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+        0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
+        0x00, 0x00, 0x02, 0x80, 0x00, 0x00, 0x01, 0xe0
+      ])
+    )
+    vi.mocked(dialog.showOpenDialog).mockResolvedValue({
+      canceled: false,
+      filePaths: [sourceImage]
+    })
+
+    const result = await pickAndSaveWorkspaceImage({
+      workspaceRoot,
+      currentFilePath,
+      imageDirectory: 'img'
+    })
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.workspaceRelativePath).toMatch(/^img\/image-.+\.png$/)
+    expect(result.relativePath).toMatch(/^..\/..\/img\/image-.+\.png$/)
+    expect(result.width).toBe(640)
+    expect(result.height).toBe(480)
+  })
+
+  it('picks workspace images without a current file path for canvas use', async () => {
+    const sourceImage = join(rootDir, 'source.gif')
+    await writeFile(
+      sourceImage,
+      Buffer.from([
+        0x47, 0x49, 0x46, 0x38, 0x39, 0x61,
+        0x40, 0x01, 0xf0, 0x00
+      ])
+    )
+    vi.mocked(dialog.showOpenDialog).mockResolvedValue({
+      canceled: false,
+      filePaths: [sourceImage]
+    })
+
+    const result = await pickAndSaveWorkspaceImage({
+      workspaceRoot,
+      imageDirectory: 'img'
+    })
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.workspaceRelativePath).toMatch(/^img\/image-.+\.gif$/)
+    expect(result.relativePath).toBe(result.workspaceRelativePath)
+    expect(result.width).toBe(320)
+    expect(result.height).toBe(240)
   })
 
   it('reads supported workspace PDFs as base64 metadata without exposing raw paths', async () => {

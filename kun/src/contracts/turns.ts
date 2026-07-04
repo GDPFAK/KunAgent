@@ -56,12 +56,21 @@ export const InjectedMemorySummarySchema = z.object({
 })
 export type InjectedMemorySummary = z.infer<typeof InjectedMemorySummarySchema>
 
+export const InjectedInstructionSourceSchema = z.object({
+  scope: z.enum(['global', 'workspace']),
+  path: z.string().min(1),
+  bytes: z.number().int().nonnegative(),
+  truncated: z.boolean().default(false)
+})
+export type InjectedInstructionSource = z.infer<typeof InjectedInstructionSourceSchema>
+
 export const TurnSchema = z.object({
   id: z.string().min(1),
   threadId: z.string().min(1),
   status: TurnStatus,
   prompt: z.string(),
   model: z.string().optional(),
+  providerId: z.string().optional(),
   reasoningEffort: TurnReasoningEffortSchema.optional(),
   /** Steered text queued by the user mid-turn. Cleared on completion. */
   steering: z.array(z.string()).default([]),
@@ -74,11 +83,19 @@ export const TurnSchema = z.object({
   injectedMemoryIds: z.array(z.string().min(1)).default([]),
   injectedMemorySummaries: z.array(InjectedMemorySummarySchema).default([]),
   skillInjectionBytes: z.number().int().nonnegative().optional(),
+  injectedInstructionSources: z.array(InjectedInstructionSourceSchema).default([]),
+  instructionInjectionBytes: z.number().int().nonnegative().optional(),
   workspaceCheckpointId: z.string().min(1).optional(),
   toolCatalogFingerprint: z.string().optional(),
   toolCatalogToolCount: z.number().int().nonnegative().optional(),
   toolCatalogDrift: z.boolean().optional(),
   guiPlan: GuiPlanContextSchema.optional(),
+  /**
+   * True for renderer-owned design canvas turns. Kun advertises the
+   * `design_canvas` tool only for these turns; the renderer applies the
+   * returned ops to its canvas store.
+   */
+  guiDesignCanvas: z.boolean().optional(),
   /**
    * Optional per-turn mode override. When set, it takes precedence over
    * the thread mode for this turn (e.g. a Plan-mode turn inside an
@@ -91,6 +108,12 @@ export const TurnSchema = z.object({
    * rejects calls to them instead of blocking on a GUI answer.
    */
   disableUserInput: z.boolean().optional(),
+  /**
+   * True when this turn originated from an IM bridge. Kun exposes
+   * IM-only tools such as outbound attachment delivery only for these
+   * turns.
+   */
+  imContext: z.boolean().optional(),
   error: z.string().optional()
 })
 export type Turn = z.infer<typeof TurnSchema>
@@ -100,6 +123,7 @@ export const StartTurnRequest = z.object({
   displayText: z.string().optional(),
   messageSource: UserMessageSource.optional(),
   model: z.string().optional(),
+  providerId: z.string().optional(),
   reasoningEffort: TurnReasoningEffortSchema.optional(),
   approvalPolicy: ApprovalPolicySchema.optional(),
   sandboxMode: SandboxModeSchema.optional(),
@@ -127,11 +151,21 @@ export const StartTurnRequest = z.object({
    */
   guiPlan: GuiPlanContextSchema.optional(),
   /**
+   * True for renderer-owned design canvas turns. Enables the `design_canvas`
+   * tool for this turn only.
+   */
+  guiDesignCanvas: z.boolean().optional(),
+  /**
    * True when the caller cannot relay structured input prompts to a
    * user (IM bridges such as WeChat/Feishu, headless runs). The turn
    * runs without the `user_input`/`request_user_input` tools.
    */
-  disableUserInput: z.boolean().optional()
+  disableUserInput: z.boolean().optional(),
+  /**
+   * True when the turn is handled through an IM bridge. This gates
+   * IM-only tool exposure separately from generic headless turns.
+   */
+  imContext: z.boolean().optional()
 })
 export type StartTurnRequest = z.input<typeof StartTurnRequest>
 

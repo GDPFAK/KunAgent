@@ -1,7 +1,12 @@
 import { describe, expect, test } from 'vitest'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { createAgentSdkRuntime, resolveTurnPlanContext, waitForGate } from './agent-sdk-runtime-factory.js'
+import { KunCapabilitiesConfig } from '../../contracts/capabilities.js'
 import type { ThreadRecord } from '../../contracts/threads.js'
 import type { UserInputGate, UserInputRequest, UserInputResolution } from '../../ports/user-input-gate.js'
+import { InstructionRuntime } from '../../instructions/instruction-runtime.js'
 
 function fakeGate(pending: Promise<UserInputResolution>): {
   gate: UserInputGate
@@ -139,5 +144,69 @@ describe('createAgentSdkRuntime handlesProvider', () => {
     expect(r.handlesProvider(undefined)).toBe(true) // default turn → SDK (the reported 401 case)
     expect(r.handlesProvider('claude-subscription')).toBe(true)
     expect(r.handlesProvider('deepseek')).toBe(false) // an explicit HTTP provider stays HTTP
+  })
+})
+
+describe('createAgentSdkRuntime turn context', () => {
+  test('injects native AGENTS.md instructions and records turn metadata', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'kun-sdk-instructions-'))
+    try {
+      const home = join(root, 'home')
+      const workspace = join(root, 'workspace')
+      await mkdir(workspace, { recursive: true })
+      await writeFile(join(workspace, 'AGENTS.md'), 'SDK workspace rule.', 'utf8')
+      const updatedMetadata: unknown[] = []
+      const runtime = createAgentSdkRuntime({
+        registry: { listTools: () => [] } as never,
+        turns: {
+          updateTurnMetadata: async (_threadId: string, _turnId: string, patch: unknown) => {
+            updatedMetadata.push(patch)
+          }
+        } as never,
+        sessionStore: {
+          loadItems: async () => [{
+            id: 'item_user',
+            turnId: 'tn',
+            threadId: 'th',
+            kind: 'user_message',
+            role: 'user',
+            status: 'completed',
+            text: 'hello',
+            createdAt: '2026-07-03T00:00:00.000Z'
+          }]
+        } as never,
+        threadStore: {
+          get: async () => threadWith({
+            id: 'th',
+            workspace,
+            providerId: 'claude-subscription',
+            turns: [{ id: 'tn', prompt: 'hello' } as ThreadRecord['turns'][number]]
+          })
+        } as never,
+        events: {} as never,
+        ids: { next: (p: string) => p },
+        prefix: { systemPrompt: '' },
+        providerConfigs: { 'claude-subscription': { kind: 'agent-sdk', apiKey: 'tok' } } as never,
+        agentSdkProviderIds: new Set(['claude-subscription']),
+        defaultApprovalPolicy: 'auto',
+        instructionRuntime: new InstructionRuntime(
+          KunCapabilitiesConfig.parse({ instructions: { enabled: true } }).instructions,
+          { homeDir: home }
+        )
+      })
+      const deps = (runtime as unknown as {
+        deps: { loadTurnContext(threadId: string, turnId: string): Promise<{ contextInstructions?: string[] } | null> }
+      }).deps
+
+      const ctx = await deps.loadTurnContext('th', 'tn')
+
+      expect(ctx?.contextInstructions?.join('\n')).toContain('SDK workspace rule.')
+      expect(updatedMetadata[0]).toMatchObject({
+        injectedInstructionSources: [expect.objectContaining({ scope: 'workspace', path: join(workspace, 'AGENTS.md') })],
+        instructionInjectionBytes: expect.any(Number)
+      })
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
   })
 })

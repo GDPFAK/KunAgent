@@ -32,6 +32,9 @@ export default defineConfig({
         '@shared': resolve('src/shared')
       }
     },
+    server: {
+      host: '127.0.0.1'
+    },
     plugins: [react()]
   }
 })

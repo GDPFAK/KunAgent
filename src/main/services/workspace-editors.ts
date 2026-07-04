@@ -2,7 +2,7 @@ import { app, nativeImage, shell } from 'electron'
 import { execFile } from 'node:child_process'
 import { readFile, stat, unlink } from 'node:fs/promises'
 import { homedir, tmpdir } from 'node:os'
-import { basename, dirname, extname, isAbsolute, join } from 'node:path'
+import { basename, dirname, extname, isAbsolute, join, posix } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { promisify } from 'node:util'
 import type {
@@ -356,11 +356,11 @@ function linuxIconNamePaths(iconName: string): string[] {
   ]
   const themed = roots.flatMap((root) =>
     LINUX_ICON_SIZES.flatMap((size) =>
-      ICON_IMAGE_EXTENSIONS.map((extension) => join(root, size, 'apps', `${iconName}${extension}`))
+      ICON_IMAGE_EXTENSIONS.map((extension) => posix.join(root, size, 'apps', `${iconName}${extension}`))
     )
   )
   const pixmaps = ['/usr/share/pixmaps', '/usr/local/share/pixmaps'].flatMap((root) =>
-    ICON_IMAGE_EXTENSIONS.map((extension) => join(root, `${iconName}${extension}`))
+    ICON_IMAGE_EXTENSIONS.map((extension) => posix.join(root, `${iconName}${extension}`))
   )
 
   return [...themed, ...pixmaps]
@@ -376,7 +376,7 @@ function linuxDesktopFilePaths(desktopIds: string[]): string[] {
     join(home, '.local', 'share', 'flatpak', 'exports', 'share', 'applications')
   ]
 
-  return roots.flatMap((root) => desktopIds.map((desktopId) => join(root, `${desktopId}.desktop`)))
+  return roots.flatMap((root) => desktopIds.map((desktopId) => posix.join(root, `${desktopId}.desktop`)))
 }
 
 async function linuxDesktopIconNames(desktopIds: string[] = []): Promise<string[]> {

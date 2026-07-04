@@ -1,3 +1,4 @@
+import { readdirSync, statSync } from 'node:fs'
 import { posix, win32 } from 'node:path'
 import type { McpServerConfig } from '../../contracts/capabilities.js'
 
@@ -57,6 +58,7 @@ function commonMcpCommandPathEntries(
       '/opt/homebrew/bin',
       '/usr/local/bin',
       '/opt/local/bin',
+      ...nvmNodeBinPathEntries(env),
       homePath(env, '.volta/bin'),
       homePath(env, '.local/bin'),
       homePath(env, '.bun/bin')
@@ -67,6 +69,7 @@ function commonMcpCommandPathEntries(
       '/home/linuxbrew/.linuxbrew/bin',
       '/usr/local/bin',
       '/usr/bin',
+      ...nvmNodeBinPathEntries(env),
       homePath(env, '.volta/bin'),
       homePath(env, '.local/bin'),
       homePath(env, '.bun/bin')
@@ -114,6 +117,55 @@ function pathDelimiter(platform: NodeJS.Platform): string {
 
 function homePath(env: NodeJS.ProcessEnv, relativePath: string): string {
   return env.HOME ? posix.join(env.HOME, relativePath) : ''
+}
+
+function nvmNodeBinPathEntries(env: NodeJS.ProcessEnv): string[] {
+  const entries: string[] = []
+  const nvmBin = env.NVM_BIN?.trim()
+  if (nvmBin) entries.push(nvmBin)
+
+  const nvmDir = env.NVM_DIR?.trim() || homePath(env, '.nvm')
+  if (!nvmDir) return entries
+
+  const versionsDir = posix.join(nvmDir, 'versions/node')
+  for (const version of childDirectoryNames(versionsDir).sort(compareNvmVersionDescending)) {
+    const binPath = posix.join(versionsDir, version, 'bin')
+    if (isDirectory(binPath)) entries.push(binPath)
+  }
+  return entries
+}
+
+function childDirectoryNames(path: string): string[] {
+  try {
+    return readdirSync(path).filter((entry) => isDirectory(posix.join(path, entry)))
+  } catch {
+    return []
+  }
+}
+
+function isDirectory(path: string): boolean {
+  try {
+    return statSync(path).isDirectory()
+  } catch {
+    return false
+  }
+}
+
+function compareNvmVersionDescending(left: string, right: string): number {
+  const leftParts = nvmVersionParts(left)
+  const rightParts = nvmVersionParts(right)
+  for (let index = 0; index < Math.max(leftParts.length, rightParts.length); index += 1) {
+    const diff = (rightParts[index] ?? 0) - (leftParts[index] ?? 0)
+    if (diff !== 0) return diff
+  }
+  return right.localeCompare(left)
+}
+
+function nvmVersionParts(version: string): number[] {
+  return version.replace(/^v/i, '').split(/[.-]/).map((part) => {
+    const value = Number.parseInt(part, 10)
+    return Number.isFinite(value) ? value : 0
+  })
 }
 
 function isMissingExecutableError(error: unknown, message: string): boolean {

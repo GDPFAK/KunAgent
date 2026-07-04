@@ -214,4 +214,75 @@ describe('chat-store Claw actions helpers', () => {
       }
     })
   })
+
+  it('saves the resolved provider and model when changing a Claw channel model', async () => {
+    rendererRuntimeClient.invalidateSettings()
+    let settings = {
+      workspaceRoot: '/Users/zxy/project',
+      claw: {
+        enabled: true,
+        channels: [channel({
+          providerId: 'old-provider',
+          model: 'old-model'
+        })]
+      }
+    }
+    const kunGui = {
+      getSettings: vi.fn(async () => settings),
+      setSettings: vi.fn(async (patch: { claw?: { channels?: ClawImChannelV1[] } }) => {
+        settings = {
+          ...settings,
+          claw: {
+            ...settings.claw,
+            ...(patch.claw ?? {}),
+            channels: patch.claw?.channels ?? settings.claw.channels
+          }
+        }
+        return settings
+      })
+    }
+    vi.stubGlobal('window', { kunGui })
+    let state: Record<string, unknown> = {
+      clawChannels: settings.claw.channels,
+      error: null
+    }
+    const set = vi.fn((partial: Record<string, unknown> | ((current: typeof state) => Record<string, unknown>)) => {
+      const patch = typeof partial === 'function' ? partial(state) : partial
+      state = { ...state, ...patch }
+    })
+    const actions = createClawActions({
+      set: set as never,
+      get: (() => state) as never,
+      i18n: { t: (key: string, values?: Record<string, unknown>) => `${key}:${values?.model ?? ''}` },
+      getProvider: vi.fn() as never,
+      newClawChannel: vi.fn() as never,
+      normalizeClawComposerModel: (raw: string) => raw.trim() || 'auto',
+      activeClawChannel: vi.fn() as never,
+      normalizeWorkspaceRoot: (workspaceRoot?: string | null) => workspaceRoot?.trim() ?? '',
+      formatRuntimeError: (error: unknown) => error instanceof Error ? error.message : String(error),
+      shouldOpenSettingsForError: () => false,
+      clearedThreadSelection: vi.fn() as never,
+      sseAbortRef: { current: null },
+      clearBusyWatchdog: vi.fn()
+    })
+
+    await actions.setClawChannelModel('channel-1', 'MiniMax-M3', 'minimax')
+
+    expect(kunGui.setSettings).toHaveBeenCalledWith({
+      claw: {
+        channels: [expect.objectContaining({
+          id: 'channel-1',
+          providerId: 'minimax',
+          model: 'MiniMax-M3'
+        })]
+      }
+    })
+    expect(state.clawChannels).toEqual([
+      expect.objectContaining({
+        id: 'channel-1',
+        providerId: 'minimax',
+        model: 'MiniMax-M3'
+      })
+    ])
+  })
 })

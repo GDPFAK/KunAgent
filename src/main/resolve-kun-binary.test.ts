@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import {
   buildKunServeArgs,
   resolveKunExecutable,
+  shouldRunKunServeAsElectronChild,
   type KunBinaryResolution
 } from './resolve-kun-binary'
 
@@ -99,9 +100,6 @@ describe('buildKunServeArgs', () => {
       host: '127.0.0.1',
       port: 18899,
       dataDir: '/tmp/kun',
-      baseUrl: 'https://api.deepseek.com/beta',
-      endpointFormat: 'responses',
-      model: 'deepseek-chat',
       approvalPolicy: 'on-request',
       sandboxMode: 'workspace-write',
       tokenEconomyMode: false,
@@ -110,9 +108,41 @@ describe('buildKunServeArgs', () => {
 
     expect(args).not.toContain('--api-key')
     expect(args).not.toContain('--runtime-token')
-    expect(args).toContain('--endpoint-format')
-    expect(args).toContain('responses')
+    expect(args).not.toContain('--base-url')
+    expect(args).not.toContain('--model-proxy-url')
+    expect(args).not.toContain('--endpoint-format')
+    expect(args).not.toContain('--model')
     expect(args).toContain('--token-economy-mode')
     expect(args).toContain('false')
+  })
+})
+
+describe('shouldRunKunServeAsElectronChild', () => {
+  it('uses the Electron child path only for macOS dev computer-use launches', () => {
+    expect(shouldRunKunServeAsElectronChild({
+      platform: 'darwin',
+      isPackaged: false,
+      computerUseEnabled: true
+    })).toBe(true)
+
+    expect(shouldRunKunServeAsElectronChild({
+      platform: 'darwin',
+      isPackaged: true,
+      computerUseEnabled: true
+    })).toBe(false)
+  })
+
+  it('keeps the regular Node helper path when computer-use is disabled or off macOS', () => {
+    expect(shouldRunKunServeAsElectronChild({
+      platform: 'darwin',
+      isPackaged: false,
+      computerUseEnabled: false
+    })).toBe(false)
+
+    expect(shouldRunKunServeAsElectronChild({
+      platform: 'linux',
+      isPackaged: false,
+      computerUseEnabled: true
+    })).toBe(false)
   })
 })

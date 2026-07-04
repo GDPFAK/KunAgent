@@ -13,8 +13,8 @@ The name Kun is inspired by the great fish in Zhuangzi's line,
 "In the northern sea there is a fish; its name is Kun." In
 this project, it means a deeper local runtime rather than a thin model
 UI: one agent loop that can carry project context, call tools
-reliably, resume sessions, and serve desktop chat, writing, phone
-connections, and scheduled tasks.
+reliably, resume sessions, and serve desktop chat, design, writing,
+phone connections, and scheduled tasks.
 
 Kun's core goal is to improve the ROI of every token. Tokens should be
 spent on user requirements, code, decisions, and results, not repeated

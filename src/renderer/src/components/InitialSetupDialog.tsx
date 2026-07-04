@@ -11,7 +11,7 @@ import {
   type ModelProviderPreset
 } from '@shared/app-settings'
 import {
-  buildInitialSetupSettings,
+  buildInitialSetupSettingsPatch,
   INITIAL_SETUP_PROVIDER_PRESETS,
   initialSetupAutoWirePlan,
   initialSetupDrafts,
@@ -314,7 +314,7 @@ export function InitialSetupDialog(): ReactElement {
     setError(null)
     try {
       const next = await rendererRuntimeClient.setSettings(
-        buildInitialSetupSettings(current, drafts, selection)
+        buildInitialSetupSettingsPatch(current, drafts, selection)
       )
       setCurrentForm(next)
       setDrafts(initialSetupDrafts(next))

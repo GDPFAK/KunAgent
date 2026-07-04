@@ -1,5 +1,10 @@
-export const DEFAULT_MAX_LINES = 2000
-export const DEFAULT_MAX_BYTES = 50 * 1024
+import {
+  DEFAULT_TOOL_OUTPUT_MAX_BYTES,
+  DEFAULT_TOOL_OUTPUT_MAX_LINES
+} from '../../contracts/tool-output-limits.js'
+
+export const DEFAULT_MAX_LINES = DEFAULT_TOOL_OUTPUT_MAX_LINES
+export const DEFAULT_MAX_BYTES = DEFAULT_TOOL_OUTPUT_MAX_BYTES
 
 export type TruncationResult = {
   content: string

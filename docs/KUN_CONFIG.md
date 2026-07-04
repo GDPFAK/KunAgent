@@ -50,7 +50,7 @@ GUI 启动 Kun 时会按下面的顺序合并配置。
     "host": "127.0.0.1",
     "port": 18899,
     "dataDir": "~/.kun/data",
-    "runtimeToken": "",
+    "runtimeToken": "<local-access-token>",
     "apiKey": "",
     "baseUrl": "https://api.deepseek.com/beta",
     "model": "deepseek-v4-pro",
@@ -87,6 +87,8 @@ GUI 启动 Kun 时会按下面的顺序合并配置。
   }
 }
 ```
+
+GUI 管理的运行时会在 `runtimeToken` 为空时自动生成并保存本地访问令牌。
 
 ## 模型配置写在哪里
 

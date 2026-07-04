@@ -1,11 +1,15 @@
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { InMemorySessionStore } from '../src/adapters/in-memory-session-store.js'
 import { InMemoryThreadStore } from '../src/adapters/in-memory-thread-store.js'
 import { createThreadRecord } from '../src/domain/thread.js'
 import { UsageService } from '../src/services/usage-service.js'
-import { seedUsageCarryover } from '../src/server/runtime-factory.js'
+import { createKunServeRuntime, seedUsageCarryover } from '../src/server/runtime-factory.js'
 import type { UsageSnapshot } from '../src/contracts/usage.js'
 import type { SessionStore } from '../src/ports/session-store.js'
+import { KunCapabilitiesConfig } from '../src/contracts/capabilities.js'
 
 function usage(overrides: Partial<UsageSnapshot>): UsageSnapshot {
   const promptTokens = overrides.promptTokens ?? 10
@@ -27,6 +31,11 @@ function usage(overrides: Partial<UsageSnapshot>): UsageSnapshot {
 }
 
 describe('runtime factory usage carryover', () => {
+  const tempDirs: string[] = []
+  afterEach(async () => {
+    await Promise.all(tempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })))
+  })
+
   it('seeds runtime usage from the latest persisted cumulative usage event per thread', async () => {
     const threadStore = new InMemoryThreadStore()
     const sessionStore = new InMemorySessionStore()
@@ -95,5 +104,46 @@ describe('runtime factory usage carryover', () => {
       cacheMissTokens: 20,
       turns: 4
     })
+  })
+
+  it('hot-applies model and tool capabilities into runtime info and diagnostics', async () => {
+    const dataDir = await mkdtemp(join(tmpdir(), 'kun-runtime-apply-'))
+    tempDirs.push(dataDir)
+    const runtime = await createKunServeRuntime({
+      host: '127.0.0.1',
+      port: 0,
+      dataDir,
+      runtimeToken: 'tok',
+      apiKey: 'sk-default',
+      baseUrl: 'https://api.example.test/v1',
+      model: 'model-before',
+      approvalPolicy: 'auto',
+      sandboxMode: 'danger-full-access',
+      tokenEconomyMode: false,
+      insecure: false,
+      storage: { backend: 'file' },
+      capabilities: KunCapabilitiesConfig.parse({})
+    })
+
+    try {
+      expect(runtime.info().capabilities.instructions.enabled).toBe(true)
+      const applied = await runtime.applyConfig({
+        serve: { model: 'model-after' },
+        capabilities: KunCapabilitiesConfig.parse({
+          web: { enabled: true, fetchEnabled: true },
+          instructions: { enabled: false }
+        })
+      })
+
+      expect(applied).toEqual({ ok: true })
+      expect(runtime.info().model).toBe('model-after')
+      expect(runtime.info().capabilities.web.fetch.available).toBe(true)
+      expect(runtime.info().capabilities.instructions).toMatchObject({ enabled: false, status: 'disabled' })
+      const diagnostics = await runtime.toolDiagnostics?.()
+      expect(diagnostics?.providers.some((provider) => provider.id === 'web')).toBe(true)
+      expect(diagnostics?.instructions?.enabled).toBe(false)
+    } finally {
+      await runtime.shutdown?.()
+    }
   })
 })

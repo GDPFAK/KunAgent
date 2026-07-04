@@ -6,7 +6,7 @@
 
 <p align="center">
   <strong>An experiment in requirement-first coding for the next programming paradigm.</strong><br>
-  Use DeepSeek, Xiaomi MiMo, and MiniMax to connect requirement clarification, design drafts, plans, and agent coding into one loop.
+  Use DeepSeek, Xiaomi MiMo, and MiniMax to connect requirements, Design, Code, and Write into one loop.
 </p>
 
 <p align="center">
@@ -29,9 +29,9 @@
   <img src="https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black" alt="React 19">
 </p>
 
-Kun is a product experiment for the future of programming: instead of starting from “ask the agent to edit code,” it starts from requirement clarification and connects requirement documents, design drafts, interactive prototypes, implementation plans, todos, agent coding, and change review in one GUI workflow.
+Kun is a product experiment for the future of programming: instead of starting from “ask the agent to edit code,” it starts from requirement clarification and connects requirement documents, Design drafts, interactive prototypes, implementation plans, todos, agent coding, and change review in one GUI workflow.
 
-Kun is for users who want to put AI agents into real everyday work. It is not just a chat client, and it is not only a CLI shell for programmers: you can hand it a local folder for code, requirements, plans, and change review, or use the dedicated Write workspace for long-form Markdown, editing, and document export.
+Kun is for users who want to put AI agents into real everyday work. It is not just a chat client, and it is not only a CLI shell for programmers: in Code mode you can hand it a local folder for code, requirements, plans, and change review; in Design mode you can generate and iterate UI drafts, interactive prototypes, and a shared design system; in Write mode you can work on long-form Markdown, editing, and document export.
 
 This is also why Kun treats DeepSeek, Xiaomi MiMo, and MiniMax as the default first-class model stack, not just ordinary optional providers. Requirement-first coding requires more rounds of clarification, research, structuring, planning, execution, and verification. If model cost is too high, that richer workflow cannot become an everyday habit. Kun chooses three cost-efficient Chinese model providers so the full loop is affordable to run, repeat, and refine.
 
@@ -52,16 +52,18 @@ Kun includes the local `kun serve` runtime for the desktop app. Preferences, ses
 
 Kun explores a next-generation programming workflow: **requirement -> design -> plan -> code -> verify**. It is not just a chat box attached to an IDE.
 
+That workflow is carried by three first-class modes: **Code** for real repositories and shipping changes, **Design** for UI direction, prototypes, and design systems, and **Write** for long-form documents, requirements, release notes, and essays. All three share the same Kun runtime, provider config, approvals, and thread capabilities.
+
 | Stage | Kun's approach |
 | --- | --- |
 | **Clarify** | Create requirement drafts in the GUI and ask Requirement AI to find missing questions, research options, and shape boundaries |
 | **Document** | Save drafts as `.kunsdd/draft/.../requirement.md`, with structured requirement blocks, acceptance criteria, and requirement history |
-| **Design** | Generate UI design drafts, infographics, or interactive HTML prototypes from requirement selections, so requirements become more than text |
+| **Design** | Enter Design mode to generate UI drafts, infographics, interactive HTML prototypes, and a shared design system from requirement selections, so requirements become more than text |
 | **Plan** | Use `/plan` and `create_plan` to produce GUI-owned `.kunsdd/plan/...` implementation plans linked back to requirements |
 | **Code** | Move from plan into todos, file edits, command execution, and change review; when requirements change, Kun can surface affected replanning |
 | **Verify** | Bring requirement blocks, acceptance criteria, plan state, and `/review` back together to answer whether the original requirement is done |
 
-This is Kun's most important product direction: moving AI coding from instant Q&A into a requirement-driven software production workflow. Models, writing, planning, review, and automation all serve that line.
+This is Kun's most important product direction: moving AI coding from instant Q&A into a requirement-driven software production workflow. Code, Design, Write, models, planning, review, and automation all serve that line.
 
 ## Core Model Stack
 
@@ -80,6 +82,7 @@ This stack lets Kun route different jobs to the right capability: fast models fo
 | You want | Kun provides |
 | --- | --- |
 | A next-generation coding workflow | Requirement clarification, requirement documents, design drafts, implementation plans, agent coding, and verification in one line |
+| Design in the same app | Design mode generates UI drafts, interactive HTML prototypes, node-based design flows, and a shared `DESIGN_SYSTEM.md`, then hands approved work to Code |
 | Complete agent capability at extreme cost efficiency | DeepSeek, Xiaomi MiMo, and MiniMax as the core stack for text, reasoning, vision, speech, image, music, and video |
 | AI that works on real projects | Bind a local workspace, read and edit files, search code, run commands, and inspect tool calls and results |
 | Requirements that become executable plans | New requirements, `/plan`, todos, `/goal`, side conversations, thread compaction, forking, and archiving |
@@ -93,6 +96,7 @@ This stack lets Kun route different jobs to the right capability: fast models fo
 
 - **Requirement-first coding**: draft requirements, clarify and structure them with AI, generate design drafts or prototypes, then move into implementation plans, todos, agent coding, and verification.
 - **Code workbench**: bind a local project folder, chat around real codebases, read and edit files, run commands, and inspect tool calls and file changes.
+- **Design mode**: generate design drafts, interactive HTML prototypes, and design flow graphs from natural language, requirement drafts, or existing UI; iterate versions, preview on canvas, export, publish a shared design system, and hand designs to Code for implementation.
 - **Planning and review**: new requirements, `/plan`, todos, `/goal`, `/review`, side conversations, thread compaction, forking, and archiving.
 - **Controlled changes**: inline diffs, a change-review panel, tool approvals, and filesystem permission modes.
 - **Write mode**: dedicated Markdown workspaces with a file tree, Live / Source / Split / Preview modes, completion, selection-based inline agent actions, and `HTML / PDF / DOC / DOCX` export.
@@ -143,7 +147,7 @@ On first launch:
 1. Choose a UI language.
 2. Choose a model provider and enter an API key or Token Plan key.
 3. For compatible providers, edit the Base URL, protocol, and model list in Settings.
-4. Open Code and bind a local project, or open Write and create a writing workspace.
+4. Open Code to bind a local project, open Design to generate a prototype, or open Write to create a writing workspace.
 
 ### Path B: Run From Source
 
@@ -185,7 +189,7 @@ npm install --registry=https://registry.npmmirror.com
 
 - Preferences, sessions, logs, runtime config, and local runtime data stay on your machine by default.
 - Model calls use the provider credentials you configure; provider presets are editable starting points.
-- Code / Write / Connect Phone share the same `kun` runtime boundary for sessions, approvals, tools, and usage tracking.
+- Code / Design / Write / Connect Phone share the same `kun` runtime boundary for sessions, approvals, tools, and usage tracking.
 - File writes, command execution, MCP tools, and media generation are governed by permissions and configuration.
 
 ## Documentation Map
@@ -195,6 +199,7 @@ npm install --registry=https://registry.npmmirror.com
 | [kun/README.md](kun/README.md) | Kun runtime, CLI, environment variables, HTTP API |
 | [docs/kun-architecture.en.md](docs/kun-architecture.en.md) | Runtime architecture and GUI integration |
 | [docs/kun-cache-optimization.en.md](docs/kun-cache-optimization.en.md) | Cache optimization and token economy |
+| [docs/DESIGN_MODE.md](docs/DESIGN_MODE.md) | Design mode, canvas, prototypes, design systems, and the Design -> Code loop |
 | [docs/model-provider-presets.md](docs/model-provider-presets.md) | Model provider presets |
 | [docs/workflow-loop.en.md](docs/workflow-loop.en.md) | The Loop node and the loop-agent idea (Create Loop workflows) |
 | [docs/CONTRIBUTING.en.md](docs/CONTRIBUTING.en.md) | Contribution guide |
@@ -211,6 +216,12 @@ Project conventions:
 - Open pull requests into `develop` by default.
 - Before opening a PR, run `npm run typecheck`, `npm run build`, and `npm run test` when possible.
 - External contributions require acceptance of the [Contributor License Agreement](./CLA.md).
+
+### Join Kun Builder
+
+If you want to become a Kun Builder, start by contributing through the normal pull request flow. After you have **5 pull requests reviewed and merged normally**, you can email [zhongxingyuemail@gmail.com](mailto:zhongxingyuemail@gmail.com) to apply.
+
+Include your GitHub username, links to the 5 merged pull requests, and the areas where you want to keep contributing, such as Code, Design, Write, runtime, model providers, workflows, documentation, or localization.
 
 ## Thanks
 

@@ -12,9 +12,13 @@ import { HybridSessionStore, HybridThreadStore } from '../adapters/hybrid/index.
 import { CompatModelClient } from '../adapters/model/compat-model-client.js'
 import { MultiProviderModelClient } from '../adapters/model/multi-provider-model-client.js'
 import { CapabilityRegistry } from '../adapters/tool/capability-registry.js'
-import { createAgentSdkRuntime } from '../runtime/agent-sdk/agent-sdk-runtime-factory.js'
+import {
+  createAgentSdkRuntime,
+  type AgentSdkRuntimeFactoryDeps
+} from '../runtime/agent-sdk/agent-sdk-runtime-factory.js'
 import { buildGoalLocalTools } from '../adapters/tool/goal-tools.js'
 import { buildTodoLocalTools } from '../adapters/tool/todo-tools.js'
+import { buildDesignCanvasLocalTools } from '../adapters/tool/design-canvas-tool.js'
 import { LocalToolHost, buildDefaultLocalTools } from '../adapters/tool/local-tool-host.js'
 import { createReadArtifactTool } from '../adapters/tool/artifact-tool.js'
 import { FileArtifactStore } from '../artifacts/artifact-store.js'
@@ -38,7 +42,7 @@ import {
   type KunCapabilitiesConfig
 } from '../contracts/capabilities.js'
 import type { ApprovalPolicy, SandboxMode } from '../contracts/policy.js'
-import { AgentLoop } from '../loop/agent-loop.js'
+import { AgentLoop, type AgentLoopOptions } from '../loop/agent-loop.js'
 import { ContextCompactor } from '../loop/context-compactor.js'
 import type { TokenEconomyConfig } from '../loop/token-economy.js'
 import {
@@ -50,12 +54,15 @@ import {
 import {
   DEFAULT_QUALITY_CONFIG,
   DEFAULT_STORAGE_CONFIG,
+  DEFAULT_TOOL_OUTPUT_LIMITS_CONFIG,
   expandHomePath,
   type QualityConfig,
   type RolesConfig,
   type RuntimeTuningConfig,
+  type ModelRequestRetryConfig,
   type ServeProviderConfig,
-  type StorageConfig
+  type StorageConfig,
+  type ToolOutputLimitsConfig
 } from '../config/kun-config.js'
 import { buildBuiltinHooks } from '../hooks/builtins/index.js'
 import { mergeBuiltinSubagentProfiles } from '../delegation/builtin-profiles.js'
@@ -72,11 +79,16 @@ import { TurnService } from '../services/turn-service.js'
 import { ReviewService } from '../services/review-service.js'
 import { UsageService } from '../services/usage-service.js'
 import type { UsageEvent } from '../contracts/events.js'
+import type {
+  RuntimeConfigApplyRequest,
+  RuntimeConfigApplyResponse
+} from '../contracts/runtime-config.js'
 import {
   DEFAULT_MODEL_ENDPOINT_FORMAT,
   type ModelEndpointFormat
 } from '../contracts/model-endpoint-format.js'
 import { SkillRuntime } from '../skills/skill-runtime.js'
+import { InstructionRuntime } from '../instructions/instruction-runtime.js'
 import { resolveConfiguredHooks, type HooksConfig } from '../hooks/hook-config.js'
 import { FileMemoryStore } from '../memory/memory-store.js'
 import { DelegationRuntime, FileDelegationStore } from '../delegation/delegation-runtime.js'
@@ -86,6 +98,7 @@ import { stopBashSessionById, createBashLocalTool } from '../adapters/tool/built
 import { createBackgroundShellTool } from '../adapters/tool/background-shell-tool.js'
 import { createSecretEncryptor, defaultSecretCommandRunner } from '../security/secret-store.js'
 import type { LocalTool } from '../adapters/tool/local-tool-host.js'
+import { InMemoryPublisherTrustStore } from '../supplychain/publisher-trust-store.js'
 
 export type KunServeRuntimeOptions = {
   host: string
@@ -97,6 +110,14 @@ export type KunServeRuntimeOptions = {
   baseUrl: string
   modelProxyUrl?: string
   endpointFormat?: ModelEndpointFormat
+  retry?: ModelRequestRetryConfig
+  /**
+   * Extra HTTP headers merged into every default-client request (last, so
+   * they win). For providers that need more than a Bearer key — e.g. Codex
+   * sends `ChatGPT-Account-Id` + a Codex-CLI `User-Agent` with its OAuth
+   * access token.
+   */
+  headers?: Record<string, string>
   /**
    * Extra providers the runtime can route to per request. Keyed by
    * provider id (matched against `ModelRequest.providerId`); each entry
@@ -111,6 +132,7 @@ export type KunServeRuntimeOptions = {
   sandboxMode: SandboxMode
   tokenEconomyMode: boolean
   tokenEconomy?: TokenEconomyConfig
+  toolOutputLimits?: ToolOutputLimitsConfig
   insecure: boolean
   models?: ModelConfig
   contextCompaction?: ContextCompactionConfig
@@ -139,6 +161,7 @@ export async function createKunServeRuntime(
   options: KunServeRuntimeOptions
 ): Promise<ServerRuntime> {
   await mkdir(options.dataDir, { recursive: true })
+  let activeOptions: KunServeRuntimeOptions = { ...options }
   const eventBus = new InMemoryEventBus()
   const stores = await createPersistentStores({
     dataDir: options.dataDir,
@@ -154,10 +177,10 @@ export async function createKunServeRuntime(
   const inflight = new InflightTracker()
   const steering = new SteeringQueue()
   const compactor = new ContextCompactor({
-    contextCompaction: options.contextCompaction,
-    models: options.models
+    contextCompaction: activeOptions.contextCompaction,
+    models: activeOptions.models
   })
-  const tokenEconomy = tokenEconomyConfigForOptions(options)
+  let tokenEconomy = tokenEconomyConfigForOptions(activeOptions)
   const ids = new RandomIdGenerator()
   const nowIso = () => new Date().toISOString()
   const allocateSeq = (threadId: string) => eventBus.allocateSeq(threadId)
@@ -171,78 +194,39 @@ export async function createKunServeRuntime(
     ]
   })
   const threadService = new ThreadService({ threadStore, sessionStore, events, ids, nowIso })
-  const artifactStore = new FileArtifactStore(join(options.dataDir, 'artifacts'), nowIso)
-  const modelProfiles = modelContextProfilesFromConfig({
-    contextCompaction: options.contextCompaction,
-    models: options.models
+  const artifactStore = new FileArtifactStore(join(activeOptions.dataDir, 'artifacts'), nowIso)
+  let modelProfiles = modelContextProfilesFromConfig({
+    contextCompaction: activeOptions.contextCompaction,
+    models: activeOptions.models
   })
   const modelCapabilities = (model: string) => modelCapabilitiesForModel(model, modelProfiles)
   const llmDebug = new LlmDebugRecorder()
-  const streamIdleOverride =
-    options.runtime?.streamIdleTimeoutMs !== undefined
-      ? { streamIdleTimeoutMs: options.runtime.streamIdleTimeoutMs }
-      : {}
-  const defaultModelClient = new CompatModelClient({
-    baseUrl: options.baseUrl,
-    apiKey: options.apiKey,
-    modelProxyUrl: options.modelProxyUrl,
-    endpointFormat: options.endpointFormat ?? DEFAULT_MODEL_ENDPOINT_FORMAT,
-    model: options.model,
-    modelCapabilities,
-    debugSink: llmDebug,
-    ...streamIdleOverride
-  })
-  // Per-provider HTTP clients (workflow/scheduled task can pick a non-default
-  // provider per request via `ModelRequest.providerId`). The wrapper falls
-  // back to the default client when the id is absent or unknown, so behavior
-  // is unchanged for single-provider deployments.
-  const providerClients = new Map<string, CompatModelClient>()
   // Providers whose kind is 'agent-sdk' don't get an HTTP client — their turns
   // are delegated to the embedded Claude Agent SDK (subscription) instead.
-  const agentSdkProviderIds = new Set<string>()
-  for (const [providerId, provider] of Object.entries(options.providers ?? {})) {
-    const trimmedId = providerId.trim()
-    if (!trimmedId) continue
-    if ((provider.kind ?? 'http') === 'agent-sdk') {
-      agentSdkProviderIds.add(trimmedId)
-      continue
-    }
-    providerClients.set(
-      trimmedId,
-      new CompatModelClient({
-        baseUrl: provider.baseUrl ?? options.baseUrl ?? '',
-        apiKey: provider.apiKey,
-        modelProxyUrl: provider.modelProxyUrl ?? options.modelProxyUrl,
-        endpointFormat: provider.endpointFormat ?? options.endpointFormat ?? DEFAULT_MODEL_ENDPOINT_FORMAT,
-        model: options.model,
-        modelCapabilities,
-        debugSink: llmDebug,
-        ...streamIdleOverride
-      })
-    )
-  }
-  const modelClient = new MultiProviderModelClient({
-    default: defaultModelClient,
-    providers: providerClients
-  })
-  const hasMcpOAuth = Object.values(options.capabilities?.mcp?.servers ?? {}).some((server) =>
+  const agentSdkProviderIds = agentSdkProviderIdsForOptions(activeOptions)
+  let agentSdkSignature = agentSdkProviderSignature(activeOptions)
+  const modelClient = new MultiProviderModelClient(
+    buildModelClientRouterInput(activeOptions, modelCapabilities, llmDebug)
+  )
+  const hasMcpOAuth = Object.values(activeOptions.capabilities?.mcp?.servers ?? {}).some((server) =>
     server.oauth?.enabled !== false && Boolean(server.oauth) && server.transport !== 'stdio'
   )
   const oauthEncryptor = hasMcpOAuth
     ? (await createSecretEncryptor({
-        keyFilePath: join(options.dataDir, 'secret.key'),
+        keyFilePath: join(activeOptions.dataDir, 'secret.key'),
         run: defaultSecretCommandRunner
       })).encryptor
     : undefined
   // Independent I/O; all must still finish before the server listens.
-  const [mcpProviders, skillRuntime] = await Promise.all([
-    buildMcpToolProviders(options.capabilities?.mcp, {
-      oauthStorageDir: join(options.dataDir, 'mcp-oauth'),
+  let [mcpProviders, skillRuntime] = await Promise.all([
+    buildMcpToolProviders(activeOptions.capabilities?.mcp, {
+      oauthStorageDir: join(activeOptions.dataDir, 'mcp-oauth'),
       ...(oauthEncryptor ? { oauthEncryptor } : {})
     }),
-    SkillRuntime.create(options.capabilities?.skills),
+    SkillRuntime.create(activeOptions.capabilities?.skills),
     seedUsageCarryover({ threadStore, sessionStore, usageService })
   ])
+  const instructionRuntime = new InstructionRuntime(activeOptions.capabilities?.instructions)
   const turnService = new TurnService({
     threadStore,
     sessionStore,
@@ -264,68 +248,87 @@ export async function createKunServeRuntime(
     turns: turnService,
     nowIso
   })
+  const supplyChainTrust = new InMemoryPublisherTrustStore()
   backgroundShellRuntime.bindStopHandler(stopBashSessionById)
   const backgroundShellTool = createBackgroundShellTool({
     listBackgroundSessions: (threadId) => backgroundShellRuntime.listSessions(threadId)
   })
-  const withBackgroundShellTools = (tools: LocalTool[]): LocalTool[] => {
+  const withBackgroundShellTools = (
+    tools: LocalTool[],
+    optionsForTools: KunServeRuntimeOptions = activeOptions
+  ): LocalTool[] => {
+    const outputLimits = toolOutputLimitsForOptions(optionsForTools)
     const mapped = tools.map((tool) =>
       tool.name === 'bash'
         ? createBashLocalTool({
+            ...outputLimits,
             backgroundShell: backgroundShellRuntime.bashHooks(),
-            backgroundShellDataDir: options.dataDir
+            backgroundShellDataDir: optionsForTools.dataDir
           })
         : tool
     )
     const withoutBackgroundShell = mapped.filter((tool) => tool.name !== 'background_shell')
     return [...withoutBackgroundShell, backgroundShellTool]
   }
-  const reviewService = new ReviewService({
+  const reviewDeps = {
     threadStore,
     turns: turnService,
     model: modelClient,
-    defaultModel: options.model,
+    defaultModel: activeOptions.model,
     nowIso,
     modelCapabilities,
-    ...(options.models ? { models: options.models } : {}),
-    ...(options.contextCompaction ? { contextCompaction: options.contextCompaction } : {}),
-    ...(tokenEconomy ? { tokenEconomy } : {}),
-    ...(options.runtime ? { runtime: options.runtime } : {}),
-    ...(options.roles?.codeReviewReasoningEffort
-      ? { reasoningEffort: options.roles.codeReviewReasoningEffort }
-      : {})
-  })
-  const webProviders = buildWebToolProviders(options.capabilities?.web)
-  const attachmentStore = options.capabilities?.attachments.enabled
-    ? new FileAttachmentStore({
-        rootDir: join(options.dataDir, 'attachments'),
-        config: options.capabilities.attachments,
-        nowIso
-      })
-    : undefined
-  const memoryStore = options.capabilities?.memory.enabled
-    ? new FileMemoryStore({
-        rootDir: join(options.dataDir, 'memory'),
-        config: options.capabilities.memory,
-        nowIso
-      })
-    : undefined
-  const imageGenProviders = buildImageGenToolProviders(options.capabilities?.imageGen, {
-    attachmentStore,
-    nowIso
-  })
-  const speechGenProviders = buildSpeechGenToolProviders(options.capabilities?.speechGen, { nowIso })
-  const musicGenProviders = buildMusicGenToolProviders(options.capabilities?.musicGen, { nowIso })
-  const videoGenProviders = buildVideoGenToolProviders(options.capabilities?.videoGen, { nowIso })
-  const computerUseProviders = await buildComputerUseToolProviders(options.capabilities?.computerUse)
-  const taskGraphTool = createTaskGraphTool({ rootDir: join(options.dataDir, 'task-graphs') })
-  const baseToolProviders = [
+	    ...(activeOptions.models ? { models: activeOptions.models } : {}),
+	    ...(activeOptions.contextCompaction ? { contextCompaction: activeOptions.contextCompaction } : {}),
+	    ...(tokenEconomy ? { tokenEconomy } : {}),
+	    ...(activeOptions.runtime ? { runtime: activeOptions.runtime } : {}),
+	    ...(activeOptions.roles?.codeReviewReasoningEffort
+	      ? { reasoningEffort: activeOptions.roles.codeReviewReasoningEffort }
+	      : {})
+	  }
+	  const reviewService = new ReviewService(reviewDeps)
+	  let webProviders = buildWebToolProviders(activeOptions.capabilities?.web)
+	  let attachmentStore = activeOptions.capabilities?.attachments.enabled
+	    ? new FileAttachmentStore({
+	        rootDir: join(activeOptions.dataDir, 'attachments'),
+	        config: activeOptions.capabilities.attachments,
+	        nowIso
+	      })
+	    : undefined
+	  let memoryStore = activeOptions.capabilities?.memory.enabled
+	    ? new FileMemoryStore({
+	        rootDir: join(activeOptions.dataDir, 'memory'),
+	        config: activeOptions.capabilities.memory,
+	        nowIso
+	      })
+	    : undefined
+	  let imageGenProviders = buildImageGenToolProviders(activeOptions.capabilities?.imageGen, {
+	    attachmentStore,
+	    nowIso
+	  })
+	  let speechGenProviders = buildSpeechGenToolProviders(activeOptions.capabilities?.speechGen, { nowIso })
+	  let musicGenProviders = buildMusicGenToolProviders(activeOptions.capabilities?.musicGen, { nowIso })
+	  let videoGenProviders = buildVideoGenToolProviders(activeOptions.capabilities?.videoGen, { nowIso })
+	  let computerUseProviders = await buildComputerUseToolProviders(activeOptions.capabilities?.computerUse)
+  const designCanvasProvider = {
+    id: 'design-canvas',
+    kind: 'gui' as const,
+    enabled: true,
+    available: true,
+    // Safe to include in child runs: the tool is still gated per turn by
+    // `context.guiDesignCanvas`, so only design-canvas child turns see it.
+    tools: buildDesignCanvasLocalTools()
+  }
+	  const taskGraphTool = createTaskGraphTool({ rootDir: join(activeOptions.dataDir, 'task-graphs') })
+	  let baseToolProviders = [
     {
       id: 'builtin',
       kind: 'built-in' as const,
       enabled: true,
       available: true,
-      tools: withBackgroundShellTools(buildDefaultLocalTools())
+      tools: withBackgroundShellTools(
+        buildDefaultLocalTools({}, builtinToolOptionsForOptions(activeOptions)),
+        activeOptions
+      )
     },
     {
       id: 'artifacts',
@@ -341,7 +344,8 @@ export async function createKunServeRuntime(
     ...imageGenProviders.providers,
     ...speechGenProviders.providers,
     ...musicGenProviders.providers,
-    ...videoGenProviders.providers
+    ...videoGenProviders.providers,
+    designCanvasProvider,
     // NOTE: computer_use is intentionally NOT in baseToolProviders — host
     // control must not be delegable to subagents. It is added to the main
     // registry only (below).
@@ -349,42 +353,43 @@ export async function createKunServeRuntime(
   // Builtin hooks are first-party and always assembled before config hooks.
   // The design-quality linter folds findings into write/edit results so the
   // model self-corrects; config-loaded command hooks run after it.
-  const resolvedHooks = [
-    ...buildBuiltinHooks({ quality: options.quality ?? DEFAULT_QUALITY_CONFIG }),
-    ...resolveConfiguredHooks(options.hooks)
-  ]
-  const childRegistry = new CapabilityRegistry(baseToolProviders)
+	  let resolvedHooks = [
+	    ...buildBuiltinHooks({ quality: activeOptions.quality ?? DEFAULT_QUALITY_CONFIG }),
+	    ...resolveConfiguredHooks(activeOptions.hooks)
+	  ]
+	  let childRegistry = new CapabilityRegistry(baseToolProviders)
   const childToolHost = new LocalToolHost({
     registry: childRegistry,
     readTracker: true,
     ...(resolvedHooks.length ? { hooks: resolvedHooks } : {})
   })
-  const delegationRuntime = options.capabilities?.subagents.enabled
-    ? new DelegationRuntime({
-        config: mergeBuiltinSubagentProfiles(options.capabilities.subagents),
-        store: new FileDelegationStore(join(options.dataDir, 'child-runs')),
-        events,
-        threadStore,
-        turns: turnService,
-        nowIso,
-        executor: createChildAgentExecutor({
-          model: modelClient,
-          toolHost: childToolHost,
-          prefix,
-          defaultModel: options.model,
-          models: options.models,
-          contextCompaction: options.contextCompaction,
-          approvalPolicy: options.approvalPolicy,
-          sandboxMode: options.sandboxMode,
-          modelCapabilities,
-          skillRuntime,
-          tokenEconomy,
+	  let delegationRuntime = activeOptions.capabilities?.subagents.enabled
+	    ? new DelegationRuntime({
+	        config: mergeBuiltinSubagentProfiles(activeOptions.capabilities.subagents),
+	        store: new FileDelegationStore(join(activeOptions.dataDir, 'child-runs')),
+	        events,
+	        threadStore,
+	        turns: turnService,
+	        nowIso,
+	        executor: createChildAgentExecutor({
+	          model: modelClient,
+	          toolHost: childToolHost,
+	          prefix,
+	          defaultModel: activeOptions.model,
+	          models: activeOptions.models,
+	          contextCompaction: activeOptions.contextCompaction,
+	          approvalPolicy: activeOptions.approvalPolicy,
+	          sandboxMode: activeOptions.sandboxMode,
+	          modelCapabilities,
+	          skillRuntime,
+	          instructionRuntime,
+	          tokenEconomy,
           // Persist the child as a hidden `side` thread on the shared stores +
           // event bus so its session is loadable and streams live in the GUI.
           sessionStore,
           threadStore,
           events,
-          ...(options.runtime ? { runtime: options.runtime } : {}),
+	          ...(activeOptions.runtime ? { runtime: activeOptions.runtime } : {}),
           ...(memoryStore ? { memoryStore } : {}),
           artifactStore,
           nowIso
@@ -394,11 +399,11 @@ export async function createKunServeRuntime(
         }
       })
     : undefined
-  const capabilities = buildRuntimeCapabilityManifest({
-    config: options.capabilities,
-    model: modelCapabilities(options.model),
-    mcp: {
-      configuredServers: Object.keys(options.capabilities?.mcp.servers ?? {}).length,
+	  let capabilities = buildRuntimeCapabilityManifest({
+	    config: activeOptions.capabilities,
+	    model: modelCapabilities(activeOptions.model),
+	    mcp: {
+	      configuredServers: Object.keys(activeOptions.capabilities?.mcp.servers ?? {}).length,
       connectedServers: mcpProviders.connectedServers,
       toolCount: mcpProviders.toolCount,
       lastError: mcpProviders.diagnostics.find((diagnostic) => diagnostic.lastError)?.lastError,
@@ -413,11 +418,16 @@ export async function createKunServeRuntime(
       searchAvailable: webProviders.searchAvailable,
       provider: webProviders.provider,
       reason: webProviders.diagnostics.find((diagnostic) => diagnostic.reason)?.reason
-    },
-    skills: {
-      configuredRoots: options.capabilities?.skills.roots.length,
+	    },
+	    skills: {
+	      configuredRoots: activeOptions.capabilities?.skills.roots.length,
       discoveredSkills: skillRuntime.count(),
       reason: skillRuntime.diagnostics().validationErrors[0]?.message
+    },
+    instructions: {
+      available: instructionRuntime.enabled(),
+      lastSourceCount: instructionRuntime.diagnostics().lastInjection?.sources.length ?? 0,
+      lastInjectedBytes: instructionRuntime.diagnostics().lastInjection?.injectedBytes ?? 0
     },
     attachments: {
       available: Boolean(attachmentStore)
@@ -449,7 +459,7 @@ export async function createKunServeRuntime(
       reason: computerUseProviders.diagnostics.find((diagnostic) => diagnostic.reason)?.reason
     }
   })
-  const registry = new CapabilityRegistry([
+	  let registry = new CapabilityRegistry([
     ...baseToolProviders,
     // Host control is available to the top-level agent only, never to
     // delegated subagents (which use childRegistry/baseToolProviders).
@@ -503,37 +513,39 @@ export async function createKunServeRuntime(
   // The runtime's own default provider can itself be agent-sdk (the Claude
   // subscription set as the main model). kun-process signals that via env so we
   // route default-provider turns to the SDK too, not just per-provider ones.
-  const defaultIsAgentSdk = process.env.KUN_RUNTIME_PROVIDER_KIND === 'agent-sdk'
-  const sdkRuntime =
-    agentSdkProviderIds.size > 0 || defaultIsAgentSdk
-      ? createAgentSdkRuntime({
-          registry,
-          turns: turnService,
-          sessionStore,
-          threadStore,
-          events,
-          ids,
-          prefix,
-          providerConfigs: options.providers ?? {},
-          agentSdkProviderIds,
-          defaultApprovalPolicy: options.approvalPolicy,
-          defaultModel: options.model,
-          defaultIsAgentSdk,
-          defaultToken: options.apiKey,
-          skillRuntime,
-          userInputGate,
-          nowIso,
-          ...(attachmentStore ? { attachmentStore } : {}),
-          ...(memoryStore ? { memoryStore } : {}),
-          ...(process.env.KUN_CLAUDE_BINARY
-            ? { pathToClaudeCodeExecutable: process.env.KUN_CLAUDE_BINARY }
-            : {})
-        })
-      : undefined
-  const loop = new AgentLoop({
-    threadStore,
-    sessionStore,
-    approvalGate,
+	  const defaultIsAgentSdk = process.env.KUN_RUNTIME_PROVIDER_KIND === 'agent-sdk'
+	  let sdkRuntimeDeps: AgentSdkRuntimeFactoryDeps | undefined
+	  if (agentSdkProviderIds.size > 0 || defaultIsAgentSdk) {
+	    sdkRuntimeDeps = {
+	      registry,
+	      turns: turnService,
+	      sessionStore,
+	      threadStore,
+	      events,
+	      ids,
+	      prefix,
+	      providerConfigs: activeOptions.providers ?? {},
+	      agentSdkProviderIds,
+	      defaultApprovalPolicy: activeOptions.approvalPolicy,
+	      defaultModel: activeOptions.model,
+	      defaultIsAgentSdk,
+	      defaultToken: activeOptions.apiKey,
+	      skillRuntime,
+	      instructionRuntime,
+	      userInputGate,
+	      nowIso,
+	      ...(attachmentStore ? { attachmentStore } : {}),
+	      ...(memoryStore ? { memoryStore } : {}),
+	      ...(process.env.KUN_CLAUDE_BINARY
+	        ? { pathToClaudeCodeExecutable: process.env.KUN_CLAUDE_BINARY }
+	        : {})
+	    }
+	  }
+	  const sdkRuntime = sdkRuntimeDeps ? createAgentSdkRuntime(sdkRuntimeDeps) : undefined
+	  const loopOptions: AgentLoopOptions = {
+	    threadStore,
+	    sessionStore,
+	    approvalGate,
     userInputGate,
     model: modelClient,
     toolHost,
@@ -547,35 +559,313 @@ export async function createKunServeRuntime(
     prefix,
     ids,
     nowIso,
-    modelCapabilities,
-    skillRuntime,
-    tokenEconomy,
-    contextCompaction: options.contextCompaction,
-    ...(options.roles ? { roles: options.roles } : {}),
-    ...(options.runtime?.toolStorm ? { toolStorm: options.runtime.toolStorm } : {}),
-    ...(options.runtime?.toolArgumentRepair ? { toolArgumentRepair: options.runtime.toolArgumentRepair } : {}),
-    ...(resolvedHooks.length ? { hooks: resolvedHooks } : {}),
-    ...(attachmentStore ? { attachmentStore } : {}),
-    artifactStore,
-    ...(memoryStore ? { memoryStore } : {}),
-    runtimeDataDir: options.dataDir,
-    onPlanWritten: async ({ threadId, planId, relativePath, markdown }) => {
-      await threadService.syncTodosFromPlan(threadId, {
-        planId,
+	    modelCapabilities,
+	    skillRuntime,
+	    instructionRuntime,
+	    tokenEconomy,
+	    contextCompaction: activeOptions.contextCompaction,
+	    ...(activeOptions.roles ? { roles: activeOptions.roles } : {}),
+	    ...(activeOptions.runtime?.toolStorm ? { toolStorm: activeOptions.runtime.toolStorm } : {}),
+	    ...(activeOptions.runtime?.toolArgumentRepair ? { toolArgumentRepair: activeOptions.runtime.toolArgumentRepair } : {}),
+	    ...(resolvedHooks.length ? { hooks: resolvedHooks } : {}),
+	    ...(attachmentStore ? { attachmentStore } : {}),
+	    artifactStore,
+	    ...(memoryStore ? { memoryStore } : {}),
+	    runtimeDataDir: activeOptions.dataDir,
+	    onPlanWritten: async ({ threadId, planId, relativePath, markdown }) => {
+	      await threadService.syncTodosFromPlan(threadId, {
+	        planId,
         relativePath,
         markdown,
-        preserveCompleted: true
-      })
-    }
-  })
-  backgroundShellRuntime.bindAgentLoop({
-    runTurn: (threadId, turnId) => loop.runTurn(threadId, turnId)
-  })
-  delegationRuntime?.bindAgentLoop({
-    runTurn: (threadId, turnId) => loop.runTurn(threadId, turnId)
-  })
-  const startedAt = options.startedAt ?? nowIso()
-  return {
+	        preserveCompleted: true
+	      })
+	    }
+	  }
+	  const loop = new AgentLoop(loopOptions)
+	  backgroundShellRuntime.bindAgentLoop({
+	    runTurn: (threadId, turnId) => loop.runTurn(threadId, turnId)
+	  })
+	  delegationRuntime?.bindAgentLoop({
+	    runTurn: (threadId, turnId) => loop.runTurn(threadId, turnId)
+	  })
+	  const startedAt = activeOptions.startedAt ?? nowIso()
+	  const rebuildCapabilities = (): typeof capabilities => buildRuntimeCapabilityManifest({
+	    config: activeOptions.capabilities,
+	    model: modelCapabilities(activeOptions.model),
+	    mcp: {
+	      configuredServers: Object.keys(activeOptions.capabilities?.mcp.servers ?? {}).length,
+	      connectedServers: mcpProviders.connectedServers,
+	      toolCount: mcpProviders.toolCount,
+	      lastError: mcpProviders.diagnostics.find((diagnostic) => diagnostic.lastError)?.lastError,
+	      search: {
+	        active: mcpProviders.search.active,
+	        indexedToolCount: mcpProviders.search.indexedToolCount,
+	        advertisedToolCount: mcpProviders.search.advertisedToolCount
+	      }
+	    },
+	    web: {
+	      fetchAvailable: webProviders.fetchAvailable,
+	      searchAvailable: webProviders.searchAvailable,
+	      provider: webProviders.provider,
+	      reason: webProviders.diagnostics.find((diagnostic) => diagnostic.reason)?.reason
+	    },
+	    skills: {
+	      configuredRoots: activeOptions.capabilities?.skills.roots.length,
+	      discoveredSkills: skillRuntime.count(),
+	      reason: skillRuntime.diagnostics().validationErrors[0]?.message
+	    },
+	    instructions: {
+	      available: instructionRuntime.enabled(),
+	      lastSourceCount: instructionRuntime.diagnostics().lastInjection?.sources.length ?? 0,
+	      lastInjectedBytes: instructionRuntime.diagnostics().lastInjection?.injectedBytes ?? 0
+	    },
+	    attachments: {
+	      available: Boolean(attachmentStore)
+	    },
+	    memory: {
+	      available: Boolean(memoryStore)
+	    },
+	    subagents: {
+	      available: Boolean(delegationRuntime?.enabled())
+	    },
+	    imageGen: {
+	      available: imageGenProviders.available,
+	      reason: imageGenProviders.diagnostics.find((diagnostic) => diagnostic.reason)?.reason
+	    },
+	    speechGen: {
+	      available: speechGenProviders.available,
+	      reason: speechGenProviders.diagnostics.find((diagnostic) => diagnostic.reason)?.reason
+	    },
+	    musicGen: {
+	      available: musicGenProviders.available,
+	      reason: musicGenProviders.diagnostics.find((diagnostic) => diagnostic.reason)?.reason
+	    },
+	    videoGen: {
+	      available: videoGenProviders.available,
+	      reason: videoGenProviders.diagnostics.find((diagnostic) => diagnostic.reason)?.reason
+	    },
+	    computerUse: {
+	      available: computerUseProviders.available,
+	      reason: computerUseProviders.diagnostics.find((diagnostic) => diagnostic.reason)?.reason
+	    }
+	  })
+	  let applyConfigQueue: Promise<RuntimeConfigApplyResponse> = Promise.resolve({ ok: true })
+	  const applyConfig = (request: RuntimeConfigApplyRequest): Promise<RuntimeConfigApplyResponse> => {
+	    const task = applyConfigQueue
+	      .catch(() => ({ ok: true }) as RuntimeConfigApplyResponse)
+	      .then(() => applyConfigOnce(request))
+	    applyConfigQueue = task
+	    return task
+	  }
+	  const applyConfigOnce = async (
+	    request: RuntimeConfigApplyRequest
+	  ): Promise<RuntimeConfigApplyResponse> => {
+	    const nextOptions = mergeRuntimeConfigApplyOptions(activeOptions, request)
+	    const nextAgentSdkSignature = agentSdkProviderSignature(nextOptions)
+	    if (nextAgentSdkSignature !== agentSdkSignature) {
+	      return {
+	        ok: false,
+	        code: 'restart_required',
+	        message: 'agent-sdk provider routing changed and requires a runtime restart'
+	      }
+	    }
+	    const nextSubagentsEnabled = nextOptions.capabilities?.subagents.enabled === true
+	    if (nextSubagentsEnabled && !delegationRuntime) {
+	      return {
+	        ok: false,
+	        code: 'restart_required',
+	        message: 'enabling subagents requires a runtime restart'
+	      }
+	    }
+
+	    const nextModelProfiles = modelContextProfilesFromConfig({
+	      contextCompaction: nextOptions.contextCompaction,
+	      models: nextOptions.models
+	    })
+	    const nextTokenEconomy = tokenEconomyConfigForOptions(nextOptions)
+	    const nextMcpHasOAuth = Object.values(nextOptions.capabilities?.mcp?.servers ?? {}).some((server) =>
+	      server.oauth?.enabled !== false && Boolean(server.oauth) && server.transport !== 'stdio'
+	    )
+	    const nextOAuthEncryptor = nextMcpHasOAuth
+	      ? (await createSecretEncryptor({
+	          keyFilePath: join(activeOptions.dataDir, 'secret.key'),
+	          run: defaultSecretCommandRunner
+	        })).encryptor
+	      : undefined
+	    const [nextMcpProviders, nextSkillRuntime] = await Promise.all([
+	      buildMcpToolProviders(nextOptions.capabilities?.mcp, {
+	        oauthStorageDir: join(activeOptions.dataDir, 'mcp-oauth'),
+	        ...(nextOAuthEncryptor ? { oauthEncryptor: nextOAuthEncryptor } : {})
+	      }),
+	      SkillRuntime.create(nextOptions.capabilities?.skills)
+	    ])
+	    const nextAttachmentStore = nextOptions.capabilities?.attachments.enabled
+	      ? new FileAttachmentStore({
+	          rootDir: join(activeOptions.dataDir, 'attachments'),
+	          config: nextOptions.capabilities.attachments,
+	          nowIso
+	        })
+	      : undefined
+	    const nextMemoryStore = nextOptions.capabilities?.memory.enabled
+	      ? new FileMemoryStore({
+	          rootDir: join(activeOptions.dataDir, 'memory'),
+	          config: nextOptions.capabilities.memory,
+	          nowIso
+	        })
+	      : undefined
+	    const nextWebProviders = buildWebToolProviders(nextOptions.capabilities?.web)
+	    const nextImageGenProviders = buildImageGenToolProviders(nextOptions.capabilities?.imageGen, {
+	      attachmentStore: nextAttachmentStore,
+	      nowIso
+	    })
+	    const nextSpeechGenProviders = buildSpeechGenToolProviders(nextOptions.capabilities?.speechGen, { nowIso })
+	    const nextMusicGenProviders = buildMusicGenToolProviders(nextOptions.capabilities?.musicGen, { nowIso })
+	    const nextVideoGenProviders = buildVideoGenToolProviders(nextOptions.capabilities?.videoGen, { nowIso })
+	    const nextComputerUseProviders = await buildComputerUseToolProviders(nextOptions.capabilities?.computerUse)
+	    const nextResolvedHooks = [
+	      ...buildBuiltinHooks({ quality: nextOptions.quality ?? DEFAULT_QUALITY_CONFIG }),
+	      ...resolveConfiguredHooks(nextOptions.hooks)
+	    ]
+	    const nextBaseToolProviders = [
+	      {
+	        id: 'builtin',
+	        kind: 'built-in' as const,
+	        enabled: true,
+	        available: true,
+	        tools: withBackgroundShellTools(
+	          buildDefaultLocalTools({}, builtinToolOptionsForOptions(nextOptions)),
+	          nextOptions
+	        )
+	      },
+	      {
+	        id: 'artifacts',
+	        kind: 'built-in' as const,
+	        enabled: true,
+	        available: true,
+	        tools: [createReadArtifactTool()]
+	      },
+	      ...nextMcpProviders.providers,
+	      ...nextWebProviders.providers,
+	      ...buildMemoryToolProviders(nextMemoryStore),
+	      ...buildSkillToolProviders(nextSkillRuntime),
+	      ...nextImageGenProviders.providers,
+	      ...nextSpeechGenProviders.providers,
+	      ...nextMusicGenProviders.providers,
+	      ...nextVideoGenProviders.providers,
+	      designCanvasProvider
+	    ]
+	    const nextChildRegistry = new CapabilityRegistry(nextBaseToolProviders)
+	    if (delegationRuntime && nextOptions.capabilities?.subagents) {
+	      delegationRuntime.replaceConfig(mergeBuiltinSubagentProfiles(nextOptions.capabilities.subagents))
+	    }
+	    const nextRegistry = new CapabilityRegistry([
+	      ...nextBaseToolProviders,
+	      ...nextComputerUseProviders.providers,
+	      {
+	        id: 'goal',
+	        kind: 'gui' as const,
+	        enabled: true,
+	        available: true,
+	        tools: buildGoalLocalTools(threadService)
+	      },
+	      {
+	        id: 'todo',
+	        kind: 'gui' as const,
+	        enabled: true,
+	        available: true,
+	        tools: buildTodoLocalTools(threadService)
+	      },
+	      {
+	        id: 'planning',
+	        kind: 'built-in' as const,
+	        enabled: true,
+	        available: true,
+	        tools: [taskGraphTool]
+	      },
+	      ...buildDelegationToolProviders(delegationRuntime)
+	    ])
+
+	    const previousMcpProviders = mcpProviders
+	    activeOptions = nextOptions
+	    modelProfiles = nextModelProfiles
+	    tokenEconomy = nextTokenEconomy
+	    agentSdkSignature = nextAgentSdkSignature
+	    modelClient.replace(buildModelClientRouterInput(activeOptions, modelCapabilities, llmDebug))
+	    skillRuntime.replaceWith(nextSkillRuntime)
+	    instructionRuntime.replaceConfig(activeOptions.capabilities?.instructions)
+	    mcpProviders = nextMcpProviders
+	    webProviders = nextWebProviders
+	    attachmentStore = nextAttachmentStore
+	    memoryStore = nextMemoryStore
+	    imageGenProviders = nextImageGenProviders
+	    speechGenProviders = nextSpeechGenProviders
+	    musicGenProviders = nextMusicGenProviders
+	    videoGenProviders = nextVideoGenProviders
+	    computerUseProviders = nextComputerUseProviders
+	    resolvedHooks = nextResolvedHooks
+	    baseToolProviders = nextBaseToolProviders
+	    childRegistry = nextChildRegistry
+	    registry = nextRegistry
+	    childToolHost.replaceRuntimeComponents({ registry: childRegistry, hooks: resolvedHooks })
+	    toolHost.replaceRuntimeComponents({ registry, hooks: resolvedHooks })
+	    if (sdkRuntimeDeps) {
+	      sdkRuntimeDeps.registry = registry
+	      sdkRuntimeDeps.providerConfigs = activeOptions.providers ?? {}
+	      sdkRuntimeDeps.defaultApprovalPolicy = activeOptions.approvalPolicy
+	      sdkRuntimeDeps.defaultModel = activeOptions.model
+	      sdkRuntimeDeps.defaultToken = activeOptions.apiKey
+	      sdkRuntimeDeps.skillRuntime = skillRuntime
+	      sdkRuntimeDeps.instructionRuntime = instructionRuntime
+	      if (attachmentStore) {
+	        sdkRuntimeDeps.attachmentStore = attachmentStore
+	      } else {
+	        delete sdkRuntimeDeps.attachmentStore
+	      }
+	      if (memoryStore) {
+	        sdkRuntimeDeps.memoryStore = memoryStore
+	      } else {
+	        delete sdkRuntimeDeps.memoryStore
+	      }
+	    }
+	    turnService.updateRuntimeConfig({
+	      defaultModel: activeOptions.model,
+	      contextCompaction: activeOptions.contextCompaction,
+	      model: modelClient
+	    })
+	    reviewService.updateRuntimeConfig({
+	      defaultModel: activeOptions.model,
+	      models: activeOptions.models,
+	      contextCompaction: activeOptions.contextCompaction,
+	      tokenEconomy,
+	      runtime: activeOptions.runtime,
+	      reasoningEffort: activeOptions.roles?.codeReviewReasoningEffort
+	    })
+	    loopOptions.tokenEconomy = tokenEconomy
+	    loopOptions.contextCompaction = activeOptions.contextCompaction
+	    loopOptions.roles = activeOptions.roles
+	    loopOptions.instructionRuntime = instructionRuntime
+	    loopOptions.toolStorm = activeOptions.runtime?.toolStorm
+	    loopOptions.toolArgumentRepair = activeOptions.runtime?.toolArgumentRepair
+	    loopOptions.hooks = resolvedHooks
+	    loopOptions.attachmentStore = attachmentStore
+	    loopOptions.memoryStore = memoryStore
+	    capabilities = rebuildCapabilities()
+	    void mcpProviders.startBackgroundReconnect((provider) => {
+	      try {
+	        registry.registerProvider(provider)
+	      } catch {
+	        // ignore duplicate/colliding registration
+	      }
+	      try {
+	        childRegistry.registerProvider(provider)
+	      } catch {
+	        // ignore duplicate/colliding registration
+	      }
+	    })
+	    void previousMcpProviders.close().catch(() => undefined)
+	    return { ok: true }
+	  }
+	  return {
     threadService,
     turnService,
     reviewService,
@@ -585,17 +875,28 @@ export async function createKunServeRuntime(
     events,
     llmDebug,
     approvalGate,
-    userInputGate,
-    workspaceInspector,
-    toolHost,
-    ...(attachmentStore ? { attachmentStore } : {}),
-    ...(memoryStore ? { memoryStore } : {}),
-    ...(delegationRuntime ? { delegationRuntime } : {}),
-    backgroundShellRuntime,
-    modelClient,
-    defaultModel: options.model,
-    ...(options.roles ? { roles: options.roles } : {}),
-    immutablePrefix: prefix,
+	    userInputGate,
+	    workspaceInspector,
+	    toolHost,
+	    get attachmentStore() {
+	      return attachmentStore
+	    },
+	    get memoryStore() {
+	      return memoryStore
+	    },
+	    get delegationRuntime() {
+	      return delegationRuntime
+	    },
+	    backgroundShellRuntime,
+	    supplyChainTrust,
+	    modelClient,
+	    get defaultModel() {
+	      return activeOptions.model
+	    },
+	    get roles() {
+	      return activeOptions.roles
+	    },
+	    immutablePrefix: prefix,
     runTurn(threadId, turnId) {
       return loop.runTurn(threadId, turnId)
     },
@@ -604,25 +905,26 @@ export async function createKunServeRuntime(
     },
     runReview(input) {
       return reviewService.runReview(input)
-    },
-    runtimeToken: options.runtimeToken,
-    insecure: options.insecure,
-    allocateSeq,
-    nowIso,
-    info: () => {
-      const memory = process.memoryUsage()
-      const peakRssBytes = Math.max(memory.rss, process.resourceUsage().maxRSS * 1024)
-      return {
-        host: options.host,
-        port: options.port,
-        configPath: options.configPath,
-        dataDir: options.dataDir,
-        model: options.model,
-        endpointFormat: options.endpointFormat ?? DEFAULT_MODEL_ENDPOINT_FORMAT,
-        approvalPolicy: options.approvalPolicy,
-        sandboxMode: options.sandboxMode,
-        tokenEconomyMode: options.tokenEconomyMode,
-        insecure: options.insecure,
+	    },
+	    runtimeToken: activeOptions.runtimeToken,
+	    insecure: activeOptions.insecure,
+	    allocateSeq,
+	    nowIso,
+	    applyConfig,
+	    info: () => {
+	      const memory = process.memoryUsage()
+	      const peakRssBytes = Math.max(memory.rss, process.resourceUsage().maxRSS * 1024)
+	      return {
+	        host: activeOptions.host,
+	        port: activeOptions.port,
+	        configPath: activeOptions.configPath,
+	        dataDir: activeOptions.dataDir,
+	        model: activeOptions.model,
+	        endpointFormat: activeOptions.endpointFormat ?? DEFAULT_MODEL_ENDPOINT_FORMAT,
+	        approvalPolicy: activeOptions.approvalPolicy,
+	        sandboxMode: activeOptions.sandboxMode,
+	        tokenEconomyMode: activeOptions.tokenEconomyMode,
+	        insecure: activeOptions.insecure,
         startedAt,
         pid: process.pid,
         memoryUsage: {
@@ -632,16 +934,17 @@ export async function createKunServeRuntime(
           heapTotalBytes: memory.heapTotal,
           externalBytes: memory.external
         },
-        capabilities
+        capabilities: rebuildCapabilities()
       }
     },
-    toolDiagnostics: async () => ({
-      providers: registry.diagnostics(),
-      mcpServers: mcpProviders.diagnostics,
+	    toolDiagnostics: async () => ({
+	      providers: registry.diagnostics(),
+	      mcpServers: mcpProviders.diagnostics,
       mcpOAuth: mcpProviders.oauth,
       mcpSearch: mcpProviders.search,
       webProviders: webProviders.diagnostics,
       skills: skillRuntime.diagnostics(),
+      instructions: instructionRuntime.diagnostics(),
       attachments: attachmentStore
         ? await attachmentStore.diagnostics()
         : { enabled: false, rootDir: '', count: 0, totalBytes: 0 },
@@ -652,7 +955,7 @@ export async function createKunServeRuntime(
       speechGen: speechGenProviders.diagnostics,
       musicGen: musicGenProviders.diagnostics,
       videoGen: videoGenProviders.diagnostics
-    }),
+	    }),
     mcpOAuth: async () => mcpProviders.oauth,
     clearMcpOAuth: async (serverId) => mcpProviders.clearOAuthCredentials(serverId),
     authorizeMcpOAuth: async (serverId) => mcpProviders.authorizeOAuth(serverId),
@@ -668,12 +971,122 @@ export async function createKunServeRuntime(
   }
 }
 
+function buildModelClientRouterInput(
+  options: KunServeRuntimeOptions,
+  modelCapabilities: (model: string) => ReturnType<typeof modelCapabilitiesForModel>,
+  llmDebug: LlmDebugRecorder
+): { default: CompatModelClient; providers: Map<string, CompatModelClient> } {
+  const streamIdleOverride =
+    options.runtime?.streamIdleTimeoutMs !== undefined
+      ? { streamIdleTimeoutMs: options.runtime.streamIdleTimeoutMs }
+      : {}
+  const defaultClient = new CompatModelClient({
+    baseUrl: options.baseUrl,
+    apiKey: options.apiKey,
+    modelProxyUrl: options.modelProxyUrl,
+    endpointFormat: options.endpointFormat ?? DEFAULT_MODEL_ENDPOINT_FORMAT,
+    retry: options.retry,
+    model: options.model,
+    modelCapabilities,
+    headers: options.headers,
+    debugSink: llmDebug,
+    ...streamIdleOverride
+  })
+  const providerClients = new Map<string, CompatModelClient>()
+  for (const [providerId, provider] of Object.entries(options.providers ?? {})) {
+    const trimmedId = providerId.trim()
+    if (!trimmedId || (provider.kind ?? 'http') === 'agent-sdk') continue
+    providerClients.set(
+      trimmedId,
+      new CompatModelClient({
+        baseUrl: provider.baseUrl ?? options.baseUrl ?? '',
+        apiKey: provider.apiKey,
+        modelProxyUrl: provider.modelProxyUrl ?? options.modelProxyUrl,
+        endpointFormat: provider.endpointFormat ?? options.endpointFormat ?? DEFAULT_MODEL_ENDPOINT_FORMAT,
+        retry: provider.retry ?? options.retry,
+        model: options.model,
+        modelCapabilities,
+        headers: provider.headers,
+        debugSink: llmDebug,
+        ...streamIdleOverride
+      })
+    )
+  }
+  return { default: defaultClient, providers: providerClients }
+}
+
+function agentSdkProviderIdsForOptions(options: KunServeRuntimeOptions): Set<string> {
+  const out = new Set<string>()
+  for (const [providerId, provider] of Object.entries(options.providers ?? {})) {
+    const trimmedId = providerId.trim()
+    if (trimmedId && (provider.kind ?? 'http') === 'agent-sdk') out.add(trimmedId)
+  }
+  return out
+}
+
+function agentSdkProviderSignature(options: KunServeRuntimeOptions): string {
+  return [...agentSdkProviderIdsForOptions(options)].sort().join('\n')
+}
+
+function mergeRuntimeConfigApplyOptions(
+  current: KunServeRuntimeOptions,
+  request: RuntimeConfigApplyRequest
+): KunServeRuntimeOptions {
+  const serve = request.serve ?? {}
+  return {
+    ...current,
+    apiKey: serve.apiKey ?? current.apiKey,
+    baseUrl: serve.baseUrl ?? current.baseUrl,
+    modelProxyUrl: serve.modelProxyUrl ?? current.modelProxyUrl,
+    endpointFormat: serve.endpointFormat ?? current.endpointFormat,
+    retry: serve.retry ?? current.retry,
+    headers: serve.headers ?? current.headers,
+    providers: serve.providers ?? current.providers,
+    model: serve.model ?? current.model,
+    approvalPolicy: serve.approvalPolicy ?? current.approvalPolicy,
+    sandboxMode: serve.sandboxMode ?? current.sandboxMode,
+    tokenEconomyMode: serve.tokenEconomyMode ?? current.tokenEconomyMode,
+    tokenEconomy: serve.tokenEconomy ?? current.tokenEconomy,
+    toolOutputLimits: serve.toolOutputLimits ?? current.toolOutputLimits,
+    models: request.models ?? current.models,
+    contextCompaction: request.contextCompaction ?? current.contextCompaction,
+    runtime: request.runtime ?? current.runtime,
+    roles: request.roles ?? current.roles,
+    capabilities: request.capabilities ?? current.capabilities,
+    hooks: request.hooks ?? current.hooks,
+    quality: request.quality ?? current.quality
+  }
+}
+
 function tokenEconomyConfigForOptions(
   options: Pick<KunServeRuntimeOptions, 'tokenEconomyMode' | 'tokenEconomy'>
 ): TokenEconomyConfig {
   return {
     ...(options.tokenEconomy ?? {}),
     enabled: options.tokenEconomy?.enabled ?? options.tokenEconomyMode
+  }
+}
+
+function toolOutputLimitsForOptions(
+  options: Pick<KunServeRuntimeOptions, 'toolOutputLimits'>
+): Required<ToolOutputLimitsConfig> {
+  return {
+    maxLines: Math.max(
+      1,
+      Math.floor(options.toolOutputLimits?.maxLines ?? DEFAULT_TOOL_OUTPUT_LIMITS_CONFIG.maxLines)
+    ),
+    maxBytes: Math.max(
+      1,
+      Math.floor(options.toolOutputLimits?.maxBytes ?? DEFAULT_TOOL_OUTPUT_LIMITS_CONFIG.maxBytes)
+    )
+  }
+}
+
+function builtinToolOptionsForOptions(options: KunServeRuntimeOptions) {
+  const outputLimits = toolOutputLimitsForOptions(options)
+  return {
+    read: outputLimits,
+    bash: outputLimits
   }
 }
 

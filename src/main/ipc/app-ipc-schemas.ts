@@ -13,6 +13,8 @@ import {
   KUN_MCP_OAUTH_TEMPLATE,
   KUN_RUNTIME_INFO_TEMPLATE,
   KUN_RUNTIME_TOOLS_TEMPLATE,
+  KUN_SUPPLY_CHAIN_AUDIT_TEMPLATE,
+  KUN_SUPPLY_CHAIN_UPDATE_CHECK_TEMPLATE,
   KUN_SESSION_RESUME_TEMPLATE,
   KUN_SKILLS_TEMPLATE,
   KUN_THREADS_TEMPLATE,
@@ -33,6 +35,7 @@ import {
   KUN_BACKGROUND_SHELL_TEMPLATE
 } from '../../shared/kun-endpoints'
 import {
+  IMAGE_GENERATION_QUALITIES,
   IMAGE_GENERATION_PROTOCOLS,
   MUSIC_GENERATION_PROTOCOLS,
   MODEL_ENDPOINT_FORMATS,
@@ -154,6 +157,8 @@ const ENDPOINTS: readonly EndpointTemplate[] = [
   compileEndpoint(KUN_HEALTH_TEMPLATE, ['GET']),
   compileEndpoint(KUN_RUNTIME_INFO_TEMPLATE, ['GET']),
   compileEndpoint(KUN_RUNTIME_TOOLS_TEMPLATE, ['GET']),
+  compileEndpoint(KUN_SUPPLY_CHAIN_AUDIT_TEMPLATE, ['POST']),
+  compileEndpoint(KUN_SUPPLY_CHAIN_UPDATE_CHECK_TEMPLATE, ['POST']),
   compileEndpoint(KUN_SKILLS_TEMPLATE, ['GET']),
   compileEndpoint(KUN_ATTACHMENTS_TEMPLATE, ['POST']),
   compileEndpoint(KUN_ATTACHMENT_DIAGNOSTICS_TEMPLATE, ['GET']),
@@ -240,6 +245,7 @@ const writeInlineCompletionModelSchema = z.union([
 ])
 const modelEndpointFormatSchema = z.enum(MODEL_ENDPOINT_FORMATS)
 const imageGenerationProtocolSchema = z.enum(IMAGE_GENERATION_PROTOCOLS)
+const imageGenerationQualitySchema = z.enum(IMAGE_GENERATION_QUALITIES)
 const speechToTextProtocolSchema = z.enum(SPEECH_TO_TEXT_PROTOCOLS)
 const localWhisperModelIdSchema = z.enum(LOCAL_WHISPER_MODELS.map((model) => model.id) as [string, ...string[]])
 const localWhisperDownloadSourceIds = LOCAL_WHISPER_DOWNLOAD_SOURCES.map((source) => source.id) as [
@@ -296,6 +302,11 @@ const modelProviderPatchSchema = z.object({
     apiKey: z.string().max(MAX_BODY_BYTES).optional(),
     baseUrl: z.string().trim().max(MAX_URL_LENGTH).optional(),
     endpointFormat: modelEndpointFormatSchema.optional(),
+    retry: z.object({
+      maxAttempts: z.number().int().min(0).max(10).optional(),
+      initialDelayMs: z.number().int().min(0).max(600_000).optional(),
+      httpStatusCodes: z.array(z.number().int().min(400).max(599)).max(64).optional()
+    }).strict().optional(),
     kind: z.enum(['http', 'agent-sdk']).optional(),
     // Some third-party aggregators (litellm, oneapi, …) advertise 500+ chat
     // models in a single /v1/models response. The previous 200/50 caps caused
@@ -380,6 +391,11 @@ const kunRuntimePatchSchema = z.object({
   baseUrl: z.string().trim().max(MAX_URL_LENGTH).optional(),
   providerId: z.string().trim().max(64).optional(),
   endpointFormat: modelEndpointFormatSchema.optional(),
+  retry: z.object({
+    maxAttempts: z.number().int().min(0).max(10).optional(),
+    initialDelayMs: z.number().int().min(0).max(600_000).optional(),
+    httpStatusCodes: z.array(z.number().int().min(400).max(599)).max(64).optional()
+  }).strict().optional(),
   runtimeToken: z.string().max(MAX_BODY_BYTES).optional(),
   dataDir: defaultPathSchema,
   model: modelIdSchema.optional(),
@@ -399,6 +415,10 @@ const kunRuntimePatchSchema = z.object({
       maxToolArgumentStringTokens: z.number().int().positive().max(64_000).optional(),
       maxArrayItems: z.number().int().positive().max(10_000).optional()
     }).strict().optional()
+  }).strict().optional(),
+  toolOutputLimits: z.object({
+    maxLines: z.number().int().positive().max(1_000_000).optional(),
+    maxBytes: z.number().int().positive().max(64 * 1024 * 1024).optional()
   }).strict().optional(),
   insecure: z.boolean().optional(),
   mcpSearch: z.object({
@@ -449,6 +469,7 @@ const kunRuntimePatchSchema = z.object({
     apiKey: z.string().max(MAX_BODY_BYTES).optional(),
     model: optionalModelIdSchema,
     defaultSize: z.string().trim().max(16).optional(),
+    quality: imageGenerationQualitySchema.optional(),
     timeoutMs: z.number().int().positive().max(600_000).optional()
   }).strict().optional(),
   speechToText: z.object({
@@ -508,6 +529,9 @@ const kunRuntimePatchSchema = z.object({
     modelProfilePatchSchema.nullable()
   ).optional(),
   memoryEnabled: z.boolean().optional(),
+  instructions: z.object({
+    enabled: z.boolean().optional()
+  }).strict().optional(),
   // Global small-model slot + per-role internal-LLM model overrides (agents.kun.*).
   // Title & Summary default to smallModel, then the main conversation model.
   smallModel: optionalModelIdSchema,
@@ -671,7 +695,8 @@ const clawImPatchSchema = z.object({
   providerId: z.string().trim().max(64).optional(),
   model: modelIdSchema.optional(),
   mode: clawRunModeSchema.optional(),
-  responseTimeoutMs: z.number().int().min(5_000).max(600_000).optional()
+  responseTimeoutMs: z.number().int().min(5_000).max(600_000).optional(),
+  recentThreadListLimit: z.number().int().min(1).max(50).optional()
 }).strict()
 
 const clawImAgentProfilePatchSchema = z.object({
@@ -724,6 +749,8 @@ const clawImConversationPatchSchema = z.object({
   senderName: z.string().max(512).optional(),
   localThreadId: z.string().max(MAX_ID_LENGTH).optional(),
   workspaceRoot: defaultPathSchema,
+  providerId: z.string().trim().max(64).optional(),
+  model: z.string().trim().max(128).optional(),
   createdAt: z.string().max(128).optional(),
   updatedAt: z.string().max(128).optional()
 }).strict()
@@ -1334,6 +1361,34 @@ export const workflowCodeCheckPayloadSchema = z
     code: z.string().max(MAX_BODY_BYTES)
   })
   .strict()
+const designSettingsPatchSchema = z.object({
+  defaultWorkspaceRoot: defaultPathSchema,
+  brandColor: z.string().trim().max(32).optional(),
+  tone: z.array(trimmedString(32)).max(12).optional(),
+  designSystemPreset: z
+    .enum([
+      'none', 'shadcn', 'radix', 'material', 'ios', 'fluent', 'ant',
+      'chakra', 'carbon', 'polaris', 'bootstrap', 'geist', 'brutalism', 'editorial'
+    ])
+    .optional(),
+  designType: z.enum(['', 'brand', 'product']).optional(),
+  designGuidelines: z.string().max(4000).optional(),
+  radius: z.enum(['', 'sharp', 'soft', 'rounded', 'pill']).optional(),
+  density: z.enum(['', 'compact', 'cozy', 'spacious']).optional(),
+  fontStyle: z.enum(['', 'system', 'geometric', 'humanist', 'serif', 'mono']).optional(),
+  model: z.string().trim().max(128).optional(),
+  providerId: z.string().trim().max(128).optional(),
+  reasoningEffort: z.string().trim().max(32).optional(),
+  generationPrompt: z.string().max(6000).optional(),
+  implementStackHint: z.string().trim().max(200).optional(),
+  injectIntoCode: z.boolean().optional(),
+  publishDesignSystem: z.boolean().optional(),
+  defaultViewport: z.enum(['mobile', 'tablet', 'desktop']).optional(),
+  defaultCanvasView: z.enum(['preview', 'code']).optional(),
+  canvasBackground: z.enum(['light', 'dark']).optional(),
+  liveRefresh: z.boolean().optional(),
+  deviceFrame: z.boolean().optional()
+}).strict()
 
 function stripLegacySettingsPatchKeys(payload: unknown): unknown {
   if (typeof payload !== 'object' || payload === null || Array.isArray(payload)) return payload
@@ -1380,6 +1435,7 @@ const settingsPatchObjectSchema = z.object({
   claw: clawSettingsPatchSchema.optional(),
   schedule: scheduleSettingsPatchSchema.optional(),
   workflow: workflowSettingsPatchSchema.optional(),
+  design: designSettingsPatchSchema.optional(),
   terminal: terminalSettingsPatchSchema.optional(),
   guiUpdate: z.object({
     channel: z.enum(GUI_UPDATE_CHANNELS).optional()
@@ -1573,6 +1629,23 @@ export const workspaceClipboardImageSavePayloadSchema = z
   })
   .strict()
 
+export const workspaceImagePickPayloadSchema = z
+  .object({
+    workspaceRoot: trimmedString(MAX_PATH_LENGTH),
+    currentFilePath: optionalTrimmedString(MAX_PATH_LENGTH),
+    imageDirectory: optionalTrimmedString(MAX_PATH_LENGTH)
+  })
+  .strict()
+
+export const workspaceImageBytesSavePayloadSchema = z
+  .object({
+    workspaceRoot: trimmedString(MAX_PATH_LENGTH),
+    dataBase64: z.string().max(MAX_SAVE_FILE_BASE64_BYTES),
+    mimeType: optionalTrimmedString(255),
+    imageDirectory: optionalTrimmedString(MAX_PATH_LENGTH)
+  })
+  .strict()
+
 export const workspaceEntryRenamePayloadSchema = z
   .object({
     path: trimmedString(MAX_PATH_LENGTH),
@@ -1607,10 +1680,30 @@ export const writeRetrievalPayloadSchema = z
 
 export const writeExportPayloadSchema = z
   .object({
-    path: trimmedString(MAX_PATH_LENGTH),
+    path: optionalTrimmedString(MAX_PATH_LENGTH),
+    title: optionalTrimmedString(200),
     workspaceRoot: optionalTrimmedString(MAX_PATH_LENGTH),
     format: z.enum(WRITE_EXPORT_FORMATS),
     content: z.string().max(MAX_BODY_BYTES)
+  })
+  .strict()
+  .refine((payload) => Boolean(payload.path || payload.title), {
+    message: 'An export path or title is required.'
+  })
+
+export const memoryMarkdownExportPayloadSchema = z
+  .object({
+    markdown: z.string().max(MAX_BODY_BYTES),
+    defaultFileName: optionalTrimmedString(200)
+  })
+  .strict()
+
+export const designExportPayloadSchema = z
+  .object({
+    path: trimmedString(MAX_PATH_LENGTH),
+    workspaceRoot: optionalTrimmedString(MAX_PATH_LENGTH),
+    format: z.enum(['html', 'pdf']),
+    filename: optionalTrimmedString(MAX_PATH_LENGTH)
   })
   .strict()
 

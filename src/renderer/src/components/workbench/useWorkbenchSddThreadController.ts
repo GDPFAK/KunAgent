@@ -1,0 +1,435 @@
+import { useCallback, useEffect, useRef, type Dispatch, type SetStateAction } from 'react'
+import { useTranslation } from 'react-i18next'
+import type { NormalizedThread, RuntimeConnectionStatus } from '../../agent/types'
+import { getProvider } from '../../agent/registry'
+import { useChatStore, type AppRoute } from '../../store/chat-store'
+import { formatWorkspacePickerError } from '../../lib/format-workspace-picker-error'
+import { isConversationWorkspacePath, normalizeWorkspaceRoot } from '../../lib/workspace-path'
+import {
+  buildSddDraftId,
+  createSddDraft,
+  resolveSddRequirementWorkspace,
+  useSddDraftStore,
+  type SddDraft,
+  type SddDraftSaveStatus
+} from '../../sdd/sdd-draft-store'
+import { listSddDraftHistory, titleFromSddDraftContent } from '../../sdd/sdd-draft-history'
+import { restoreSddDraft } from '../../sdd/sdd-draft-restore'
+import { saveActiveSddDraftToDisk } from '../../sdd/sdd-draft-actions'
+import {
+  isSddAssistantThread,
+  isEmptySddAssistantThreadCandidate,
+  markSddAssistantThread,
+  sddAssistantThreadIdForDraft
+} from '../../sdd/sdd-thread-registry'
+import {
+  refreshSddChatTranscriptFromProvider,
+  sddDraftRefForThreadId,
+  writeSddChatTranscriptForThread
+} from '../../sdd/sdd-chat-transcript'
+import type { RightPanelMode } from '../chat/WorkbenchTopBar'
+
+const SDD_ASSISTANT_TITLE_SYNC_DELAY_MS = 900
+
+function sddAssistantThreadTitle(markdown: string, fallback: string): string {
+  return titleFromSddDraftContent(markdown, fallback).trim() || fallback
+}
+
+function sddDraftFromRegisteredThread(threadId: string): SddDraft | null {
+  const ref = sddDraftRefForThreadId(threadId)
+  if (!ref) return null
+  const timestamp = new Date(0).toISOString()
+  return {
+    id: buildSddDraftId(ref.workspaceRoot, ref.draftRelativePath),
+    workspaceRoot: ref.workspaceRoot,
+    relativePath: ref.draftRelativePath,
+    createdAt: timestamp,
+    updatedAt: timestamp
+  }
+}
+
+type UseWorkbenchSddThreadControllerParams = {
+  activeThreadId: string | null
+  codeThreads: NormalizedThread[]
+  conversationWorkspaceRoot: string
+  input: string
+  rightPanelMode: RightPanelMode
+  runtimeConnection: RuntimeConnectionStatus
+  workspaceRoot: string
+  selectThread: (id: string) => Promise<void>
+  setComposerMode: (mode: 'plan' | 'agent') => void
+  setError: (message: string | null) => void
+  setInput: (value: string) => void
+  setRightPanelMode: (mode: RightPanelMode) => void
+  setRightSidebarWidth: Dispatch<SetStateAction<number>>
+  setRoute: (route: AppRoute) => void
+}
+
+export type WorkbenchSddThreadController = {
+  activeSddDraft: SddDraft | null
+  sddDraftContent: string
+  sddDraftOperationStatus: ReturnType<typeof useSddDraftStore.getState>['operationStatus']
+  createSddAssistantThreadForDraft: (draft: SddDraft) => Promise<string | null>
+  dismissActiveSddDraft: (options?: { closeAssistant?: boolean }) => void
+  findSddDraftForSidebarThread: (
+    threadId: string,
+    thread: NormalizedThread | null
+  ) => Promise<SddDraft | null>
+  openSddAssistantPanel: () => Promise<void>
+  openSddRequirementDraftFromHistory: (draft: SddDraft) => Promise<void>
+  quoteToSddAssistant: (prompt: string) => void
+  renameSddAssistantThreadToDraft: (threadId: string, draft: SddDraft) => Promise<void>
+  startNewSddAssistantConversation: () => void
+  startNewSddRequirement: () => Promise<void>
+  toggleSddAssistantPanel: () => Promise<void>
+  ensureSddAssistantThreadForDraft: (draft: SddDraft) => Promise<string | null>
+}
+
+export function useWorkbenchSddThreadController({
+  activeThreadId,
+  codeThreads,
+  conversationWorkspaceRoot,
+  input,
+  rightPanelMode,
+  runtimeConnection,
+  workspaceRoot,
+  selectThread,
+  setComposerMode,
+  setError,
+  setInput,
+  setRightPanelMode,
+  setRightSidebarWidth,
+  setRoute
+}: UseWorkbenchSddThreadControllerParams): WorkbenchSddThreadController {
+  const { t } = useTranslation('common')
+  const activeSddDraft = useSddDraftStore((s) => s.activeDraft)
+  const sddDraftContent = useSddDraftStore((s) => s.content)
+  const sddDraftOperationStatus = useSddDraftStore((s) => s.operationStatus)
+  const sddTitleSyncTimerRef = useRef<number | null>(null)
+  const lastSyncedSddTitleRef = useRef<Record<string, string>>({})
+
+  const titleForSddDraft = useCallback((draft: SddDraft): string => {
+    const snapshot = useSddDraftStore.getState()
+    const markdown = snapshot.activeDraft?.id === draft.id ? snapshot.content : ''
+    return sddAssistantThreadTitle(markdown, t('sddUntitledRequirement'))
+  }, [t])
+
+  const renameSddAssistantThreadToDraft = useCallback(async (
+    threadId: string,
+    draft: SddDraft
+  ): Promise<void> => {
+    const targetId = threadId.trim()
+    const nextTitle = titleForSddDraft(draft)
+    if (!targetId || !nextTitle || runtimeConnection !== 'ready') return
+    const currentTitle = useChatStore.getState().threads.find((thread) => thread.id === targetId)?.title.trim()
+    if (currentTitle === nextTitle || lastSyncedSddTitleRef.current[targetId] === nextTitle) return
+    try {
+      await getProvider().renameThread(targetId, nextTitle)
+      lastSyncedSddTitleRef.current[targetId] = nextTitle
+      useChatStore.setState((state) => ({
+        threads: state.threads.map((thread) =>
+          thread.id === targetId ? { ...thread, title: nextTitle } : thread
+        )
+      }))
+    } catch (error) {
+      setError(error instanceof Error ? error.message : String(error))
+    }
+  }, [runtimeConnection, setError, titleForSddDraft])
+
+  const createSddAssistantThreadForDraft = useCallback(async (
+    draft: SddDraft
+  ): Promise<string | null> => {
+    const normalizedWorkspace = normalizeWorkspaceRoot(draft.workspaceRoot)
+    if (!normalizedWorkspace) {
+      setError(t('workspaceRequiredToCreateThread'))
+      return null
+    }
+    if (runtimeConnection !== 'ready') {
+      setError(t('runtimeActionNeedsConnection'))
+      return null
+    }
+    try {
+      const provider = getProvider()
+      const thread = await provider.createThread({
+        workspace: normalizedWorkspace,
+        title: titleForSddDraft(draft),
+        mode: 'agent'
+      })
+      const normalizedThread = {
+        ...thread,
+        workspace: normalizeWorkspaceRoot(thread.workspace) || normalizedWorkspace
+      }
+      markSddAssistantThread(draft, normalizedThread.id)
+      void writeSddChatTranscriptForThread({
+        workspaceRoot: draft.workspaceRoot,
+        draftRelativePath: draft.relativePath,
+        threadId: normalizedThread.id,
+        blocks: []
+      })
+      useChatStore.setState((state) => ({
+        activeThreadId: normalizedThread.id,
+        threads: state.threads.some((item) => item.id === normalizedThread.id)
+          ? state.threads
+          : [normalizedThread, ...state.threads]
+      }))
+      setRoute('chat')
+      await selectThread(normalizedThread.id)
+      void useChatStore.getState().refreshThreads()
+      return normalizedThread.id
+    } catch (error) {
+      setError(error instanceof Error ? error.message : String(error))
+      return null
+    }
+  }, [runtimeConnection, selectThread, setError, setRoute, t, titleForSddDraft])
+
+  const ensureSddAssistantThreadForDraft = useCallback(async (
+    draft: SddDraft
+  ): Promise<string | null> => {
+    const registeredThreadId = sddAssistantThreadIdForDraft(draft)
+    if (registeredThreadId) {
+      setRoute('chat')
+      if (useChatStore.getState().activeThreadId !== registeredThreadId) {
+        await selectThread(registeredThreadId)
+      }
+      if (useChatStore.getState().activeThreadId === registeredThreadId) {
+        void renameSddAssistantThreadToDraft(registeredThreadId, draft)
+        return registeredThreadId
+      }
+    }
+    return createSddAssistantThreadForDraft(draft)
+  }, [
+    createSddAssistantThreadForDraft,
+    renameSddAssistantThreadToDraft,
+    selectThread,
+    setRoute
+  ])
+
+  useEffect(() => {
+    const draft = activeSddDraft
+    if (!draft || runtimeConnection !== 'ready') return
+    const threadId = sddAssistantThreadIdForDraft(draft)
+    if (!threadId) return
+    const nextTitle = sddAssistantThreadTitle(sddDraftContent, t('sddUntitledRequirement'))
+    if (!nextTitle || lastSyncedSddTitleRef.current[threadId] === nextTitle) return
+    if (sddTitleSyncTimerRef.current) {
+      window.clearTimeout(sddTitleSyncTimerRef.current)
+    }
+    sddTitleSyncTimerRef.current = window.setTimeout(() => {
+      sddTitleSyncTimerRef.current = null
+      const latestDraft = useSddDraftStore.getState().activeDraft
+      if (!latestDraft || latestDraft.id !== draft.id) return
+      const latestThreadId = sddAssistantThreadIdForDraft(latestDraft)
+      if (latestThreadId !== threadId) return
+      void renameSddAssistantThreadToDraft(threadId, latestDraft)
+    }, SDD_ASSISTANT_TITLE_SYNC_DELAY_MS)
+    return () => {
+      if (sddTitleSyncTimerRef.current) {
+        window.clearTimeout(sddTitleSyncTimerRef.current)
+        sddTitleSyncTimerRef.current = null
+      }
+    }
+  }, [activeSddDraft, renameSddAssistantThreadToDraft, runtimeConnection, sddDraftContent, t])
+
+  const openSddRequirementDraft = useCallback(async (
+    draft: SddDraft,
+    content: string,
+    options: {
+      lastSavedContent?: string
+      saveStatus?: SddDraftSaveStatus
+      openAssistant?: boolean
+    } = {}
+  ): Promise<boolean> => {
+    useSddDraftStore.getState().setActiveDraft(draft, content, {
+      lastSavedContent: options.lastSavedContent,
+      saveStatus: options.saveStatus
+    })
+    void refreshSddChatTranscriptFromProvider(draft)
+    setInput('')
+    setComposerMode('agent')
+    setRoute('chat')
+    if (options.openAssistant ?? runtimeConnection === 'ready') {
+      setRightSidebarWidth((width) => Math.max(width, 420))
+      const sddThreadId = await ensureSddAssistantThreadForDraft(draft)
+      if (sddThreadId) {
+        setRightPanelMode('sdd-ai')
+      } else {
+        setRightPanelMode(null)
+      }
+    } else {
+      setRightPanelMode(null)
+    }
+    return true
+  }, [
+    ensureSddAssistantThreadForDraft,
+    runtimeConnection,
+    setComposerMode,
+    setInput,
+    setRightPanelMode,
+    setRightSidebarWidth,
+    setRoute
+  ])
+
+  const dismissActiveSddDraft = useCallback((
+    options: { closeAssistant?: boolean } = {}
+  ): void => {
+    const draft = useSddDraftStore.getState().activeDraft
+    if (draft) {
+      void saveActiveSddDraftToDisk()
+      useSddDraftStore.getState().clearActiveDraft()
+    }
+    if (options.closeAssistant && rightPanelMode === 'sdd-ai') setRightPanelMode(null)
+  }, [rightPanelMode, setRightPanelMode])
+
+  const openSddAssistantPanel = useCallback(async (): Promise<void> => {
+    const draft = useSddDraftStore.getState().activeDraft
+    if (!draft) return
+    setRightSidebarWidth((width) => Math.max(width, 420))
+    const threadId = await ensureSddAssistantThreadForDraft(draft)
+    if (!threadId) return
+    setRightPanelMode('sdd-ai')
+  }, [ensureSddAssistantThreadForDraft, setRightPanelMode, setRightSidebarWidth])
+
+  const toggleSddAssistantPanel = useCallback(async (): Promise<void> => {
+    if (rightPanelMode === 'sdd-ai') {
+      setRightPanelMode(null)
+      return
+    }
+    await openSddAssistantPanel()
+  }, [openSddAssistantPanel, rightPanelMode, setRightPanelMode])
+
+  const quoteToSddAssistant = useCallback((prompt: string): void => {
+    const trimmed = prompt.trim()
+    if (!trimmed) return
+    setInput(input.trim() ? `${input.trim()}\n\n${trimmed}` : trimmed)
+    void openSddAssistantPanel()
+  }, [input, openSddAssistantPanel, setInput])
+
+  const startNewSddRequirement = useCallback(async (): Promise<void> => {
+    const suggestedWorkspace = resolveSddRequirementWorkspace(codeThreads, activeThreadId, workspaceRoot)
+    let targetWorkspace = ''
+    try {
+      const picked = await window.kunGui.pickWorkspaceDirectory(suggestedWorkspace || undefined)
+      if (picked.canceled || !picked.path) return
+      targetWorkspace = normalizeWorkspaceRoot(picked.path)
+    } catch (error) {
+      setError(formatWorkspacePickerError(error))
+      return
+    }
+    if (!targetWorkspace) {
+      setError(t('workspaceRequiredToCreateThread'))
+      return
+    }
+    if (isConversationWorkspacePath(targetWorkspace, conversationWorkspaceRoot)) {
+      setError(t('workspaceInsideConversationDir'))
+      return
+    }
+
+    if (useSddDraftStore.getState().activeDraft && !await saveActiveSddDraftToDisk()) return
+
+    const draftUuid = globalThis.crypto?.randomUUID?.() ?? `draft-${Date.now()}`
+    const draft = createSddDraft({ id: draftUuid, workspaceRoot: targetWorkspace })
+    const initialContent = [
+      `# ${t('sddUntitledRequirement')}`,
+      '',
+      `## ${t('sddTemplateBackground')}`,
+      '',
+      `## ${t('sddTemplateGoal')}`,
+      '',
+      `## ${t('sddTemplateAcceptance')}`,
+      ''
+    ].join('\n')
+    const result = await window.kunGui.createWorkspaceFile({
+      workspaceRoot: targetWorkspace,
+      path: draft.relativePath,
+      content: initialContent
+    })
+    if (!result.ok) {
+      setError(result.message)
+      return
+    }
+    const activeDraft = { ...draft, absolutePath: result.path }
+    await openSddRequirementDraft(activeDraft, initialContent)
+  }, [
+    activeThreadId,
+    codeThreads,
+    conversationWorkspaceRoot,
+    openSddRequirementDraft,
+    setError,
+    t,
+    workspaceRoot
+  ])
+
+  const openSddRequirementDraftFromHistory = useCallback(async (
+    draft: SddDraft
+  ): Promise<void> => {
+    const current = useSddDraftStore.getState().activeDraft
+    if (current && current.id !== draft.id) {
+      await saveActiveSddDraftToDisk()
+    }
+    const restored = await restoreSddDraft({
+      draft,
+      readWorkspaceFile: window.kunGui.readWorkspaceFile
+    })
+    if (restored.kind !== 'restored') {
+      setError(restored.kind === 'unreadable' ? restored.message : t('sddDraftHistoryOpenFailed'))
+      return
+    }
+    await openSddRequirementDraft(restored.draft, restored.content, {
+      lastSavedContent: restored.lastSavedContent,
+      saveStatus: restored.saveStatus
+    })
+  }, [openSddRequirementDraft, setError, t])
+
+  const findSddDraftForSidebarThread = useCallback(async (
+    threadId: string,
+    thread: NormalizedThread | null
+  ): Promise<SddDraft | null> => {
+    const normalizedThreadId = threadId.trim()
+    if (!normalizedThreadId) return null
+
+    if (isSddAssistantThread(thread ?? { id: normalizedThreadId })) {
+      return sddDraftFromRegisteredThread(normalizedThreadId)
+    }
+
+    if (thread && !isEmptySddAssistantThreadCandidate(thread)) return null
+    const listWorkspaceDirectory = window.kunGui?.listWorkspaceDirectory
+    const readWorkspaceFile = window.kunGui?.readWorkspaceFile
+    if (typeof listWorkspaceDirectory !== 'function' || typeof readWorkspaceFile !== 'function') {
+      return null
+    }
+
+    const targetWorkspace = normalizeWorkspaceRoot(thread?.workspace || workspaceRoot)
+    if (!targetWorkspace) return null
+    const history = await listSddDraftHistory({
+      workspaceRoot: targetWorkspace,
+      listWorkspaceDirectory,
+      readWorkspaceFile,
+      limit: 80
+    }).catch(() => [])
+    return history.find((draft) => draft.chatThreadIds?.includes(normalizedThreadId)) ?? null
+  }, [workspaceRoot])
+
+  const startNewSddAssistantConversation = useCallback((): void => {
+    const draft = useSddDraftStore.getState().activeDraft
+    if (!draft) return
+    setInput('')
+    void createSddAssistantThreadForDraft(draft)
+  }, [createSddAssistantThreadForDraft, setInput])
+
+  return {
+    activeSddDraft,
+    sddDraftContent,
+    sddDraftOperationStatus,
+    createSddAssistantThreadForDraft,
+    dismissActiveSddDraft,
+    ensureSddAssistantThreadForDraft,
+    findSddDraftForSidebarThread,
+    openSddAssistantPanel,
+    openSddRequirementDraftFromHistory,
+    quoteToSddAssistant,
+    renameSddAssistantThreadToDraft,
+    startNewSddAssistantConversation,
+    startNewSddRequirement,
+    toggleSddAssistantPanel
+  }
+}

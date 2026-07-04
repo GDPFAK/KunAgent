@@ -45,10 +45,19 @@ export type ReviewServiceDeps = {
 }
 
 export class ReviewService {
-  private readonly deps: ReviewServiceDeps
+  private deps: ReviewServiceDeps
 
   constructor(deps: ReviewServiceDeps) {
     this.deps = deps
+  }
+
+  updateRuntimeConfig(
+    patch: Partial<Pick<ReviewServiceDeps, 'defaultModel' | 'models' | 'contextCompaction' | 'tokenEconomy' | 'runtime' | 'reasoningEffort'>>
+  ): void {
+    this.deps = {
+      ...this.deps,
+      ...patch
+    }
   }
 
   async runReview(input: {
@@ -57,6 +66,7 @@ export class ReviewService {
     reviewItemId: string
     target: ReviewTarget
     model?: string
+    providerId?: string
   }): Promise<'completed' | 'failed' | 'aborted'> {
     const signal = this.deps.turns.getAbortController(input.turnId)
     if (!signal) {
@@ -82,6 +92,7 @@ export class ReviewService {
         prompt: resolved.prompt,
         workspace: thread.workspace ?? '',
         model: input.model?.trim() || thread.model || this.deps.defaultModel,
+        providerId: input.providerId?.trim() || thread.providerId?.trim(),
         signal
       })
       if (signal.aborted) {
@@ -118,6 +129,7 @@ export class ReviewService {
     prompt: string
     workspace: string
     model: string
+    providerId?: string
     signal: AbortSignal
   }): Promise<string> {
     const nowIso = this.deps.nowIso
@@ -189,6 +201,7 @@ export class ReviewService {
       title: 'Review',
       workspace: input.workspace || '~',
       model: input.model,
+      ...(input.providerId?.trim() ? { providerId: input.providerId.trim() } : {}),
       mode: 'agent',
       approvalPolicy: 'auto'
     })
@@ -197,6 +210,7 @@ export class ReviewService {
       request: {
         prompt: input.prompt,
         model: input.model,
+        ...(input.providerId?.trim() ? { providerId: input.providerId.trim() } : {}),
         mode: 'agent',
         reasoningEffort: normalizeRoleReasoningEffort(this.deps.reasoningEffort)
       }

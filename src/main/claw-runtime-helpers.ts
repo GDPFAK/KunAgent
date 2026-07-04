@@ -31,7 +31,8 @@ export type ClawRuntimeDeps = {
   sendWeixinBridgeMessage?: (options: {
     accountId: string
     to: string
-    text: string
+    text?: string
+    files?: readonly { path: string; fileName: string }[]
   }) => Promise<{ ok: true; messageId: string } | { ok: false; message: string }>
   /** WeChat owner (`ilink_user_id`) for a bridge account; '' when unknown. */
   resolveWeixinAccountUserId?: (accountId: string) => Promise<string>
@@ -52,7 +53,11 @@ export type ClawRuntimeDeps = {
 
 export type ThreadRecordJson = {
   id: string
+  title?: string
   status?: string
+  workspace?: string
+  createdAt?: string
+  updatedAt?: string
 }
 
 export type TurnRecordJson = {
@@ -299,7 +304,8 @@ function generatedFilesFromToolResult(
     (item.toolName === 'generate_image' ||
       item.toolName === 'generate_speech' ||
       item.toolName === 'generate_music' ||
-      item.toolName === 'generate_video') &&
+      item.toolName === 'generate_video' ||
+      item.toolName === 'send_im_attachment') &&
     Array.isArray(output.files)
   ) {
     return output.files

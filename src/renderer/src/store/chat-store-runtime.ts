@@ -15,7 +15,12 @@ import { getProvider } from '../agent/registry'
 import { rendererRuntimeClient } from '../agent/runtime-client'
 import i18n from '../i18n'
 import { describeRuntimeError, formatRuntimeError, getRuntimeErrorCode } from '../lib/format-runtime-error'
-import { isClawWorkspacePath, isInternalTemporaryWorkspace, normalizeWorkspaceRoot } from '../lib/workspace-path'
+import {
+  isClawWorkspacePath,
+  isInternalDeepSeekGuiWorkspace,
+  isInternalTemporaryWorkspace,
+  normalizeWorkspaceRoot
+} from '../lib/workspace-path'
 import type { ClawImChannelV1 } from '@shared/app-settings'
 import { isBackgroundShellNoticeUserMessage } from '@shared/background-shell-notice'
 import type { ChatState } from './chat-store-types'
@@ -33,8 +38,10 @@ import {
   type WriteThreadRegistry
 } from '../write/write-thread-registry'
 import { isSddAssistantThread } from '../sdd/sdd-thread-registry'
+import { isDesignThreadId, type DesignThreadRegistry } from '../design/design-thread-registry'
 import { readThreadWorktreeRegistry, saveThreadWorktreeRegistry, forgetThreadWorktree } from '../lib/thread-worktree-registry'
 import { notifySddChatTranscriptMirror } from '../sdd/sdd-chat-transcript'
+import { notifyDesignChatTranscriptMirror } from '../design/design-chat-transcript'
 import { useWriteWorkspaceStore } from '../write/write-workspace-store'
 import {
   armBusyWatchdog as armBusyWatchdogImpl,
@@ -397,16 +404,27 @@ export function looksLikeActiveTurnError(error: unknown): boolean {
 export function isCodeThread(
   thread: NormalizedThread,
   clawChannels: ClawImChannelV1[] = [],
-  writeRegistry?: WriteThreadRegistry
+  writeRegistry?: WriteThreadRegistry,
+  designRegistry?: DesignThreadRegistry
+): boolean {
+  return thread.archived !== true && isCodeSidebarThread(thread, clawChannels, writeRegistry, designRegistry)
+}
+
+export function isCodeSidebarThread(
+  thread: NormalizedThread,
+  clawChannels: ClawImChannelV1[] = [],
+  writeRegistry?: WriteThreadRegistry,
+  designRegistry?: DesignThreadRegistry
 ): boolean {
   const workspace = normalizeWorkspaceRoot(thread.workspace)
   return Boolean(workspace) &&
-    thread.archived !== true &&
     !isInternalTemporaryWorkspace(thread.workspace) &&
+    !isInternalDeepSeekGuiWorkspace(thread.workspace) &&
     !isClawWorkspacePath(thread.workspace) &&
     !isClawThread(thread, clawChannels) &&
     !isWriteThreadId(thread.id, writeRegistry) &&
-    !isSddAssistantThread(thread)
+    !isSddAssistantThread(thread) &&
+    !isDesignThreadId(thread.id, designRegistry)
 }
 
 export function latestThread(threads: NormalizedThread[]): NormalizedThread | null {
@@ -462,19 +480,27 @@ function runtimeStatusText(event: RuntimeStatusEventPayload): string {
   if (event.kind === 'tool_result_upload_wait') {
     return i18n.t('common:toolUploadWaitStatus', { count: event.toolResultCount ?? 0 })
   }
-	  if (event.kind === 'tool_catalog_changed') {
-	    return event.message?.trim() || i18n.t('common:toolCatalogChangedStatus')
-	  }
-	  if (event.kind === 'tool_storm_suppressed') {
-	    return event.message?.trim() || i18n.t('common:toolStormSuppressedStatus', {
-	      tool: event.toolName ?? 'tool'
-	    })
-	  }
+  if (event.kind === 'model_request_retry') {
+    return i18n.t('common:modelRequestRetryStatus', {
+      status: event.status ?? '',
+      attempt: event.attempt ?? 0,
+      max: event.maxAttempts ?? 0,
+      seconds: Math.ceil((event.delayMs ?? 0) / 1000)
+    })
+  }
+  if (event.kind === 'tool_catalog_changed') {
+    return event.message?.trim() || i18n.t('common:toolCatalogChangedStatus')
+  }
+  if (event.kind === 'tool_storm_suppressed') {
+    return event.message?.trim() || i18n.t('common:toolStormSuppressedStatus', {
+      tool: event.toolName ?? 'tool'
+    })
+  }
   if (event.kind === 'compaction_summary_fallback') {
     return event.message?.trim() || i18n.t('common:compactionSummaryFallbackStatus')
   }
-	  return event.message?.trim() || ''
-	}
+  return event.message?.trim() || ''
+}
 
 function runtimeErrorPayloadToError(event: {
   message: string
@@ -868,11 +894,21 @@ export function buildThreadEventSink(
         }
         let liveReasoning = s.liveReasoning
         let liveAssistant = s.liveAssistant
+        // Shared, cross-sink replay guard — see ChatState.liveDeltaSeqFloor.
+        // The per-sink `appliedDeltaSeqFloor` above only dedups within one
+        // subscription; while a flaky long turn briefly has more than one sink
+        // live, each independently re-applies the same replayed deltas. Gating
+        // on the store floor serializes them so each seq folds in just once.
+        let liveDeltaSeqFloor = s.liveDeltaSeqFloor
         let nextReasoningFirstAtByUserId = s.turnReasoningFirstAtByUserId
         let nextReasoningLastAtByUserId = s.turnReasoningLastAtByUserId
         const userId = s.currentTurnUserId
         let sawReasoning = false
         for (const delta of deltas) {
+          if (typeof delta.seq === 'number') {
+            if (delta.seq <= liveDeltaSeqFloor) continue
+            liveDeltaSeqFloor = delta.seq
+          }
           if (delta.kind === 'agent_reasoning') {
             liveReasoning += delta.text
             sawReasoning = true
@@ -892,6 +928,7 @@ export function buildThreadEventSink(
           ...base,
           ...(liveReasoning !== s.liveReasoning ? { liveReasoning } : {}),
           ...(liveAssistant !== s.liveAssistant ? { liveAssistant } : {}),
+          ...(liveDeltaSeqFloor !== s.liveDeltaSeqFloor ? { liveDeltaSeqFloor } : {}),
           ...(nextReasoningFirstAtByUserId !== s.turnReasoningFirstAtByUserId
             ? { turnReasoningFirstAtByUserId: nextReasoningFirstAtByUserId }
             : {}),
@@ -1368,6 +1405,7 @@ export function buildThreadEventSink(
       notifyTurnComplete(completedThreadId, completedState, completedKey)
       notifyWriteWorkspaceFileRefresh(get)
       notifySddChatTranscriptMirror(get)
+      notifyDesignChatTranscriptMirror(get)
       syncTurnCompletionPoll(set, get)
       if (shouldReconcileCompletion) {
         void reconcileCompletedTurnFromThreadDetail({

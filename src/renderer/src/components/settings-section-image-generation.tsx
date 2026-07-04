@@ -2,6 +2,7 @@ import { useState, useEffect, type ReactElement } from 'react'
 import {
   CUSTOM_IMAGE_GENERATION_PROVIDER_ID,
   DEFAULT_IMAGE_GENERATION_PROTOCOL,
+  IMAGE_GENERATION_QUALITIES,
   IMAGE_GENERATION_PROTOCOLS,
   resolveKunImageGenerationSettings
 } from '@shared/app-settings'
@@ -15,7 +16,19 @@ const DEFAULT_IMAGE_GENERATION = {
   apiKey: '',
   model: '',
   defaultSize: '',
+  quality: 'auto',
   timeoutMs: 180000
+}
+
+function imageGenerationProtocolLabelKey(protocol: string): string {
+  if (protocol === 'minimax-image') return 'imageGenProtocolMiniMax'
+  if (protocol === 'codex-responses-image') return 'imageGenProtocolCodex'
+  return 'imageGenProtocolOpenAi'
+}
+
+function preferredImageGenerationModel(image: { protocol?: string; models?: string[] } | undefined): string {
+  if (image?.protocol === 'codex-responses-image' && image.models?.includes('gpt-image-2')) return 'gpt-image-2'
+  return image?.models?.[0] ?? ''
 }
 
 export function ImageGenerationSettingsSection({ ctx }: { ctx: Record<string, any> }): ReactElement {
@@ -94,7 +107,7 @@ export function ImageGenerationSettingsSection({ ctx }: { ctx: Record<string, an
                         : nextProvider?.image?.protocol ?? DEFAULT_IMAGE_GENERATION_PROTOCOL,
                       model: providerId === CUSTOM_IMAGE_GENERATION_PROVIDER_ID
                         ? imageGeneration.model
-                        : nextProvider?.image?.models?.[0] ?? ''
+                        : preferredImageGenerationModel(nextProvider?.image)
                     })
                   }}
                 >
@@ -124,7 +137,7 @@ export function ImageGenerationSettingsSection({ ctx }: { ctx: Record<string, an
                   >
                     {IMAGE_GENERATION_PROTOCOLS.map((protocol) => (
                       <option key={protocol} value={protocol}>
-                        {t(protocol === 'minimax-image' ? 'imageGenProtocolMiniMax' : 'imageGenProtocolOpenAi')}
+                        {t(imageGenerationProtocolLabelKey(protocol))}
                       </option>
                     ))}
                   </select>
@@ -177,7 +190,7 @@ export function ImageGenerationSettingsSection({ ctx }: { ctx: Record<string, an
                     value={imageModelOptions.includes(imageGeneration.model) ? imageGeneration.model : ''}
                     options={imageModelOptions}
                     defaultLabel={t('modelSelectDefaultOption', {
-                      model: imageModelOptions[0] ?? ''
+                      model: preferredImageGenerationModel(selectedProviderImage)
                     })}
                     selectClassName={selectControlClass}
                     onChange={(model) => updateImageGeneration({ model })}
@@ -189,6 +202,23 @@ export function ImageGenerationSettingsSection({ ctx }: { ctx: Record<string, an
           <div className="px-3 py-3">
             <InlineNoticeView notice={{ tone: 'info', message: t('imageGenModelQualityHint') }} />
           </div>
+          <SettingRow
+            title={t('imageGenQuality')}
+            description={t('imageGenQualityDesc')}
+            control={
+              <select
+                className={selectControlClass}
+                value={imageGeneration.quality}
+                onChange={(e) => updateImageGeneration({ quality: e.target.value })}
+              >
+                {IMAGE_GENERATION_QUALITIES.map((quality) => (
+                  <option key={quality} value={quality}>
+                    {t(`imageGenQuality_${quality}`)}
+                  </option>
+                ))}
+              </select>
+            }
+          />
           <SettingRow
             title={t('imageGenDefaultSize')}
             description={t('imageGenDefaultSizeDesc')}

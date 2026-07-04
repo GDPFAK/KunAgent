@@ -107,6 +107,7 @@ export function parseServeOptions(
           : env.KUN_ENDPOINT_FORMAT as ServeOptions['endpointFormat'] | undefined ??
             configServe.endpointFormat ??
             DEFAULT_SERVE_OPTIONS.endpointFormat,
+    retry: configServe.retry ?? DEFAULT_SERVE_OPTIONS.retry,
     model:
       typeof raw.model === 'string'
         ? raw.model
@@ -124,6 +125,7 @@ export function parseServeOptions(
       ...(configServe.tokenEconomy ?? {}),
       enabled: tokenEconomyMode
     },
+    toolOutputLimits: configServe.toolOutputLimits ?? DEFAULT_SERVE_OPTIONS.toolOutputLimits,
     insecure:
       typeof raw.insecure === 'string'
         ? raw.insecure !== 'false' && raw.insecure !== '0'
@@ -139,6 +141,7 @@ export function parseServeOptions(
         ? { sqlitePath: storageSqlitePathFromRawOrEnv(raw, env) ?? configServe.storage?.sqlitePath }
         : {})
     },
+    headers: configServe.headers,
     providers: configServe.providers,
     models: loadedConfig?.config.models,
     contextCompaction: loadedConfig?.config.contextCompaction,

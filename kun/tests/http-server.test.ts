@@ -70,6 +70,80 @@ describe('HTTP server', () => {
     expect(response.status).toBe(401)
   })
 
+  it('applies runtime config through the authenticated hot apply route', async () => {
+    const h = buildHarness()
+    const applyConfig = vi.fn(async () => ({ ok: true as const }))
+    h.runtime.applyConfig = applyConfig
+    const response = await dispatchRequest(
+      h.router,
+      new Request('http://localhost/v1/runtime/config/apply', {
+        method: 'POST',
+        headers: { authorization: 'Bearer tok-1', 'content-type': 'application/json' },
+        body: JSON.stringify({
+          serve: {
+            model: 'deepseek-reasoner',
+            approvalPolicy: 'never',
+            providers: {
+              minimax: {
+                apiKey: 'sk-minimax',
+                baseUrl: 'https://api.minimax.example/v1'
+              }
+            }
+          }
+        })
+      })
+    )
+
+    expect(response.status).toBe(200)
+    expect(await readJson(response)).toEqual({ ok: true })
+    expect(applyConfig).toHaveBeenCalledWith(expect.objectContaining({
+      serve: expect.objectContaining({
+        model: 'deepseek-reasoner',
+        approvalPolicy: 'never',
+        providers: expect.objectContaining({
+          minimax: expect.objectContaining({
+            apiKey: 'sk-minimax',
+            baseUrl: 'https://api.minimax.example/v1'
+          })
+        })
+      })
+    }))
+  })
+
+  it('requires auth for runtime config hot apply', async () => {
+    const h = buildHarness()
+    h.runtime.applyConfig = vi.fn(async () => ({ ok: true as const }))
+    const response = await dispatchRequest(
+      h.router,
+      new Request('http://localhost/v1/runtime/config/apply', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ serve: { model: 'deepseek-reasoner' } })
+      })
+    )
+
+    expect(response.status).toBe(401)
+    expect(h.runtime.applyConfig).not.toHaveBeenCalled()
+  })
+
+  it('rejects process-level runtime fields on the hot apply route', async () => {
+    const h = buildHarness()
+    h.runtime.applyConfig = vi.fn(async () => ({ ok: true as const }))
+    const response = await dispatchRequest(
+      h.router,
+      new Request('http://localhost/v1/runtime/config/apply', {
+        method: 'POST',
+        headers: { authorization: 'Bearer tok-1', 'content-type': 'application/json' },
+        body: JSON.stringify({ serve: { port: 18899 } })
+      })
+    )
+
+    expect(response.status).toBe(400)
+    const body = await readJson(response) as { ok?: boolean; code?: string }
+    expect(body).toMatchObject({ ok: false, code: 'invalid_config' })
+    expect(h.runtime.applyConfig).not.toHaveBeenCalled()
+  })
+
   it('returns structured validation errors for invalid JSON bodies', async () => {
     const h = buildHarness()
     const response = await dispatchRequest(

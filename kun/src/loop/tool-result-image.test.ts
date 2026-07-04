@@ -4,7 +4,9 @@ import {
   capToolResultImages,
   extractToolResultImages,
   isModelVisibleImageOutput,
-  toolResultTextWithoutImages
+  rehydrateGeneratedImagesForForward,
+  toolResultTextWithoutImages,
+  type ToolResultImage
 } from './tool-result-image.js'
 
 function toolResult(id: string, output: unknown): Extract<TurnItem, { kind: 'tool_result' }> {
@@ -29,6 +31,65 @@ const screenshot = (data: string) => ({
   action: 'screenshot',
   screen: { width: 1280, height: 800 },
   images: [{ mime_type: 'image/png', data_base64: data, width: 1280, height: 800 }]
+})
+
+function genImageResult(id: string, isError = false): Extract<TurnItem, { kind: 'tool_result' }> {
+  return {
+    ...toolResult(id, {
+      files: [{ relativePath: `.deepseekgui-images/${id}.png`, absolutePath: `/tmp/${id}.png` }],
+      attachments: [{ id: `att_${id}` }],
+      endpoint: 'generations'
+    }),
+    toolName: 'generate_image',
+    isError
+  }
+}
+
+const fakeResolve = async (): Promise<ToolResultImage> => ({
+  mimeType: 'image/png',
+  dataBase64: 'ZZZ',
+  width: 24,
+  height: 24
+})
+
+describe('rehydrateGeneratedImagesForForward', () => {
+  it('augments the most recent generate_image into a model-visible image (copy only)', async () => {
+    const history: TurnItem[] = [genImageResult('a')]
+    const before = JSON.parse(JSON.stringify(history))
+    const out = await rehydrateGeneratedImagesForForward(history, fakeResolve, 1)
+    expect(out[0].kind).toBe('tool_result')
+    if (out[0].kind === 'tool_result') {
+      expect(isModelVisibleImageOutput(out[0].output)).toBe(true)
+      expect((out[0].output as { data_base64?: string }).data_base64).toBe('ZZZ')
+      // the original generate_image output is also preserved (files/attachments still there)
+      expect((out[0].output as { files?: unknown }).files).toBeDefined()
+    }
+    // The input history is NEVER mutated — the persisted log stays base64-free.
+    expect(history).toEqual(before)
+  })
+
+  it('forwards only the most recent N, leaving older generated images base64-free', async () => {
+    const history: TurnItem[] = [genImageResult('older'), genImageResult('newer')]
+    const out = await rehydrateGeneratedImagesForForward(history, fakeResolve, 1)
+    const older = out[0]
+    const newer = out[1]
+    expect(newer.kind === 'tool_result' && isModelVisibleImageOutput(newer.output)).toBe(true)
+    expect(older.kind === 'tool_result' && isModelVisibleImageOutput(older.output)).toBe(false)
+  })
+
+  it('skips error results and non-generate_image tools (returns history unchanged)', async () => {
+    const history: TurnItem[] = [genImageResult('failed', true), toolResult('read1', { text: 'hi' })]
+    const out = await rehydrateGeneratedImagesForForward(history, fakeResolve, 2)
+    expect(out).toBe(history)
+  })
+
+  it('degrades to a no-op when the resolver throws (scope miss / missing file)', async () => {
+    const history: TurnItem[] = [genImageResult('a')]
+    const out = await rehydrateGeneratedImagesForForward(history, async () => {
+      throw new Error('not authorized')
+    }, 1)
+    expect(out).toBe(history)
+  })
 })
 
 describe('extractToolResultImages', () => {

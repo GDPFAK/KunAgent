@@ -6,7 +6,6 @@ import {
   ArrowUpCircle,
   Bot,
   Check,
-  ChevronDown,
   Code2,
   ClipboardList,
   Download,
@@ -19,6 +18,7 @@ import {
   Loader2,
   MessageCircleMore,
   RefreshCw,
+  Shapes,
   Terminal
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
@@ -31,6 +31,7 @@ export type RightPanelMode =
   | 'file'
   | 'plan'
   | 'sdd-ai'
+  | 'canvas'
   | 'subagents'
   | null
 
@@ -38,6 +39,7 @@ type Props = {
   rightPanelMode: RightPanelMode
   onToggleRightPanelMode: (mode: Exclude<RightPanelMode, null>) => void
   planPanelEnabled?: boolean
+  canvasEnabled?: boolean
   terminalOpen?: boolean
   onToggleTerminal?: () => void
   sideChatCount?: number
@@ -50,21 +52,13 @@ type Props = {
   onOpenSideChat?: () => void
 }
 
-const TOPBAR_ICON_CLASS = 'h-[17px] w-[17px]'
-const TOPBAR_BUTTON_BASE =
-  'inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full border p-0 shadow-[inset_0_1px_0_rgba(255,255,255,0.45)] transition dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]'
-const TOPBAR_BUTTON_ACTIVE = 'border-ds-border-strong bg-white/70 text-ds-ink dark:bg-white/10'
-const TOPBAR_BUTTON_IDLE =
-  'border-transparent bg-white/38 text-ds-faint opacity-90 hover:border-ds-border-muted hover:bg-white/55 hover:text-ds-ink hover:opacity-100 dark:bg-white/4 dark:hover:bg-white/8'
+const TOPBAR_ICON_CLASS = 'h-4 w-4'
 
-function topbarIconButtonClass(active: boolean): string {
-  return `${TOPBAR_BUTTON_BASE} ${active ? TOPBAR_BUTTON_ACTIVE : TOPBAR_BUTTON_IDLE}`
-}
-
-export function WorkbenchTopBar({
+export function WorkbenchSideRail({
   rightPanelMode,
   onToggleRightPanelMode,
   planPanelEnabled = false,
+  canvasEnabled = false,
   terminalOpen = false,
   onToggleTerminal,
   sideChatCount = 0,
@@ -89,6 +83,7 @@ export function WorkbenchTopBar({
     ...(planPanelEnabled ? [{ mode: 'plan' as const, label: t('rightPanelPlan'), icon: ClipboardList }] : []),
     { mode: 'changes' as const, label: t('rightPanelChanges'), icon: FileEdit },
     { mode: 'browser' as const, label: t('rightPanelBrowser'), icon: Globe2 },
+    ...(canvasEnabled ? [{ mode: 'canvas' as const, label: t('rightPanelWhiteboard'), icon: Shapes }] : []),
     { mode: 'subagents' as const, label: t('rightPanelSubagents'), icon: Bot }
   ]
   const selectedEditor = useMemo(
@@ -279,18 +274,20 @@ export function WorkbenchTopBar({
   }
 
   return (
-    <div className="chat-workbench-topbar ds-no-drag flex min-w-0 shrink-0 flex-nowrap items-center justify-end gap-1">
+    <div className="ds-no-drag flex h-full w-12 shrink-0 flex-col items-center gap-1.5 border-l border-ds-border-muted bg-white/80 py-3 backdrop-blur-xl dark:bg-ds-canvas">
       {guiUpdateAction ? (
         <button
           type="button"
           onClick={() => void runGuiUpdateAction()}
           disabled={guiUpdateBusy}
-          className="chat-gui-update-button inline-flex items-center gap-1.5 rounded-full border border-amber-300/75 bg-amber-50/92 px-3 py-1.5 text-[12.5px] font-semibold text-amber-950 shadow-[inset_0_1px_0_rgba(255,255,255,0.55)] transition hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-amber-700/70 dark:bg-amber-950/35 dark:text-amber-100 dark:hover:bg-amber-900/45"
-          aria-label={guiUpdateTitle}
-          title={guiUpdateTitle}
+          className="relative inline-flex h-8 w-8 items-center justify-center rounded-[0.9rem] border border-amber-300/75 bg-amber-50/92 text-amber-950 shadow-[inset_0_1px_0_rgba(255,255,255,0.55)] transition hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-amber-700/70 dark:bg-amber-950/35 dark:text-amber-100 dark:hover:bg-amber-900/45"
+          aria-label={guiUpdateBusy ? guiUpdateLabel : guiUpdateTitle}
+          title={guiUpdateBusy ? guiUpdateLabel : guiUpdateTitle}
         >
           {renderGuiUpdateIcon()}
-          <span className="chat-gui-update-label max-w-[11rem] truncate">{guiUpdateLabel}</span>
+          {!guiUpdateBusy ? (
+            <span className="absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full bg-amber-500 shadow-[0_0_0_2px_rgba(245,158,11,0.18)]" />
+          ) : null}
         </button>
       ) : null}
 
@@ -298,7 +295,7 @@ export function WorkbenchTopBar({
         <button
           type="button"
           onClick={() => setEditorMenuOpen((value) => !value)}
-          className="inline-flex h-7 items-center gap-1 rounded-full border border-transparent bg-white/38 px-2.5 text-ds-faint opacity-90 shadow-[inset_0_1px_0_rgba(255,255,255,0.45)] transition hover:border-ds-border-muted hover:bg-white/55 hover:text-ds-ink hover:opacity-100 dark:bg-white/4 dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] dark:hover:bg-white/8"
+          className="inline-flex h-8 w-8 items-center justify-center rounded-[0.9rem] border border-transparent bg-white/38 text-ds-faint opacity-90 shadow-[inset_0_1px_0_rgba(255,255,255,0.45)] transition hover:border-ds-border-muted hover:bg-white/55 hover:text-ds-ink hover:opacity-100 dark:bg-white/4 dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] dark:hover:bg-white/8"
           aria-label={t('editorPickerTitle')}
           aria-expanded={editorMenuOpen}
           title={
@@ -307,12 +304,11 @@ export function WorkbenchTopBar({
               : t('editorPickerTitle')
           }
         >
-          {renderEditorIcon(selectedEditor, TOPBAR_ICON_CLASS)}
-          <ChevronDown className="h-3.5 w-3.5 opacity-60" strokeWidth={1.9} />
+          {renderEditorIcon(selectedEditor, 'h-4 w-4')}
         </button>
 
         {editorMenuOpen ? (
-          <div className="ds-card-strong absolute right-0 top-full z-50 mt-2 w-64 overflow-hidden rounded-[18px] border border-ds-border py-1.5 shadow-[0_18px_52px_rgba(20,47,95,0.18)] backdrop-blur-xl dark:shadow-[0_22px_58px_rgba(0,0,0,0.38)]">
+          <div className="ds-card-strong absolute right-full top-0 z-50 mr-2 w-64 overflow-hidden rounded-[18px] border border-ds-border py-1.5 shadow-[0_18px_52px_rgba(20,47,95,0.18)] backdrop-blur-xl dark:shadow-[0_22px_58px_rgba(0,0,0,0.38)]">
             <div className="border-b border-ds-border-muted px-3 pb-2 pt-1.5 text-[11px] font-semibold text-ds-faint">
               {t('editorPickerMenuTitle')}
             </div>
@@ -349,19 +345,23 @@ export function WorkbenchTopBar({
           type="button"
           onClick={onOpenSideChat}
           disabled={!sideChatEnabled}
-          className={`relative ${topbarIconButtonClass(sideChatOpen)} disabled:cursor-not-allowed disabled:opacity-45`}
+          className={`relative inline-flex h-8 w-8 items-center justify-center rounded-[0.9rem] border shadow-[inset_0_1px_0_rgba(255,255,255,0.45)] transition disabled:cursor-not-allowed disabled:opacity-45 dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] ${
+            sideChatOpen
+              ? 'border-ds-border-strong bg-white/70 text-ds-ink dark:bg-white/10'
+              : 'border-transparent bg-white/38 text-ds-faint opacity-90 hover:border-ds-border-muted hover:bg-white/55 hover:text-ds-ink hover:opacity-100 dark:bg-white/4 dark:hover:bg-white/8'
+          }`}
           aria-label={t('sidePanelOpen')}
           aria-pressed={sideChatOpen}
           title={t('sidePanelOpen')}
         >
           <MessageCircleMore className={TOPBAR_ICON_CLASS} strokeWidth={1.75} />
           {sideChatCount > 0 ? (
-            <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-accent px-1 text-[10px] font-semibold leading-none text-white">
+            <span className="absolute -left-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-accent px-1 text-[10px] font-semibold leading-none text-white">
               {Math.min(sideChatCount, 9)}
             </span>
           ) : null}
           {sideChatRunningCount > 0 ? (
-            <span className="absolute -bottom-0.5 -right-0.5 h-2 w-2 animate-pulse rounded-full bg-emerald-500 shadow-[0_0_0_2px_rgba(16,185,129,0.18)]" />
+            <span className="absolute -bottom-0.5 -left-0.5 h-2 w-2 animate-pulse rounded-full bg-emerald-500 shadow-[0_0_0_2px_rgba(16,185,129,0.18)]" />
           ) : null}
         </button>
       ) : null}
@@ -375,7 +375,11 @@ export function WorkbenchTopBar({
             <button
               type="button"
               onClick={() => onToggleRightPanelMode(item.mode)}
-              className={topbarIconButtonClass(active)}
+              className={`inline-flex h-8 w-8 items-center justify-center rounded-[0.9rem] border shadow-[inset_0_1px_0_rgba(255,255,255,0.45)] transition dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] ${
+                active
+                  ? 'border-ds-border-strong bg-white/70 text-ds-ink dark:bg-white/10'
+                  : 'border-transparent bg-white/38 text-ds-faint opacity-90 hover:border-ds-border-muted hover:bg-white/55 hover:text-ds-ink hover:opacity-100 dark:bg-white/4 dark:hover:bg-white/8'
+              }`}
               aria-label={item.label}
               aria-pressed={active}
               title={item.label}
@@ -386,7 +390,11 @@ export function WorkbenchTopBar({
               <button
                 type="button"
                 onClick={onToggleTerminal}
-                className={topbarIconButtonClass(terminalOpen)}
+                className={`inline-flex h-8 w-8 items-center justify-center rounded-[0.9rem] border shadow-[inset_0_1px_0_rgba(255,255,255,0.45)] transition dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] ${
+                  terminalOpen
+                    ? 'border-ds-border-strong bg-white/70 text-ds-ink dark:bg-white/10'
+                    : 'border-transparent bg-white/38 text-ds-faint opacity-90 hover:border-ds-border-muted hover:bg-white/55 hover:text-ds-ink hover:opacity-100 dark:bg-white/4 dark:hover:bg-white/8'
+                }`}
                 aria-label={t('rightPanelTerminal')}
                 aria-pressed={terminalOpen}
                 title={t('rightPanelTerminal')}
@@ -403,7 +411,11 @@ export function WorkbenchTopBar({
           type="button"
           onClick={onToggleFileTree}
           disabled={!fileTreeEnabled}
-          className={`${topbarIconButtonClass(fileTreeOpen)} disabled:cursor-not-allowed disabled:opacity-45`}
+          className={`inline-flex h-8 w-8 items-center justify-center rounded-[0.9rem] border shadow-[inset_0_1px_0_rgba(255,255,255,0.45)] transition disabled:cursor-not-allowed disabled:opacity-45 dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] ${
+            fileTreeOpen
+              ? 'border-ds-border-strong bg-white/70 text-ds-ink dark:bg-white/10'
+              : 'border-transparent bg-white/38 text-ds-faint opacity-90 hover:border-ds-border-muted hover:bg-white/55 hover:text-ds-ink hover:opacity-100 dark:bg-white/4 dark:hover:bg-white/8'
+          }`}
           aria-label={t('rightPanelFiles')}
           aria-pressed={fileTreeOpen}
           title={t('rightPanelFiles')}

@@ -1,7 +1,7 @@
 import { mkdtempSync, existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AppSettingsV1 } from '../../shared/app-settings'
 import type { ImageGenClient, ImageGenEditRequest, ImageGenRequest } from '../../../kun/src/adapters/tool/image-gen-tool-provider.js'
 import { buildWriteInfographicPrompt, requestWriteInfographic } from './write-infographic-service'
@@ -22,6 +22,7 @@ function settingsWithImageGen(overrides: Record<string, unknown> = {}): AppSetti
           apiKey: 'sk-image',
           model: 'test-image-model',
           defaultSize: '',
+          quality: 'auto',
           timeoutMs: 180000,
           ...overrides
         }
@@ -56,6 +57,7 @@ describe('write infographic service', () => {
   })
 
   afterEach(() => {
+    vi.unstubAllGlobals()
     rmSync(workspace, { recursive: true, force: true })
   })
 
@@ -94,6 +96,7 @@ describe('write infographic service', () => {
 
     expect(client.requests).toHaveLength(1)
     expect(client.requests[0].model).toBe('test-image-model')
+    expect(client.requests[0].quality).toBe('auto')
     expect(client.requests[0].size).toBe('768x1024')
     expect(client.requests[0].prompt).toContain('季度营收增长 25%')
     expect(client.requests[0].prompt).toContain('infographic')
@@ -123,6 +126,79 @@ describe('write infographic service', () => {
 
     expect(result.ok).toBe(true)
     expect(client.requests[0].size).toBe('1024x1536')
+  })
+
+  it('passes the configured image quality to the provider', async () => {
+    const client = fakeClient()
+    const result = await requestWriteInfographic(settingsWithImageGen({ quality: 'medium' }), {
+      text: 'quality-specific content',
+      filePath: join(workspace, 'doc.md'),
+      workspaceRoot: workspace
+    }, { client })
+
+    expect(result.ok).toBe(true)
+    expect(client.requests[0].quality).toBe('medium')
+  })
+
+  it('unwraps Codex OAuth credentials for direct Write image generation', async () => {
+    const codexCredentials = JSON.stringify({
+      kind: 'codex-oauth',
+      accessToken: 'codex-access-token',
+      refreshToken: 'codex-refresh-token',
+      expiresAt: Date.now() + 3600_000,
+      accountId: 'acct_123',
+      email: 'user@example.com'
+    })
+    const requests: Array<{ url: string; headers: Record<string, string>; body: string }> = []
+    vi.stubGlobal('fetch', vi.fn(async (url: string | URL, init?: RequestInit) => {
+      requests.push({
+        url: String(url),
+        headers: init?.headers as Record<string, string>,
+        body: String(init?.body)
+      })
+      return new Response(`data: ${JSON.stringify({
+        type: 'response.output_item.done',
+        item: { type: 'image_generation_call', result: PNG_BYTES.toString('base64') }
+      })}\n\ndata: [DONE]\n`, {
+        status: 200,
+        headers: { 'content-type': 'text/event-stream' }
+      })
+    }))
+
+    const result = await requestWriteInfographic(settingsWithImageGen({
+      protocol: 'codex-responses-image',
+      baseUrl: 'https://chatgpt.com/backend-api/codex',
+      apiKey: codexCredentials,
+      model: 'gpt-image-2'
+    }), {
+      text: 'Codex subscription image',
+      filePath: join(workspace, 'doc.md'),
+      workspaceRoot: workspace
+    })
+
+    expect(result.ok).toBe(true)
+    expect(requests).toHaveLength(1)
+    expect(requests[0].url).toBe('https://chatgpt.com/backend-api/codex/responses')
+    expect(requests[0].headers).toMatchObject({
+      Authorization: 'Bearer codex-access-token',
+      'ChatGPT-Account-Id': 'acct_123',
+      originator: 'codex_cli_rs',
+      'OpenAI-Beta': 'responses=experimental'
+    })
+    expect(JSON.parse(requests[0].body).tools[0]).toMatchObject({
+      type: 'image_generation',
+      action: 'generate',
+      quality: 'auto',
+      output_format: 'png',
+      background: 'opaque',
+      partial_images: 1,
+      model: 'gpt-image-2'
+    })
+    expect(JSON.parse(requests[0].body).tool_choice).toMatchObject({
+      type: 'allowed_tools',
+      mode: 'required',
+      tools: [{ type: 'image_generation' }]
+    })
   })
 
   it('surfaces provider failures as error results', async () => {
@@ -250,6 +326,7 @@ describe('write infographic service', () => {
       name: 'source.png',
       mimeType: 'image/png'
     })
+    expect(client.edits[0].quality).toBe('auto')
     expect(client.edits[0].prompt).toContain('旅行社区首页')
     if (!result.ok) return
     expect(result.relativePath).toMatch(/^img\/design-\d{14}-[0-9a-f]{4}\.png$/)

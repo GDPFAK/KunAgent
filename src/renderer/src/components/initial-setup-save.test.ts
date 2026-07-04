@@ -8,12 +8,14 @@ import {
 } from '@shared/app-settings'
 import {
   buildInitialSetupSettings,
+  buildInitialSetupSettingsPatch,
   INITIAL_SETUP_PROVIDER_PRESETS,
   initialSetupAutoWirePlan,
   initialSetupDrafts,
   initialSetupProfileId,
   initialSetupSelection
 } from './initial-setup-save'
+import { settingsPatchSchema } from '../../../main/ipc/app-ipc-schemas'
 
 function settings(patch: Record<string, unknown> = {}): AppSettingsV1 {
   return normalizeAppSettings(patch as AppSettingsV1)
@@ -319,6 +321,30 @@ describe('buildInitialSetupSettings', () => {
     })
     const zenmux = getModelProviderSettings(next).providers.find((p) => p.id === 'custom-provider-2')
     expect(zenmux?.apiKey).toBe('z-key')
+  })
+})
+
+describe('buildInitialSetupSettingsPatch', () => {
+  it('omits legacy top-level instructions from the settings:set payload', () => {
+    const current = settings({
+      instructions: { enabled: true },
+      provider: { apiKey: '' },
+      agents: { kun: { providerId: 'deepseek' } }
+    })
+    const drafts = initialSetupDrafts(current)
+    drafts.deepseek = {
+      ...drafts.deepseek,
+      apiKey: 'sk-deepseek-key',
+      baseUrl: 'https://api.deepseek.com'
+    }
+
+    const patch = buildInitialSetupSettingsPatch(current, drafts, {
+      presetId: 'deepseek',
+      mode: 'api'
+    })
+
+    expect('instructions' in patch).toBe(false)
+    expect(settingsPatchSchema.parse(patch)).toEqual(patch)
   })
 })
 

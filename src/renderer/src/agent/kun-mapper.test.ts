@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { chatBlockFromItem, dispatchKunRuntimeEvent, mergeChatBlocks } from './kun-mapper'
 import type { CoreRuntimeEventJson, CoreTurnItemJson } from './kun-contract'
 import type { ThreadErrorOptions, ThreadEventSink } from './types'
@@ -516,6 +516,60 @@ describe('create_plan tool mapping', () => {
     }
   })
 
+  it('does not treat generic tool_result files as generated files', () => {
+    const item: CoreTurnItemJson = {
+      id: 'item_read_1',
+      turnId: 'turn_1',
+      threadId: 'thr_1',
+      role: 'tool',
+      status: 'completed',
+      createdAt: '2024-01-01T00:00:00.000Z',
+      kind: 'tool_result',
+      toolName: 'read',
+      callId: 'call_read_1',
+      output: {
+        files: [
+          { path: 'src/parser.js' },
+          { path: 'src/admin_system.md' }
+        ]
+      }
+    }
+    const block = chatBlockFromItem(item)
+    expect(block).not.toBeNull()
+    if (block && block.kind === 'tool') {
+      expect(block.meta?.generatedFiles).toBeUndefined()
+    } else {
+      throw new Error('expected tool block')
+    }
+  })
+
+  it('still trusts explicit generatedFiles from tool_result output', () => {
+    const item: CoreTurnItemJson = {
+      id: 'item_export_1',
+      turnId: 'turn_1',
+      threadId: 'thr_1',
+      role: 'tool',
+      status: 'completed',
+      createdAt: '2024-01-01T00:00:00.000Z',
+      kind: 'tool_result',
+      toolName: 'export_report',
+      callId: 'call_export_1',
+      output: {
+        files: [{ path: 'src/parser.js' }],
+        generatedFiles: [{ relativePath: 'reports/summary.md', mimeType: 'text/markdown' }]
+      }
+    }
+    const block = chatBlockFromItem(item)
+    expect(block).not.toBeNull()
+    if (block && block.kind === 'tool') {
+      expect(block.meta?.generatedFiles).toEqual([
+        { relativePath: 'reports/summary.md', mimeType: 'text/markdown' }
+      ])
+    } else {
+      throw new Error('expected tool block')
+    }
+  })
+
   it('omits meta attachments when tool_result output has none worth showing', () => {
     const item: CoreTurnItemJson = {
       id: 'item_img_2',
@@ -753,7 +807,10 @@ describe('tool block merging', () => {
     expect(blocks[0]).toMatchObject({
       kind: 'tool',
       id: 'tool_call_1',
-      status: 'success'
+      status: 'success',
+      meta: {
+        sourceItemKind: 'tool_result'
+      }
     })
   })
 })
@@ -896,6 +953,46 @@ describe('streaming runtime status events', () => {
 	      message: 'read repeated the same arguments'
 	    })
 	  })
+
+  it('surfaces model request retries as runtime status events', async () => {
+    let captured: unknown = null
+    const runtimeError = vi.fn()
+    const sink: ThreadEventSink = {
+      ...makeSink(),
+      onRuntimeStatus: (event) => {
+        captured = event
+      },
+      onRuntimeError: runtimeError
+    }
+
+    await dispatchKunRuntimeEvent(
+      {
+        kind: 'model_request_retry',
+        seq: 24,
+        timestamp: '2026-06-03T10:00:03.000Z',
+        threadId: 'thr_1',
+        turnId: 'turn_1',
+        status: 429,
+        attempt: 1,
+        maxAttempts: 3,
+        delayMs: 3000
+      },
+      sink,
+      async () => undefined
+    )
+
+    expect(captured).toMatchObject({
+      kind: 'model_request_retry',
+      itemId: 'runtime_status_turn_1_model_retry',
+      turnId: 'turn_1',
+      createdAt: '2026-06-03T10:00:03.000Z',
+      status: 429,
+      attempt: 1,
+      maxAttempts: 3,
+      delayMs: 3000
+    })
+    expect(runtimeError).not.toHaveBeenCalled()
+  })
 	})
 
 describe('Kun extension metadata mapping', () => {

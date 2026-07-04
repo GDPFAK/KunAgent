@@ -2,13 +2,19 @@ import {
   DEFAULT_APPROVAL_POLICY,
   DEFAULT_DEEPSEEK_BASE_URL,
   DEFAULT_IMAGE_GENERATION_PROTOCOL,
+  IMAGE_GENERATION_QUALITIES,
   DEFAULT_KUN_DATA_DIR,
   DEFAULT_KUN_MODEL,
   DEFAULT_KUN_PORT,
   DEFAULT_MUSIC_GENERATION_PROTOCOL,
   MIN_KUN_LOCAL_PORT,
   DEFAULT_MODEL_ENDPOINT_FORMAT,
+  DEFAULT_MODEL_REQUEST_RETRY_HTTP_STATUS_CODES,
+  DEFAULT_MODEL_REQUEST_RETRY_INITIAL_DELAY_MS,
+  DEFAULT_MODEL_REQUEST_RETRY_MAX_ATTEMPTS,
   DEFAULT_SANDBOX_MODE,
+  DEFAULT_TOOL_OUTPUT_MAX_BYTES,
+  DEFAULT_TOOL_OUTPUT_MAX_LINES,
   DEFAULT_SPEECH_TO_TEXT_PROTOCOL,
   DEFAULT_TEXT_TO_SPEECH_PROTOCOL,
   DEFAULT_VIDEO_GENERATION_PROTOCOL,
@@ -22,6 +28,8 @@ import {
   type KunDesignQualityStrictness,
   type KunHistoryHygieneSettingsV1,
   type KunImageGenerationSettingsV1,
+  type KunInstructionSettingsV1,
+  type ImageGenerationQuality,
   type KunMcpSearchSettingsV1,
   type KunMusicGenerationSettingsV1,
   type KunRuntimeTuningSettingsV1,
@@ -31,6 +39,7 @@ import {
   type KunSettingsEnvelopeV1,
   type KunSpeechToTextSettingsV1,
   type KunStorageSettingsV1,
+  type KunToolOutputLimitsSettingsV1,
   type KunTextToSpeechSettingsV1,
   type KunTokenEconomySettingsV1,
   type KunVideoGenerationSettingsV1,
@@ -131,6 +140,11 @@ export function defaultKunRuntimeSettings(
     baseUrl: '',
     providerId: '',
     endpointFormat: DEFAULT_MODEL_ENDPOINT_FORMAT,
+    retry: {
+      maxAttempts: DEFAULT_MODEL_REQUEST_RETRY_MAX_ATTEMPTS,
+      initialDelayMs: DEFAULT_MODEL_REQUEST_RETRY_INITIAL_DELAY_MS,
+      httpStatusCodes: [...DEFAULT_MODEL_REQUEST_RETRY_HTTP_STATUS_CODES]
+    },
     runtimeToken: '',
     dataDir: DEFAULT_KUN_DATA_DIR,
     model: DEFAULT_KUN_MODEL,
@@ -138,6 +152,7 @@ export function defaultKunRuntimeSettings(
     sandboxMode: DEFAULT_SANDBOX_MODE,
     tokenEconomyMode: false,
     tokenEconomy: defaultKunTokenEconomySettings(),
+    toolOutputLimits: defaultKunToolOutputLimitsSettings(),
     insecure: false,
     mcpSearch: defaultKunMcpSearchSettings(),
     storage: defaultKunStorageSettings(),
@@ -150,8 +165,22 @@ export function defaultKunRuntimeSettings(
     videoGeneration: defaultKunVideoGenerationSettings(),
     modelProfiles: {},
     memoryEnabled: false,
+    instructions: defaultKunInstructionSettings(),
     computerUse: defaultKunComputerUseSettings(),
     quality: defaultKunQualitySettings()
+  }
+}
+
+export function defaultKunInstructionSettings(): KunInstructionSettingsV1 {
+  return {
+    enabled: true
+  }
+}
+
+export function defaultKunToolOutputLimitsSettings(): KunToolOutputLimitsSettingsV1 {
+  return {
+    maxLines: DEFAULT_TOOL_OUTPUT_MAX_LINES,
+    maxBytes: DEFAULT_TOOL_OUTPUT_MAX_BYTES
   }
 }
 
@@ -183,6 +212,7 @@ export function defaultKunImageGenerationSettings(): KunImageGenerationSettingsV
     apiKey: '',
     model: '',
     defaultSize: '',
+    quality: 'auto',
     timeoutMs: 180_000
   }
 }
@@ -298,7 +328,7 @@ export function defaultKunContextCompactionSettings(): KunContextCompactionSetti
 
 export function defaultKunRuntimeTuningSettings(): KunRuntimeTuningSettingsV1 {
   return {
-    streamIdleTimeoutMs: 45_000,
+    streamIdleTimeoutMs: 450_000,
     toolStorm: {
       enabled: true,
       windowSize: 8,
@@ -359,6 +389,11 @@ export function mergeKunRuntimeSettings(
     ...patchedTokenEconomy,
     enabled: tokenEconomyEnabled
   }
+  const currentToolOutputLimits = normalizeKunToolOutputLimitsSettings(current.toolOutputLimits)
+  const nextToolOutputLimits = normalizeKunToolOutputLimitsSettings({
+    ...currentToolOutputLimits,
+    ...(patch?.toolOutputLimits ?? {})
+  })
   const currentStorage = normalizeKunStorageSettings(current.storage)
   const nextStorage = normalizeKunStorageSettings({
     ...currentStorage,
@@ -432,6 +467,9 @@ export function mergeKunRuntimeSettings(
       : {})
   })
   const nextModelProfiles = normalizeKunModelProfiles(current.modelProfiles, patch?.modelProfiles)
+  const nextInstructions = {
+    enabled: patch?.instructions?.enabled ?? current.instructions?.enabled ?? true
+  }
   const nextPort = normalizeKunLocalPort(patch?.port ?? current.port, DEFAULT_KUN_PORT)
   // Optional role/small-model slots (agents.kun.*). Patch wins when the key is
   // present (even as empty string => clear); otherwise inherit current. Empty/
@@ -452,6 +490,7 @@ export function mergeKunRuntimeSettings(
     port: nextPort,
     tokenEconomyMode: nextTokenEconomy.enabled,
     tokenEconomy: nextTokenEconomy,
+    toolOutputLimits: nextToolOutputLimits,
     mcpSearch: nextMcpSearch,
     storage: nextStorage,
     contextCompaction: nextContextCompaction,
@@ -463,6 +502,7 @@ export function mergeKunRuntimeSettings(
     videoGeneration: nextVideoGeneration,
     modelProfiles: nextModelProfiles,
     memoryEnabled: patch?.memoryEnabled ?? current.memoryEnabled ?? false,
+    instructions: nextInstructions,
     computerUse: nextComputerUse,
     quality: nextQuality,
     ...(patch?.subagents !== undefined
@@ -552,12 +592,21 @@ function normalizeKunImageGenerationSettings(
     apiKey: typeof input?.apiKey === 'string' ? input.apiKey.trim() : defaults.apiKey,
     model: typeof input?.model === 'string' ? input.model.trim() : defaults.model,
     defaultSize: /^(auto|\d+x\d+)$/.test(defaultSize) ? defaultSize : '',
+    quality: normalizeKunImageGenerationQuality(input?.quality),
     timeoutMs: boundedPositiveInt(input?.timeoutMs, defaults.timeoutMs, 600_000)
   }
 }
 
+function normalizeKunImageGenerationQuality(value: unknown): ImageGenerationQuality {
+  return IMAGE_GENERATION_QUALITIES.includes(value as ImageGenerationQuality)
+    ? value as ImageGenerationQuality
+    : 'auto'
+}
+
 function normalizeKunImageGenerationProtocol(value: unknown): ImageGenerationProtocol {
-  return value === 'minimax-image' ? 'minimax-image' : DEFAULT_IMAGE_GENERATION_PROTOCOL
+  if (value === 'minimax-image') return 'minimax-image'
+  if (value === 'codex-responses-image') return 'codex-responses-image'
+  return DEFAULT_IMAGE_GENERATION_PROTOCOL
 }
 
 function normalizeKunSpeechToTextSettings(
@@ -682,6 +731,16 @@ function normalizeKunTokenEconomySettings(
     compressToolResults: input?.compressToolResults !== false,
     conciseResponses: input?.conciseResponses !== false,
     historyHygiene: normalizeKunHistoryHygieneSettings(input?.historyHygiene)
+  }
+}
+
+function normalizeKunToolOutputLimitsSettings(
+  input: Partial<KunToolOutputLimitsSettingsV1> | undefined
+): KunToolOutputLimitsSettingsV1 {
+  const defaults = defaultKunToolOutputLimitsSettings()
+  return {
+    maxLines: boundedPositiveInt(input?.maxLines, defaults.maxLines, 1_000_000),
+    maxBytes: boundedPositiveInt(input?.maxBytes, defaults.maxBytes, 64 * 1024 * 1024)
   }
 }
 
@@ -1012,7 +1071,7 @@ export function applyKunRuntimePatch(
 }
 
 export function isKunRuntimeInsecure(runtime: Pick<KunRuntimeSettingsV1, 'insecure' | 'runtimeToken'>): boolean {
-  return runtime.insecure || !runtime.runtimeToken.trim()
+  return runtime.insecure === true
 }
 
 export function getActiveAgentApiKey(settings: AppSettingsV1): string {
@@ -1106,6 +1165,7 @@ export function migrateLegacyAppSettings(parsed: LegacyAppSettingsShape): Partia
     baseUrl: legacySource.baseUrl,
     providerId: '',
     endpointFormat: DEFAULT_MODEL_ENDPOINT_FORMAT,
+    retry: kunDefaults.retry,
     runtimeToken: isReasoningLegacy ? kunDefaults.runtimeToken : legacyLocalHttp.runtimeToken,
     model: isReasoningLegacy ? legacyReasoning.model : kunDefaults.model,
     approvalPolicy: isReasoningLegacy ? kunDefaults.approvalPolicy : legacyLocalHttp.approvalPolicy,
@@ -1138,6 +1198,7 @@ export function migrateLegacyAppSettings(parsed: LegacyAppSettingsShape): Partia
       explicitKun.tokenEconomy,
       explicitKun.tokenEconomyMode ?? kunDefaults.tokenEconomyMode
     ),
+    toolOutputLimits: normalizeKunToolOutputLimitsSettings(explicitKun.toolOutputLimits),
     mcpSearch: normalizeKunMcpSearchSettings(explicitKun.mcpSearch),
     storage: normalizeKunStorageSettings(explicitKun.storage),
     contextCompaction: normalizeKunContextCompactionSettings(explicitKun.contextCompaction),

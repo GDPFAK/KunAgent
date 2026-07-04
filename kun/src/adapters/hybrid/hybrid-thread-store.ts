@@ -936,6 +936,10 @@ function mergeTurnMetadata(previous: Turn, next: Turn): Turn {
       next.injectedMemorySummaries.length > 0
         ? next.injectedMemorySummaries
         : previous.injectedMemorySummaries,
+    injectedInstructionSources:
+      next.injectedInstructionSources.length > 0
+        ? next.injectedInstructionSources
+        : previous.injectedInstructionSources,
     items: mergeTurnItems(previous.items, next.items)
   }
 }
@@ -976,6 +980,7 @@ function turnFromItems(threadId: string, turnId: string, items: TurnItem[], fall
     activeSkillIds: [],
     injectedMemoryIds: [],
     injectedMemorySummaries: [],
+    injectedInstructionSources: [],
     createdAt,
     finishedAt: hasOpenItem ? undefined : items[items.length - 1]?.finishedAt ?? fallbackTime,
     items

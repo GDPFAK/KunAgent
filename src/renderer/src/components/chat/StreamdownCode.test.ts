@@ -47,4 +47,44 @@ describe('StreamdownCode plain text fences', () => {
 
     expect(html).toBe('')
   })
+
+  it('renders design_canvas fenced blocks as compact chips', () => {
+    const html = renderToStaticMarkup(
+      createElement(
+        StreamdownCode,
+        { className: 'language-design_canvas', 'data-block': true },
+        '{ "action": "add_screen", "name": "Home" }'
+      )
+    )
+
+    expect(html).toContain('Canvas ops')
+    expect(html).not.toContain('add_screen')
+  })
+
+  it('renders recognized design canvas json fenced blocks as compact chips', () => {
+    const html = renderToStaticMarkup(
+      createElement(
+        StreamdownCode,
+        { className: 'language-json', 'data-block': true },
+        '{ "action": "add_screen", "name": "Home" }'
+      )
+    )
+
+    expect(html).toContain('Canvas ops')
+    expect(html).not.toContain('add_screen')
+  })
+
+  it('keeps unrelated json fenced blocks as normal code', () => {
+    const html = renderToStaticMarkup(
+      createElement(
+        StreamdownCode,
+        { className: 'language-json', 'data-block': true },
+        '{ "name": "Home" }'
+      )
+    )
+
+    expect(html).toContain('ds-code-block-header')
+    expect(html).toContain('json')
+    expect(html).toContain('Home')
+  })
 })

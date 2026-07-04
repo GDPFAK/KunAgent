@@ -21,6 +21,14 @@ export type KunBinaryResolution =
   | { kind: 'node-script'; command: string; args: string[]; dataDir: string }
   | { kind: 'custom'; command: string; args: string[]; dataDir: string }
 
+export function shouldRunKunServeAsElectronChild(input: {
+  platform: NodeJS.Platform
+  isPackaged: boolean
+  computerUseEnabled: boolean
+}): boolean {
+  return input.platform === 'darwin' && input.computerUseEnabled && !input.isPackaged
+}
+
 const DIST_ENTRY_CANDIDATES = [
   'kun/dist/cli/serve-entry.js',
   'kun/dist/cli/serve.js'
@@ -105,10 +113,6 @@ export function buildKunServeArgs(input: {
   host: string
   port: number
   dataDir: string
-  baseUrl?: string
-  modelProxyUrl?: string
-  endpointFormat?: string
-  model: string
   approvalPolicy: string
   sandboxMode: string
   tokenEconomyMode: boolean
@@ -122,11 +126,6 @@ export function buildKunServeArgs(input: {
     String(input.port),
     '--data-dir',
     input.dataDir,
-    ...(input.baseUrl ? ['--base-url', input.baseUrl] : []),
-    ...(input.modelProxyUrl ? ['--model-proxy-url', input.modelProxyUrl] : []),
-    ...(input.endpointFormat ? ['--endpoint-format', input.endpointFormat] : []),
-    '--model',
-    input.model,
     '--approval-policy',
     input.approvalPolicy,
     '--sandbox-mode',

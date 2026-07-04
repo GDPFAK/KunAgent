@@ -23,6 +23,7 @@ import {
   composerModelMenuItemSelected,
   composerMenuSupportsModel,
   composerReasoningEffortRequestValue,
+  buildComposerModelOptions,
   canSwitchComposerModelFromCurrent,
   filterComposerModelIds,
   normalizeComposerReasoningEffort
@@ -406,6 +407,16 @@ describe('FloatingComposer model controls', () => {
       label: 'Other models',
       modelIds: ['loose-model']
     })
+  })
+
+  it('builds model picker options only from configured picks, not the current model', () => {
+    expect(buildComposerModelOptions([
+      ' deepseek-v4-pro ',
+      'mock-model',
+      'deepseek-v4-pro',
+      ' '
+    ])).toEqual(['deepseek-v4-pro', 'mock-model'])
+    expect(buildComposerModelOptions(['deepseek-v4-pro'])).not.toContain('stale-thread-model')
   })
 
   it('deduplicates models within a provider but keeps the same model id across providers', () => {
@@ -1255,6 +1266,43 @@ describe('FloatingComposer capability controls', () => {
     expect(html).toContain('Remove reference')
     expect(html).toContain('aria-label="Send"')
     expect(html).not.toContain('aria-label="Send" disabled=""')
+  })
+
+  it('renders design context chips without writing them into the textarea', () => {
+    const html = renderToStaticMarkup(
+      createElement(FloatingComposer, {
+        input: 'Make this more compact',
+        setInput: () => undefined,
+        mode: 'agent',
+        setMode: () => undefined,
+        busy: false,
+        runtimeReady: true,
+        hasActiveThread: true,
+        composerModel: '',
+        composerPickList: [],
+        onComposerModelChange: () => undefined,
+        queuedMessages: [],
+        onRemoveQueuedMessage: () => undefined,
+        onSend: () => undefined,
+        onInterrupt: () => undefined,
+        contextChips: [{
+          id: 'html-screen-frame:s1:login',
+          kind: 'html-screen-frame',
+          label: 'Login screen',
+          detail: '1280 x 800 - .kun-design/login/v1.html',
+          removable: true
+        }],
+        onRemoveContextChip: () => undefined,
+        attachmentUploadEnabled: false,
+        webAccessAvailable: false
+      })
+    )
+
+    expect(html).toContain('Login screen')
+    expect(html).toContain('1280 x 800')
+    expect(html).toContain('Remove context')
+    expect(html).toContain('>Make this more compact</textarea>')
+    expect(html).not.toContain('>Login screen</textarea>')
   })
 
   it('shows execution access controls beside the composer menu', () => {

@@ -55,12 +55,19 @@ export type TurnServiceDeps = {
  * directly.
  */
 export class TurnService {
-  private readonly deps: TurnServiceDeps
+  private deps: TurnServiceDeps
   private readonly inflightTurns = new Map<string, AbortController>()
   private readonly threadMutationQueues = new Map<string, Promise<void>>()
 
   constructor(deps: TurnServiceDeps) {
     this.deps = deps
+  }
+
+  updateRuntimeConfig(patch: Partial<Pick<TurnServiceDeps, 'model' | 'defaultModel' | 'contextCompaction'>>): void {
+    this.deps = {
+      ...this.deps,
+      ...patch
+    }
   }
 
   async startTurn(input: {
@@ -75,11 +82,14 @@ export class TurnService {
       threadId: input.threadId,
       prompt: input.request.prompt,
       model: input.request.model,
+      providerId: input.request.providerId,
       reasoningEffort: input.request.reasoningEffort,
       attachmentIds: input.request.attachmentIds ?? [],
       guiPlan: input.request.guiPlan,
+      guiDesignCanvas: input.request.guiDesignCanvas,
       mode: input.request.mode,
       disableUserInput: input.request.disableUserInput,
+      imContext: input.request.imContext,
       workspaceCheckpointId: input.request.workspaceCheckpointId
     })
     const userItem = makeUserItem({
@@ -461,6 +471,8 @@ export class TurnService {
       | 'injectedMemoryIds'
       | 'injectedMemorySummaries'
       | 'skillInjectionBytes'
+      | 'injectedInstructionSources'
+      | 'instructionInjectionBytes'
       | 'toolCatalogFingerprint'
       | 'toolCatalogToolCount'
       | 'toolCatalogDrift'
@@ -478,6 +490,12 @@ export class TurnService {
                 ? { injectedMemorySummaries: [...patch.injectedMemorySummaries] }
                 : {}),
               ...(patch.skillInjectionBytes !== undefined ? { skillInjectionBytes: patch.skillInjectionBytes } : {}),
+              ...(patch.injectedInstructionSources
+                ? { injectedInstructionSources: [...patch.injectedInstructionSources] }
+                : {}),
+              ...(patch.instructionInjectionBytes !== undefined
+                ? { instructionInjectionBytes: patch.instructionInjectionBytes }
+                : {}),
               ...(patch.toolCatalogFingerprint ? { toolCatalogFingerprint: patch.toolCatalogFingerprint } : {}),
               ...(patch.toolCatalogToolCount !== undefined ? { toolCatalogToolCount: patch.toolCatalogToolCount } : {}),
               ...(patch.toolCatalogDrift !== undefined ? { toolCatalogDrift: patch.toolCatalogDrift } : {})

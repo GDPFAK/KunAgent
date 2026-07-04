@@ -1,4 +1,6 @@
-import { isAbsolute, relative, resolve } from 'node:path'
+import { isAbsolute, join, relative, resolve } from 'node:path'
+import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { randomBytes } from 'node:crypto'
 import type { ModelClient, ModelRequest, ModelToolSpec } from '../ports/model-client.js'
 import type { AgentSdkRuntime } from '../runtime/agent-sdk/agent-sdk-runtime.js'
 import type {
@@ -60,7 +62,9 @@ import type { TurnItem } from '../contracts/items.js'
 import type { ThreadGoal, ThreadTodoList } from '../contracts/threads.js'
 import { modelCapabilitiesForModel, type ContextCompactionConfig } from './model-context-profile.js'
 import type { SkillRuntime } from '../skills/skill-runtime.js'
+import type { InstructionRuntime } from '../instructions/instruction-runtime.js'
 import type { AttachmentContent, AttachmentStore } from '../attachments/attachment-store.js'
+import { detectImage } from '../attachments/attachment-store.js'
 import type { ModelDocumentAttachment, ModelInputAttachment, ModelTextAttachmentFallback } from '../ports/model-client.js'
 import type { MemoryStore } from '../memory/memory-store.js'
 import type { ArtifactStore } from '../artifacts/artifact-store.js'
@@ -76,7 +80,12 @@ import {
   type TokenEconomyConfig
 } from './token-economy.js'
 import { applyRequestHistoryHygiene } from './request-history-hygiene.js'
-import { capToolResultImages } from './tool-result-image.js'
+import {
+  capToolResultImages,
+  rehydrateGeneratedImagesForForward,
+  MAX_FORWARDED_GENERATED_IMAGES,
+  type ToolResultImage
+} from './tool-result-image.js'
 import { estimateModelRequestInputTokens, estimateRequestOverheadTokens } from './model-request-estimator.js'
 import {
   recentAutoRouterContext,
@@ -608,19 +617,6 @@ function latestUserMessageText(items: readonly TurnItem[], turnId: string): stri
   return ''
 }
 
-/**
- * Injected when the turn runs without an interactive user (IM bridges,
- * headless runs). The user-input tools are also withheld from the tool
- * catalog; this line keeps the model from promising a GUI dialog that
- * nobody can answer.
- */
-function userInputUnavailableInstruction(): string {
-  return [
-    'Interactive user input is unavailable for this turn: the user is on a remote channel (IM) and cannot answer GUI prompts.',
-    'Do not ask for structured input or wait for confirmation. If information is missing, state your assumption and continue, or finish your reply with the question so the user can answer in their next message.'
-  ].join(' ')
-}
-
 function allowedToolNamesWithGuiStateTools(
   allowedToolNames: readonly string[] | undefined,
   activeGoal: boolean
@@ -672,6 +668,7 @@ export type AgentLoopOptions = {
   nowMs?: () => number
   modelCapabilities?: (model: string) => ModelCapabilityMetadata
   skillRuntime?: SkillRuntime
+  instructionRuntime?: InstructionRuntime
   attachmentStore?: AttachmentStore
   memoryStore?: MemoryStore
   artifactStore?: ArtifactStore
@@ -839,7 +836,9 @@ export class AgentLoop {
     // fall through to kun's native loop below.
     const sdkRuntime = this.opts.sdkRuntime
     if (sdkRuntime) {
-      const providerId = (await this.opts.threadStore.get(threadId))?.providerId
+      const thread = await this.opts.threadStore.get(threadId)
+      const turn = thread?.turns.find((candidate) => candidate.id === turnId)
+      const providerId = turn?.providerId?.trim() || thread?.providerId?.trim()
       if (sdkRuntime.handlesProvider(providerId)) {
         return sdkRuntime.runTurn(threadId, turnId, signal)
       }
@@ -1403,6 +1402,13 @@ export class AgentLoop {
       instructions: [],
       injectedBytes: 0
     }
+    const instructionResolution = await this.opts.instructionRuntime?.resolveTurn({
+      workspace: thread?.workspace ?? ''
+    }) ?? {
+      instruction: undefined,
+      sources: [],
+      injectedBytes: 0
+    }
     const memories = await this.retrieveMemories({
       prompt: turn?.prompt ?? '',
       workspace: thread?.workspace ?? ''
@@ -1424,9 +1430,9 @@ export class AgentLoop {
       ),
       this.opts.forcedAllowedToolNames
     )
-    // IM/headless turns run without the user-input gate; the tools key
-    // their advertisement off `awaitUserInput`, so omitting it hides
-    // `user_input`/`request_user_input` and rejects stray calls.
+    // IM/headless turns run without the user-input gate. The tools stay
+    // advertised so GUI/IM transitions keep a stable provider tool
+    // catalog; execution returns a tool error if the model calls them.
     const userInputDisabled = turn?.disableUserInput === true
     const toolContext: ToolHostContext = {
       threadId,
@@ -1434,6 +1440,8 @@ export class AgentLoop {
       workspace: thread?.workspace ?? '',
       threadMode: effectiveMode,
       ...(activePlanContext ? { guiPlan: activePlanContext } : {}),
+      ...(turn?.guiDesignCanvas ? { guiDesignCanvas: true } : {}),
+      ...(turn?.imContext ? { imContext: true } : {}),
       model: modelCapabilities,
       activeSkillIds: skillResolution.activeSkillIds,
       memoryPolicy: { enabled: Boolean(this.opts.memoryStore) },
@@ -1465,6 +1473,7 @@ export class AgentLoop {
       activeSkillIds: skillResolution.activeSkillIds,
       allowedToolNames,
       userInputDisabled,
+      guiDesignCanvas: turn?.guiDesignCanvas === true,
       fingerprint: toolCatalog.fingerprint,
       toolNames: toolCatalog.toolNames,
       toolHashes: toolCatalog.toolHashes
@@ -1492,6 +1501,8 @@ export class AgentLoop {
           id: memory.id,
           content: memoryPreview(memory.content)
         })),
+        injectedInstructionSources: instructionResolution.sources,
+        instructionInjectionBytes: instructionResolution.injectedBytes,
         toolCatalogFingerprint: toolCatalog.fingerprint,
         toolCatalogToolCount: toolCatalog.toolCount,
         toolCatalogDrift: toolCatalogDrift.kind !== 'none'
@@ -1527,6 +1538,15 @@ export class AgentLoop {
     await this.recordPipelineStage(threadId, turnId, 'input_compressed', {
       historyItems: history.length
     })
+    // Forward the just-generated image(s) back to a vision-capable model so it can
+    // self-review and regenerate if the result is off. Bytes come from the
+    // already-persisted attachment/file; the persisted tool output keeps NO base64
+    // (only this transient request copy carries it).
+    const forwardHistory = await rehydrateGeneratedImagesForForward(
+      history,
+      (output) => this.resolveGeneratedImageForForward(output, threadId, thread?.workspace),
+      MAX_FORWARDED_GENERATED_IMAGES
+    )
     const runtimeContextInstruction = shouldInjectInitialRuntimeContext({
       stepIndex,
       turnId,
@@ -1540,6 +1560,7 @@ export class AgentLoop {
     const toolPreferenceInstruction = buildToolPreferenceInstruction(tools)
     const contextInstructions = [
       ...(runtimeContextInstruction ? [runtimeContextInstruction] : []),
+      ...(instructionResolution.instruction ? [instructionResolution.instruction] : []),
       ...(activeGoalInstruction ? [activeGoalInstruction] : []),
       ...(goalRecoveryInstruction && (this.goalNoToolRecoveryStepsByTurn.get(turnId) ?? 0) > 0
         ? [goalRecoveryInstruction]
@@ -1557,7 +1578,6 @@ export class AgentLoop {
       ...memoryInstructions(memories),
       ...(skillResolution.catalogInstruction ? [skillResolution.catalogInstruction] : []),
       ...skillResolution.instructions,
-      ...(userInputDisabled ? [userInputUnavailableInstruction()] : []),
       ...(toolPreferenceInstruction ? [toolPreferenceInstruction] : []),
       ...(effectiveToolSpecs.some((tool) => tool.name === 'bash') ? [shellRuntimeInstruction()] : []),
       ...(suggestVerification ? [verificationSuggestionInstruction()] : []),
@@ -1568,11 +1588,12 @@ export class AgentLoop {
       contextInstructionCount: contextInstructions.length
     })
     const tokenEconomy = normalizeTokenEconomyConfig(this.opts.tokenEconomy)
+    const providerId = turn?.providerId?.trim() || thread?.providerId?.trim()
     const baseRequest: ModelRequest = {
       threadId,
       turnId,
       model,
-      ...(thread?.providerId?.trim() ? { providerId: thread.providerId.trim() } : {}),
+      ...(providerId ? { providerId } : {}),
       // Thread-level systemPrompt (primary-agent persona snapshot) is
       // appended to the runtime base — same augment strategy as child agents
       // (child-agent-executor) — so the agent keeps kun's tool/safety
@@ -1585,7 +1606,7 @@ export class AgentLoop {
       ...(planTurnActive ? { modeInstruction: PLAN_MODE_INSTRUCTION } : {}),
       ...(contextInstructions.length ? { contextInstructions } : {}),
       prefix: this.opts.prefix.fewShots,
-      history: capToolResultImages(history, MAX_FORWARDED_TOOL_IMAGES),
+      history: capToolResultImages(forwardHistory, MAX_FORWARDED_TOOL_IMAGES),
       ...(attachments.imageAttachments.length ? { attachments: attachments.imageAttachments } : {}),
       ...(attachments.textFallbacks.length ? { attachmentTextFallbacks: attachments.textFallbacks } : {}),
       ...(attachments.documents.length ? { attachmentDocuments: attachments.documents } : {}),
@@ -1720,6 +1741,17 @@ export class AgentLoop {
           break
         case 'tool_call_delta':
           break
+        case 'retrying':
+          await this.opts.events.record({
+            kind: 'model_request_retry',
+            threadId,
+            turnId,
+            status: chunk.status,
+            attempt: chunk.attempt,
+            maxAttempts: chunk.maxAttempts,
+            delayMs: chunk.delayMs
+          })
+          break
         case 'tool_call_complete': {
           const provider = toolProviderMetadata.get(chunk.toolName)
           const toolKind = toolKinds.get(chunk.toolName)
@@ -1761,6 +1793,33 @@ export class AgentLoop {
             callId: chunk.callId,
             toolName: chunk.toolName,
             readyCount: completedToolCalls.length
+          })
+          break
+        }
+        case 'image_generation_complete': {
+          const imgDir = '.deepseekgui-images'
+          const stamp = new Date().toISOString().replace(/\D/g, '').slice(0, 14)
+          const fileName = `img-${stamp}-${randomBytes(2).toString('hex')}.png`
+          const relativePath = `${imgDir}/${fileName}`
+          const workspace = thread?.workspace ?? ''
+          const absolutePath = join(workspace, imgDir, fileName)
+          await mkdir(join(workspace, imgDir), { recursive: true })
+          await writeFile(absolutePath, Buffer.from(chunk.imageBase64, 'base64'))
+          const imageMarkdown = `\n![generated image](${relativePath})\n`
+          textItemId ||= this.opts.ids.next('item_text')
+          textAccumulator.value += imageMarkdown
+          await this.opts.events.record({
+            kind: 'assistant_text_delta',
+            threadId,
+            turnId,
+            itemId: textItemId,
+            item: makeAssistantTextItem({
+              id: textItemId,
+              turnId,
+              threadId,
+              text: imageMarkdown,
+              status: 'running'
+            })
           })
           break
         }
@@ -1878,6 +1937,7 @@ export class AgentLoop {
             workspace: thread?.workspace ?? '',
             threadMode: effectiveMode,
             activePlanContext,
+            guiDesignCanvas: turn?.guiDesignCanvas === true,
             modelCapabilities,
             activeSkillIds: skillResolution.activeSkillIds,
             allowedToolNames,
@@ -2045,10 +2105,12 @@ export class AgentLoop {
       workspace: thread?.workspace ?? '',
       threadMode: effectiveMode,
       activePlanContext,
+      guiDesignCanvas: turn?.guiDesignCanvas === true,
       modelCapabilities,
       activeSkillIds: skillResolution.activeSkillIds,
       allowedToolNames,
       userInputDisabled,
+      imContext: turn?.imContext === true,
       toolProviderKinds: new Map(tools.map((tool) => [tool.name, tool.providerKind])),
       approvalPolicy,
       sandboxMode,
@@ -2066,10 +2128,12 @@ export class AgentLoop {
     workspace: string
     threadMode?: 'agent' | 'plan'
     activePlanContext?: GuiPlanContext
+    guiDesignCanvas?: boolean
     modelCapabilities: ModelCapabilityMetadata
     activeSkillIds: readonly string[]
     allowedToolNames?: readonly string[]
     userInputDisabled?: boolean
+    imContext?: boolean
     toolProviderKinds: ReadonlyMap<string, ToolProviderKind | undefined>
     approvalPolicy: ToolHostContext['approvalPolicy']
     sandboxMode: NonNullable<ToolHostContext['sandboxMode']>
@@ -2207,10 +2271,12 @@ export class AgentLoop {
     workspace: string
     threadMode?: 'agent' | 'plan'
     activePlanContext?: GuiPlanContext
+    guiDesignCanvas?: boolean
     modelCapabilities: ModelCapabilityMetadata
     activeSkillIds: readonly string[]
     allowedToolNames?: readonly string[]
     userInputDisabled?: boolean
+    imContext?: boolean
     approvalPolicy: ToolHostContext['approvalPolicy']
     sandboxMode: NonNullable<ToolHostContext['sandboxMode']>
     signal: AbortSignal
@@ -2221,6 +2287,8 @@ export class AgentLoop {
       workspace: input.workspace,
       threadMode: input.threadMode,
       ...(input.activePlanContext ? { guiPlan: input.activePlanContext } : {}),
+      ...(input.guiDesignCanvas ? { guiDesignCanvas: true } : {}),
+      ...(input.imContext ? { imContext: true } : {}),
       model: input.modelCapabilities,
       activeSkillIds: input.activeSkillIds,
       memoryPolicy: { enabled: Boolean(this.opts.memoryStore) },
@@ -2831,6 +2899,7 @@ export class AgentLoop {
     activeSkillIds: readonly string[]
     allowedToolNames?: readonly string[]
     userInputDisabled?: boolean
+    guiDesignCanvas?: boolean
     fingerprint: string
     toolNames: string[]
     toolHashes: Record<string, string>
@@ -2842,7 +2911,8 @@ export class AgentLoop {
       model: input.model,
       activeSkillIds: [...input.activeSkillIds].sort(),
       allowedToolNames: input.allowedToolNames ? [...input.allowedToolNames].sort() : [],
-      userInputDisabled: input.userInputDisabled === true
+      userInputDisabled: input.userInputDisabled === true,
+      guiDesignCanvas: input.guiDesignCanvas === true
     })
     const current: ToolCatalogSnapshot = {
       fingerprint: input.fingerprint,
@@ -3027,6 +3097,61 @@ export class AgentLoop {
       ))
     }
     return { imageAttachments, textFallbacks, documents }
+  }
+
+  /**
+   * Resolve the bytes of a generate_image result for transient model forwarding:
+   * prefer the attachment the tool already created (authorized for this thread),
+   * fall back to reading the saved file. Returns null (no image forwarded) on any
+   * miss so a scope/auth error degrades gracefully rather than throwing.
+   */
+  private async resolveGeneratedImageForForward(
+    output: Record<string, unknown>,
+    threadId: string,
+    workspace: string | undefined
+  ): Promise<ToolResultImage | null> {
+    const fromBytes = (data: Buffer, fallbackMime?: string): ToolResultImage => {
+      const detected = detectImage(data)
+      return {
+        mimeType: detected?.mimeType ?? fallbackMime ?? 'image/png',
+        dataBase64: data.toString('base64'),
+        ...(detected?.width !== undefined ? { width: detected.width } : {}),
+        ...(detected?.height !== undefined ? { height: detected.height } : {})
+      }
+    }
+    const attachments = Array.isArray(output.attachments) ? output.attachments : []
+    const firstAttachment = attachments[0]
+    const attachmentId =
+      firstAttachment && typeof firstAttachment === 'object' &&
+      typeof (firstAttachment as { id?: unknown }).id === 'string'
+        ? (firstAttachment as { id: string }).id
+        : ''
+    if (attachmentId && this.opts.attachmentStore) {
+      try {
+        const content = await this.opts.attachmentStore.resolveContent(attachmentId, {
+          threadId,
+          ...(workspace ? { workspace } : {})
+        })
+        return fromBytes(content.data, content.mimeType)
+      } catch {
+        // fall through to reading the file on disk
+      }
+    }
+    const files = Array.isArray(output.files) ? output.files : []
+    const firstFile = files[0]
+    const absolutePath =
+      firstFile && typeof firstFile === 'object' &&
+      typeof (firstFile as { absolutePath?: unknown }).absolutePath === 'string'
+        ? (firstFile as { absolutePath: string }).absolutePath
+        : ''
+    if (absolutePath) {
+      try {
+        return fromBytes(await readFile(absolutePath))
+      } catch {
+        // no-op
+      }
+    }
+    return null
   }
 
   private async retrieveMemories(input: {

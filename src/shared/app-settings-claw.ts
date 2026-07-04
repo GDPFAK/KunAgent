@@ -1,4 +1,5 @@
 import {
+  DEFAULT_CLAW_RECENT_THREAD_LIST_LIMIT,
   DEFAULT_CLAW_MODEL,
   MIN_KUN_LOCAL_PORT,
   DEFAULT_WEIXIN_BRIDGE_RPC_URL,
@@ -88,7 +89,8 @@ export function defaultClawSettings(): ClawSettingsV1 {
       providerId: '',
       model: DEFAULT_CLAW_MODEL,
       mode: 'agent',
-      responseTimeoutMs: 120_000
+      responseTimeoutMs: 120_000,
+      recentThreadListLimit: DEFAULT_CLAW_RECENT_THREAD_LIST_LIMIT
     },
     channels: [],
     tasks: []
@@ -136,7 +138,13 @@ export function normalizeClawSettings(input: ClawSettingsPatchV1 | undefined): C
       providerId: typeof im.providerId === 'string' ? im.providerId.trim() : '',
       model: typeof im.model === 'string' && im.model.trim() ? im.model.trim() : DEFAULT_CLAW_MODEL,
       mode: normalizeRunMode(im.mode),
-      responseTimeoutMs: normalizePositiveInteger(im.responseTimeoutMs, defaults.im.responseTimeoutMs, 5_000, 600_000)
+      responseTimeoutMs: normalizePositiveInteger(im.responseTimeoutMs, defaults.im.responseTimeoutMs, 5_000, 600_000),
+      recentThreadListLimit: normalizePositiveInteger(
+        im.recentThreadListLimit,
+        defaults.im.recentThreadListLimit,
+        1,
+        50
+      )
     },
     channels: rawChannels
       .map((channel, index): ClawImChannelV1 => {

@@ -11,6 +11,7 @@ import { MessageTimelineEmptyHero, ThreadForkBanner, ThreadForkPoint } from './m
 import { GeneratedFilesPanel, MessageBubble } from './message-timeline-bubbles'
 import { ReviewPlanCard, ReviewSummaryCard, TurnChangeSummary, WorkMetaRow } from './message-timeline-cards'
 import { ProcessSectionRow, groupProcessSections } from './message-timeline-process'
+import type { OpenChildThreadHandler } from './SubagentCallCard'
 import {
   AnimatedWorkLogo,
   IKUN_WORK_LOGO_VARIANT_LABEL_KEYS,
@@ -31,6 +32,10 @@ import {
 import { extractPlanMetadataFromBlock } from '../../plan/plan-tool'
 import { InjectedMemoryLookupProvider } from './injected-memory-lookup'
 import { planDisplayNameFromRelativePath } from '../../plan/plan-path'
+import {
+  TimelineFilePreviewWorkspaceProvider,
+  timelineFilePreviewWorkspaceRoot
+} from './timeline-file-preview-workspace'
 
 export { summarizeToolBlock } from './message-timeline-process'
 
@@ -53,12 +58,16 @@ type Props = {
   /** Opens/focuses the Plan panel (Open button on the inline card). */
   onOpenPlan?: () => void
   compactCards?: boolean
+  onOpenChildThread?: OpenChildThreadHandler
 }
 
 type CompactionTimelineBlock = Extract<ChatBlock, { kind: 'compaction' }>
 
 const TURN_PAGE_SIZE = 18
 const AUTO_COLLAPSE_THRESHOLD = 24
+const TIMELINE_JUMP_RAIL_RESERVED_PX = 84
+const TIMELINE_JUMP_RAIL_GAP_PX = 18
+const TIMELINE_JUMP_RAIL_FALLBACK_LEFT_PX = 16
 
 export function goalTimelinePaddingClass(route: 'chat' | 'claw', hasActiveGoal: boolean): string {
   return route === 'chat' && hasActiveGoal ? 'pb-32 md:pb-40' : 'pb-10'
@@ -81,6 +90,16 @@ export function activeTimelineTurnKey(
     active = position.key
   }
   return active
+}
+
+export function timelineJumpRailLeft(containerLeft: number, containerWidth: number, contentMaxWidth: number): number {
+  const contentWidth = Math.min(
+    containerWidth,
+    Math.max(0, contentMaxWidth),
+    Math.max(0, containerWidth - TIMELINE_JUMP_RAIL_RESERVED_PX)
+  )
+  const contentLeft = containerLeft + Math.max(0, (containerWidth - contentWidth) / 2)
+  return Math.max(TIMELINE_JUMP_RAIL_FALLBACK_LEFT_PX, contentLeft - TIMELINE_JUMP_RAIL_GAP_PX)
 }
 
 function blockScrollStamp(block: ChatBlock | undefined): string {
@@ -115,6 +134,20 @@ function turnPreview(turn: Turn, fallback: string): string {
   if (!text) return fallback
   const oneLine = text.replace(/\s+/g, ' ')
   return oneLine.length > 48 ? `${oneLine.slice(0, 47).trimEnd()}...` : oneLine
+}
+
+function turnPromptPreview(turn: Turn, fallback: string): string {
+  if (turn.user && isBackgroundShellNoticeBlock(turn.user)) {
+    const display = turn.user.meta?.displayText?.trim()
+    if (display) return display.replace(/\s+/g, ' ')
+  }
+  const text = turn.user?.text.trim() ?? ''
+  if (!text) return fallback
+  return text.replace(/\s+/g, ' ')
+}
+
+export function timelineJumpWaveLevel(index: number): number {
+  return [2, 4, 5, 3, 1][index % 5] ?? 3
 }
 
 function processBlockHasError(block: ChatBlock): boolean {
@@ -174,7 +207,8 @@ export function MessageTimeline({
   planActionsBusy,
   onBuildPlan,
   onOpenPlan,
-  compactCards = false
+  compactCards = false,
+  onOpenChildThread
 }: Props): ReactElement {
   const { t } = useTranslation('common')
   const {
@@ -198,6 +232,12 @@ export function MessageTimeline({
   const containerRef = useRef<HTMLDivElement>(null)
   const turnRefMap = useRef(new Map<string, HTMLDivElement>())
   const [activeTurnKey, setActiveTurnKey] = useState<string | null>(null)
+  const [jumpRailLeft, setJumpRailLeft] = useState<number | null>(null)
+  const [jumpRailPreview, setJumpRailPreview] = useState<{
+    title: string
+    prompt: string
+    top: number
+  } | null>(null)
 
   const turns = useMemo(() => groupTurns(blocks), [blocks])
   const latestBlock = blocks[blocks.length - 1]
@@ -234,7 +274,7 @@ export function MessageTimeline({
   )
   const visibleTurnAnchors = useMemo(
     () => {
-      const anchors: { key: string; label: string; title: string }[] = []
+      const anchors: { key: string; label: string; title: string; prompt: string; waveLevel: number }[] = []
       let questionIndex = turns
         .slice(0, hiddenTurnCount)
         .filter((turn) => turn.user)
@@ -248,7 +288,9 @@ export function MessageTimeline({
         anchors.push({
           key,
           label: String(questionIndex),
-          title: turnPreview(turn, t('timelineJumpTurn', { index: questionIndex }))
+          title: turnPreview(turn, t('timelineJumpTurn', { index: questionIndex })),
+          prompt: turnPromptPreview(turn, t('timelineJumpTurn', { index: questionIndex })),
+          waveLevel: timelineJumpWaveLevel(anchors.length)
         })
       })
       return anchors
@@ -260,6 +302,7 @@ export function MessageTimeline({
     typeof activeThread?.forkedFromTurnCount === 'number'
       ? Math.max(0, activeThread.forkedFromTurnCount)
       : undefined
+  const filePreviewWorkspaceRoot = timelineFilePreviewWorkspaceRoot(activeThread, workspaceRoot)
 
   useEffect(() => {
     const container = containerRef.current
@@ -294,6 +337,29 @@ export function MessageTimeline({
     }
   }, [visibleTurnAnchors])
 
+  useEffect(() => {
+    const container = containerRef.current
+    if (!container || visibleTurnAnchors.length <= 2) {
+      setJumpRailLeft(null)
+      return
+    }
+    const update = (): void => {
+      const rect = container.getBoundingClientRect()
+      const rawMaxWidth = window.getComputedStyle(document.documentElement).getPropertyValue('--ds-chat-content-max-width')
+      const parsedMaxWidth = Number.parseFloat(rawMaxWidth)
+      const contentMaxWidth = Number.isFinite(parsedMaxWidth) ? parsedMaxWidth : 896
+      setJumpRailLeft(timelineJumpRailLeft(rect.left, rect.width, contentMaxWidth))
+    }
+    update()
+    const observer = new ResizeObserver(update)
+    observer.observe(container)
+    window.addEventListener('resize', update)
+    return () => {
+      observer.disconnect()
+      window.removeEventListener('resize', update)
+    }
+  }, [visibleTurnAnchors.length])
+
   // Tick a clock while a turn is running so the live "Worked for Xs" updates.
   const [tickNow, setTickNow] = useState(() => Date.now())
   useEffect(() => {
@@ -310,28 +376,58 @@ export function MessageTimeline({
     target.scrollIntoView({ behavior: 'smooth', block: 'start' })
   }
 
+  const showJumpRailPreview = (
+    anchor: { label: string; title: string; prompt: string },
+    node: HTMLButtonElement
+  ): void => {
+    const rect = node.getBoundingClientRect()
+    setJumpRailPreview({
+      title: t('timelineJumpTurn', { index: anchor.label }),
+      prompt: anchor.prompt || anchor.title,
+      top: rect.top + rect.height / 2
+    })
+  }
+
   return (
+    <TimelineFilePreviewWorkspaceProvider workspaceRoot={filePreviewWorkspaceRoot}>
     <InjectedMemoryLookupProvider workspaceRoot={workspaceRoot}>
     <div ref={containerRef} className="ds-no-drag relative flex min-h-0 flex-1 flex-col overflow-y-auto overflow-x-hidden">
       {visibleTurnAnchors.length > 2 ? (
         <nav
           aria-label={t('timelineJumpRailLabel')}
           className="timeline-jump-rail"
+          style={jumpRailLeft === null ? undefined : { left: `${jumpRailLeft}px` }}
         >
           {visibleTurnAnchors.map((anchor) => (
             <button
               key={anchor.key}
               type="button"
               className={`timeline-jump-rail-button${activeTurnKey === anchor.key ? ' is-active' : ''}`}
+              data-wave-level={anchor.waveLevel}
               title={anchor.title}
               aria-label={anchor.title}
               aria-current={activeTurnKey === anchor.key ? 'true' : undefined}
+              onMouseEnter={(event) => showJumpRailPreview(anchor, event.currentTarget)}
+              onFocus={(event) => showJumpRailPreview(anchor, event.currentTarget)}
+              onMouseLeave={() => setJumpRailPreview(null)}
+              onBlur={() => setJumpRailPreview(null)}
               onClick={() => jumpToTurn(anchor.key)}
-            >
-              {anchor.label}
-            </button>
+            />
           ))}
         </nav>
+      ) : null}
+      {jumpRailPreview ? (
+        <div
+          className="timeline-jump-rail-preview"
+          style={{
+            left: `${Math.max(TIMELINE_JUMP_RAIL_FALLBACK_LEFT_PX, (jumpRailLeft ?? TIMELINE_JUMP_RAIL_FALLBACK_LEFT_PX) + 34)}px`,
+            top: `${jumpRailPreview.top}px`
+          }}
+          role="tooltip"
+        >
+          <div className="timeline-jump-rail-preview-title">{jumpRailPreview.title}</div>
+          <div className="timeline-jump-rail-preview-text">{jumpRailPreview.prompt}</div>
+        </div>
       ) : null}
       <div className={`ds-message-timeline-content ds-chat-column-inset ds-chat-content-max-width mx-auto flex w-full min-w-0 flex-col gap-8 pt-8 ${
         goalTimelinePaddingClass(heroRoute, Boolean(activeThreadGoal))
@@ -414,6 +510,8 @@ export function MessageTimeline({
                 planActionsBusy={planActionsBusy}
                 onBuildPlan={onBuildPlan}
                 onOpenPlan={onOpenPlan}
+                onOpenChildThread={onOpenChildThread}
+                filePreviewWorkspaceRoot={filePreviewWorkspaceRoot}
                 viewportRef={containerRef}
                 compactCards={compactCards}
               />
@@ -448,7 +546,9 @@ export function MessageTimeline({
             liveReasoning={liveReasoning}
             live={live}
             devPreviewCard={devPreviewCard}
+            filePreviewWorkspaceRoot={filePreviewWorkspaceRoot}
             viewportRef={containerRef}
+            onOpenChildThread={onOpenChildThread}
             compactCards={compactCards}
             durationMs={
               currentTurnUserId && typeof turnStartedAtByUserId[currentTurnUserId] === 'number'
@@ -468,6 +568,7 @@ export function MessageTimeline({
       </div>
     </div>
     </InjectedMemoryLookupProvider>
+    </TimelineFilePreviewWorkspaceProvider>
   )
 }
 
@@ -482,6 +583,8 @@ function MessageTurn({
   planActionsBusy,
   onBuildPlan,
   onOpenPlan,
+  onOpenChildThread,
+  filePreviewWorkspaceRoot,
   viewportRef,
   compactCards = false
 }: {
@@ -495,10 +598,11 @@ function MessageTurn({
   planActionsBusy?: boolean
   onBuildPlan?: () => void
   onOpenPlan?: () => void
+  onOpenChildThread?: OpenChildThreadHandler
+  filePreviewWorkspaceRoot: string
   viewportRef: RefObject<HTMLDivElement | null>
   compactCards?: boolean
 }): ReactElement {
-  const workspaceRoot = useChatStore((s) => s.workspaceRoot)
   const activeThreadGoal = useChatStore((s) => s.activeThreadGoal)
   const forkThreadFromTurn = useChatStore((s) => s.forkThreadFromTurn)
   const rollbackWorkspaceToCheckpoint = useChatStore((s) => s.rollbackWorkspaceToCheckpoint)
@@ -528,9 +632,9 @@ function MessageTurn({
         isProcessing,
         liveProcessText,
         liveContent,
-        workspaceRoot
+        workspaceRoot: filePreviewWorkspaceRoot
       }),
-    [turn, isProcessing, liveProcessText, liveContent, workspaceRoot]
+    [turn, isProcessing, liveProcessText, liveContent, filePreviewWorkspaceRoot]
   )
   const compactionBlocks = useMemo(
     () => processBlocks.filter((block): block is CompactionTimelineBlock => block.kind === 'compaction'),
@@ -542,10 +646,10 @@ function MessageTurn({
   )
   const onlyCompactionProcess = processBlocks.length > 0 && workProcessBlocks.length === 0
   const hasProcessError = workProcessBlocks.some(processBlockHasError)
-  // Error details should stay visible after completion so provider/runtime
-  // failures do not disappear into a collapsed work summary.
+  // Keep active failures visible while a turn is still running, but fold
+  // completed failures into the normal work summary until the user opens it.
   const forceExpandForError = isProcessing && hasProcessError
-  const workExpanded = forceExpandForError || (workExpandedOverride ?? (isProcessing || hasProcessError))
+  const workExpanded = forceExpandForError || (workExpandedOverride ?? isProcessing)
   const reviewBlocks = useMemo(
     () => turn.blocks.filter((block) => block.kind === 'review'),
     [turn.blocks]
@@ -633,7 +737,9 @@ function MessageTurn({
                   processing={isProcessing}
                   reasoningDurationMs={reasoningDurationMs}
                   singleReasoningSection={reasoningSectionCount === 1}
+                  workspaceRoot={filePreviewWorkspaceRoot}
                   viewportRef={viewportRef}
+                  onOpenChildThread={onOpenChildThread}
                 />
               ))}
             </div>
@@ -748,6 +854,7 @@ const MemoMessageTurn = memo(MessageTurn, (prev, next) => (
   prev.planActionsBusy === next.planActionsBusy &&
   prev.onBuildPlan === next.onBuildPlan &&
   prev.onOpenPlan === next.onOpenPlan &&
+  prev.onOpenChildThread === next.onOpenChildThread &&
   prev.compactCards === next.compactCards &&
   prev.viewportRef === next.viewportRef
 ))

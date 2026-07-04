@@ -153,7 +153,7 @@ Around: Earlier term: [[edit]] should be consistent.
 - `src/renderer/src/write/recent-edits.ts`：最近编辑上下文的记录、筛选和 prompt payload 转换。
 - `src/renderer/src/write/term-propagation.ts`：同段术语大小写/重命名传播。
 - `src/renderer/src/components/write/WriteWorkspaceView.tsx`：选中文本浮层支持“AI 编辑”和“发送到写作助手”两条路径。
-- `src/main/ipc/app-ipc-schemas.ts`、`src/preload/index.ts`、`src/shared/ds-gui-api.ts`：复用 `write:inline-completion` IPC，通过 `mode: "edit"`、`editCandidate` 和 recent edits 承载 inline edit。
+- `src/main/ipc/app-ipc-schemas.ts`、`src/preload/index.ts`、`src/shared/kun-gui-api.ts`：复用 `write:inline-completion` IPC，通过 `mode: "edit"`、`editCandidate` 和 recent edits 承载 inline edit。
 
 测试覆盖：
 

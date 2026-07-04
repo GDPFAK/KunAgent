@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
+  loadWorkspaceDirectoryContextFiles,
+  loadWorkspaceFileIndex,
   loadWorkspaceMentionPathSuggestions,
   mentionQueryDirectory,
   mergeMentionCandidates
@@ -112,6 +114,82 @@ describe('loadWorkspaceMentionPathSuggestions', () => {
     const candidates = mergeMentionCandidates([], onDemand)
     const filtered = filterWorkspaceFileMentionSuggestions(candidates, 'src/a/b/c/d/e/f/g/VeryDeep', [])
     expect(filtered.map((ref) => ref.relativePath)).toContain('src/a/b/c/d/e/f/g/VeryDeep.ts')
+  })
+})
+
+describe('loadWorkspaceFileIndex design document references', () => {
+  it('adds design document directories from the persisted documents index', async () => {
+    const root = '/ws-design-doc-index'
+    const listWorkspaceDirectory = vi.fn(async () => ({ ok: true as const, root, entries: [] }))
+    const readWorkspaceFile = vi.fn(async (options: { path: string }) => {
+      if (options.path !== '.kun-design/documents.json') return { ok: false as const, message: 'missing' }
+      return {
+        ok: true as const,
+        content: JSON.stringify({
+          version: 1,
+          activeDocumentId: 'doc_1',
+          documents: [{
+            id: 'doc_1',
+            title: '我的设计',
+            order: 0,
+            createdAt: '2026-06-20T00:00:00.000Z',
+            updatedAt: '2026-06-20T00:00:00.000Z',
+            activeArtifactId: null
+          }]
+        })
+      }
+    })
+    vi.stubGlobal('window', { kunGui: { listWorkspaceDirectory, readWorkspaceFile } })
+
+    const index = await loadWorkspaceFileIndex(root)
+
+    expect(index.directories).toContainEqual(expect.objectContaining({
+      path: `${root}/.kun-design/doc_1`,
+      relativePath: '.kun-design/doc_1',
+      name: 'doc_1',
+      type: 'directory',
+      workspaceRoot: root
+    }))
+  })
+})
+
+describe('loadWorkspaceDirectoryContextFiles', () => {
+  it('recursively lists mentionable text files under the referenced directory', async () => {
+    const root = '/ws-design-dir-context'
+    const listWorkspaceDirectory = installListDirectory((options) => {
+      if (options.path === '.kun-design/doc_1') {
+        return {
+          ok: true,
+          root: `${root}/.kun-design/doc_1`,
+          entries: [
+            entry(`${root}/.kun-design/doc_1/design.md`, 'file'),
+            entry(`${root}/.kun-design/doc_1/home`, 'directory'),
+            entry(`${root}/.kun-design/doc_1/preview.png`, 'file')
+          ]
+        }
+      }
+      if (options.path === '.kun-design/doc_1/home') {
+        return {
+          ok: true,
+          root: `${root}/.kun-design/doc_1/home`,
+          entries: [
+            entry(`${root}/.kun-design/doc_1/home/DESIGN.md`, 'file'),
+            entry(`${root}/.kun-design/doc_1/home/v1.html`, 'file'),
+            entry(`${root}/.kun-design/doc_1/home/screenshot.png`, 'file')
+          ]
+        }
+      }
+      return { ok: false, message: 'missing' }
+    })
+
+    const files = await loadWorkspaceDirectoryContextFiles(root, '.kun-design/doc_1', 10)
+
+    expect(listWorkspaceDirectory).toHaveBeenCalledWith({ workspaceRoot: root, path: '.kun-design/doc_1' })
+    expect(files.map((file) => file.relativePath)).toEqual([
+      '.kun-design/doc_1/design.md',
+      '.kun-design/doc_1/home/DESIGN.md',
+      '.kun-design/doc_1/home/v1.html'
+    ])
   })
 })
 

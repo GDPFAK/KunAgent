@@ -80,6 +80,32 @@ describe('CompatModelClient transient gateway retry', () => {
     expect(chunks.some((c) => c.kind === 'error')).toBe(true)
   })
 
+  it('summarizes HTML challenge pages in user-visible HTTP errors', async () => {
+    const html = `
+      <html>
+        <head><title>Challenge</title></head>
+        <body>
+          <h2><span id="challenge-error-text">Enable JavaScript and cookies to continue</span></h2>
+          ${'<svg><path d="M37.5324 16.8707" /></svg>'.repeat(100)}
+        </body>
+      </html>
+    `
+    const fetchImpl = (async () =>
+      new Response(html, { status: 403, headers: { 'content-type': 'text/html' } })
+    ) as unknown as typeof fetch
+
+    const chunks = await drain(client(fetchImpl).stream(request()))
+    const error = chunks.find((c) => c.kind === 'error')
+
+    expect(error).toMatchObject({
+      kind: 'error',
+      code: 'http_403'
+    })
+    expect(error && error.kind === 'error' ? error.message : '').toContain('HTML challenge page')
+    expect(error && error.kind === 'error' ? error.message : '').not.toContain('<svg>')
+    expect(error && error.kind === 'error' ? error.message.length : 0).toBeLessThan(240)
+  })
+
   it('stops retrying when the request is aborted during backoff', async () => {
     const controller = new AbortController()
     let calls = 0

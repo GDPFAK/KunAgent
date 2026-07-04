@@ -8,6 +8,12 @@ import {
 import type { ModelProviderProbeRequest, ModelProviderProbeResult } from '../shared/kun-gui-api'
 import { upstreamOpenAiModelsUrl } from '../shared/openai-compat-url'
 import { fetchWithOptionalProxy } from './proxy-fetch'
+import { isCodexOAuthCredentials, parseCodexCredentials } from './codex-auth'
+
+const CODEX_FIXED_MODEL_IDS = ['gpt-5.5', 'gpt-5.4', 'gpt-5.4-mini', 'gpt-5.3-codex-spark']
+function isCodexBaseUrl(url: string): boolean {
+  return url.includes('chatgpt.com/backend-api/codex')
+}
 
 const PROBE_TIMEOUT_MS = 10_000
 // The proxy-vs-direct diagnosis runs only after the proxied probe already
@@ -46,6 +52,23 @@ export async function probeModelProvider(
   const baseUrl = request.baseUrl.trim()
   if (!/^https?:\/\//i.test(baseUrl)) {
     return { ok: false, message: 'Base URL must start with http:// or https://.' }
+  }
+  if (isCodexBaseUrl(baseUrl)) {
+    const rawKey = request.apiKey.trim()
+    if (!rawKey) {
+      return { ok: false, message: 'Codex 未登录，请先点击「登录 ChatGPT」。' }
+    }
+    if (!isCodexOAuthCredentials(rawKey)) {
+      return { ok: false, message: 'Codex 凭据格式无效，请重新登录。' }
+    }
+    const creds = parseCodexCredentials(rawKey)
+    if (!creds) {
+      return { ok: false, message: 'Codex 凭据已损坏，请重新登录。' }
+    }
+    if (creds.expiresAt < Date.now()) {
+      return { ok: false, message: 'Codex 凭据已过期，将在下次启动时自动刷新；或重新登录。' }
+    }
+    return { ok: true, latencyMs: 0, modelIds: [...CODEX_FIXED_MODEL_IDS] }
   }
   const endpointFormat = normalizeModelEndpointFormat(request.endpointFormat)
   if (isCustomModelEndpointFormat(endpointFormat)) {

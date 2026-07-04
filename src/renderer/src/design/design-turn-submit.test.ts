@@ -1,0 +1,192 @@
+import { describe, expect, it, vi } from 'vitest'
+import type { AttachmentReference } from '../agent/types'
+import { createEmptyDocument } from './canvas/canvas-types'
+import { createEmptyDesignSystem } from './canvas/design-system-types'
+import { submitDesignTurn } from './design-turn-submit'
+import type { DesignArtifact } from './design-types'
+import type { DesignWorkspaceState } from './design-workspace-store-types'
+import type {
+  BuildDesignTurnPromptPayloadOptions,
+  DesignTurnPromptPayload
+} from './design-turn-prompt/payload'
+import type {
+  PrepareDesignTurnFilesOptions,
+  PrepareDesignTurnFilesResult
+} from './design-turn-prompt/setup'
+import type {
+  ResolveDesignTurnTargetOptions,
+  ResolvedDesignTurnTarget
+} from './design-turn-prompt/target'
+
+const now = '2026-07-02T00:00:00.000Z'
+
+const boardArtifact: DesignArtifact & { kind: 'canvas' } = {
+  id: 'board',
+  kind: 'canvas',
+  title: 'Design board',
+  relativePath: '.kun-design/doc/board/canvas.json',
+  createdAt: now,
+  updatedAt: now,
+  versions: [{ id: 'board-v1', relativePath: '.kun-design/doc/board/canvas.json', createdAt: now, summary: '' }]
+}
+
+const attachment: AttachmentReference = {
+  id: 'att_1',
+  kind: 'image',
+  name: 'reference.png'
+}
+
+function makeDesignState(patch: Partial<DesignWorkspaceState> = {}): DesignWorkspaceState {
+  const state = {
+    artifacts: [boardArtifact],
+    activeArtifactId: null,
+    assistantModel: ' deepseek-chat ',
+    assistantProviderId: ' ',
+    designContext: { designTarget: 'web' },
+    generationPrompt: '',
+    documents: [],
+    activeDocumentId: 'doc',
+    setActiveArtifact: vi.fn((artifactId: string | null) => {
+      state.activeArtifactId = artifactId
+    }),
+    setDesignIntentMode: vi.fn(),
+    setFileError: vi.fn(),
+    ...patch
+  } as unknown as DesignWorkspaceState
+  return state
+}
+
+function resolvedTarget(patch: Partial<ResolvedDesignTurnTarget> = {}): ResolvedDesignTurnTarget {
+  return {
+    target: 'canvas',
+    artifactRelativePath: boardArtifact.relativePath,
+    visibleTargets: [],
+    targetAutoRepairKey: 'artifact:board',
+    nextIntentMode: 'modify',
+    ...patch
+  }
+}
+
+describe('submitDesignTurn', () => {
+  it('resolves the target, builds the prompt payload, and sends the design turn', async () => {
+    const designState = makeDesignState()
+    const canvasDocument = createEmptyDocument()
+    const target = resolvedTarget()
+    const resolveTarget = vi.fn((_options: ResolveDesignTurnTargetOptions) => target)
+    const prepareTurnFiles = vi.fn(async (
+      _options: PrepareDesignTurnFilesOptions
+    ): Promise<PrepareDesignTurnFilesResult> => ({ ok: true, notesWritten: false }))
+    const buildPromptPayload = vi.fn(async (
+      _options: BuildDesignTurnPromptPayloadOptions
+    ): Promise<DesignTurnPromptPayload> => ({
+      prompt: 'DESIGN PROMPT',
+      promptState: designState
+    }))
+    const takeLastCanvasErrors = vi.fn(() => [])
+    const sendMessage = vi.fn(async () => true)
+    const clearAutoRepairScope = vi.fn()
+
+    const result = await submitDesignTurn({
+      promptText: 'Create a dashboard',
+      displayText: 'Create a dashboard',
+      workspaceRoot: '/workspace',
+      source: 'user',
+      sendMessage,
+      resolveProviderId: () => 'deepseek',
+      reasoningEffort: 'medium',
+      attachmentIds: [attachment.id],
+      attachments: [attachment],
+      suppressedIds: new Set(['hidden']),
+      htmlElementContext: null,
+      explicitScreenShapeId: 'frame_1',
+      clearAutoRepairScope,
+      getDesignState: () => designState,
+      getCanvasShapeState: () => ({ document: canvasDocument }) as never,
+      getCanvasSelectionState: () => ({ selectedIds: new Set(['shape_1']) }) as never,
+      getCanvasViewportState: () => ({ vbox: { x: 0, y: 0, width: 1200, height: 800 } }) as never,
+      getDesignSystemState: () => ({ system: createEmptyDesignSystem() }) as never,
+      getDesignTokensState: () => ({ byArtifact: {} }) as never,
+      takeLastCanvasErrors,
+      resolveTarget,
+      prepareTurnFiles,
+      buildPromptPayload
+    })
+
+    expect(result).toEqual({ status: 'sent', target: 'canvas', clearAttachments: true })
+    expect(resolveTarget).toHaveBeenCalledWith(expect.objectContaining({
+      promptText: 'Create a dashboard',
+      boardArtifact,
+      selectedShapeIds: new Set(['shape_1']),
+      explicitScreenShapeId: 'frame_1'
+    }))
+    expect(designState.setDesignIntentMode).toHaveBeenCalledWith('modify')
+    expect(clearAutoRepairScope).toHaveBeenCalledWith('artifact:board')
+    expect(prepareTurnFiles).toHaveBeenCalledWith(expect.objectContaining({
+      workspaceRoot: '/workspace',
+      resolvedTarget: target
+    }))
+    expect(buildPromptPayload).toHaveBeenCalledWith(expect.objectContaining({
+      mode: 'image',
+      target: 'canvas',
+      previousOpErrors: []
+    }))
+    expect(takeLastCanvasErrors).toHaveBeenCalledWith('/workspace:doc:board')
+    expect(sendMessage).toHaveBeenCalledWith('DESIGN PROMPT', 'agent', {
+      displayText: 'Create a dashboard',
+      model: 'deepseek-chat',
+      providerId: 'deepseek',
+      reasoningEffort: 'medium',
+      guiDesignCanvas: true,
+      attachmentIds: [attachment.id],
+      attachments: [attachment]
+    })
+  })
+
+  it('sets the design file error and skips send when setup fails', async () => {
+    const designState = makeDesignState()
+    const prepareTurnFiles = vi.fn(async (): Promise<PrepareDesignTurnFilesResult> => ({
+      ok: false,
+      phase: 'preview',
+      message: 'Design preview setup failed'
+    }))
+    const sendMessage = vi.fn(async () => true)
+
+    const result = await submitDesignTurn({
+      promptText: 'Refine the page',
+      displayText: 'Refine the page',
+      workspaceRoot: '/workspace',
+      source: 'manual-quality-repair',
+      sendMessage,
+      resolveProviderId: () => '',
+      getDesignState: () => designState,
+      getCanvasShapeState: () => ({ document: createEmptyDocument() }) as never,
+      getCanvasSelectionState: () => ({ selectedIds: new Set<string>() }) as never,
+      getCanvasViewportState: () => ({ vbox: { x: 0, y: 0, width: 1200, height: 800 } }) as never,
+      resolveTarget: vi.fn(() => resolvedTarget({ target: 'html' })),
+      prepareTurnFiles
+    })
+
+    expect(result).toEqual({ status: 'file-error', message: 'Design preview setup failed' })
+    expect(designState.setFileError).toHaveBeenCalledWith('Design preview setup failed')
+    expect(sendMessage).not.toHaveBeenCalled()
+  })
+
+  it('returns missing-board when no canvas board can be found or created', async () => {
+    const designState = makeDesignState({ artifacts: [] })
+    const sendMessage = vi.fn(async () => true)
+
+    const result = await submitDesignTurn({
+      promptText: 'Create a screen',
+      displayText: 'Create a screen',
+      workspaceRoot: '/workspace',
+      source: 'user',
+      sendMessage,
+      resolveProviderId: () => '',
+      getDesignState: () => designState,
+      ensureBoardArtifact: vi.fn(async () => null)
+    })
+
+    expect(result).toEqual({ status: 'missing-board' })
+    expect(sendMessage).not.toHaveBeenCalled()
+  })
+})

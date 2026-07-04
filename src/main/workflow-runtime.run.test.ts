@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   defaultClawSettings,
+  defaultDesignSettings,
   defaultKeyboardShortcuts,
   defaultKunRuntimeSettings,
   defaultModelProviderSettings,
@@ -61,6 +62,7 @@ function settingsWithWorkflows(workflows: WorkflowV1[], modules: WorkflowCustomM
     claw: defaultClawSettings(),
     schedule: defaultScheduleSettings(),
     workflow: normalizeWorkflowSettings({ enabled: true, workflows, modules }),
+    design: defaultDesignSettings(),
     terminal: defaultTerminalSettings(),
     guiUpdate: { channel: 'stable' },
     codePromptPrefix: '',

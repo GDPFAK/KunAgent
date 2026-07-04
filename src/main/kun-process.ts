@@ -21,10 +21,13 @@ import {
 } from '../shared/app-settings'
 import {
   buildKunServeArgs,
-  resolveKunExecutable
+  resolveKunExecutable,
+  shouldRunKunServeAsElectronChild
 } from './resolve-kun-binary'
+import { resolveCodexOAuthApiKey } from './codex-auth'
 import {
   KunConfigSchema,
+  type KunConfig,
   KunServeConfigSchema,
   ModelConfigSchema,
   ContextCompactionConfigSchema,
@@ -37,6 +40,7 @@ import {
   AttachmentsCapabilityConfig,
   ComputerUseCapabilityConfig,
   ImageGenCapabilityConfig,
+  InstructionsCapabilityConfig,
   McpCapabilityConfig,
   McpServerConfig,
   MemoryCapabilityConfig,
@@ -363,10 +367,6 @@ async function startKunChildOnce(
     host: '127.0.0.1',
     port: runtime.port,
     dataDir,
-    baseUrl: runtime.baseUrl,
-    modelProxyUrl: resolveModelProviderProxyUrl(settings),
-    endpointFormat: runtime.endpointFormat,
-    model: runtime.model,
     approvalPolicy: runtime.approvalPolicy,
     sandboxMode: runtime.sandboxMode,
     tokenEconomyMode: runtime.tokenEconomyMode,
@@ -375,12 +375,22 @@ async function startKunChildOnce(
   // On macOS, libnut links AppKit and calls `[NSApplication sharedApplication]`
   // on its first screen-grab/mouse/keyboard call. That promotes a pure-Node
   // (ELECTRON_RUN_AS_NODE) child to a regular Cocoa app and a second Kun icon
-  // appears in the Dock. When computer-use is enabled we instead spawn kun as
-  // a real Electron instance so it can call `app.dock.hide()` itself (see
-  // kun/src/cli/serve-entry.ts). The extra Chromium overhead is only paid
-  // when the user actually opted into host control.
-  const runAsElectron = process.platform === 'darwin' && runtime.computerUse?.enabled === true
+  // appears in the Dock. In dev, when computer-use is enabled, we instead
+  // spawn kun as a real Electron instance so it can call `app.dock.hide()`
+  // itself (see kun/src/cli/serve-entry.ts). Packaged .app executables are not
+  // generic Electron script runners: passing serve-entry.js to the main app
+  // launches the GUI process instead of kun serve, so packaged builds must use
+  // the Node helper path even when computer-use is enabled.
+  const runAsElectron = shouldRunKunServeAsElectronChild({
+    platform: process.platform,
+    isPackaged: app.isPackaged,
+    computerUseEnabled: runtime.computerUse?.enabled === true
+  })
   const command = runAsElectron ? resolution.command : resolveNodeScriptCommand(resolution.command)
+  // When the active provider is Codex, runtime.apiKey holds JSON-encoded OAuth
+  // credentials; unwrap to the bare access token so the default client sends a
+  // valid Bearer (the Codex headers are written to serve.headers in config).
+  const defaultClientApiKey = resolveCodexOAuthApiKey(runtime.apiKey).apiKey
   // When the runtime's own (default) provider is the Claude subscription, tell
   // the runtime so its dispatch routes default-provider turns (thread.providerId
   // absent or equal to it) to the embedded SDK instead of the HTTP default.
@@ -394,7 +404,7 @@ async function startKunChildOnce(
   const childEnv: NodeJS.ProcessEnv = {
     ...process.env,
     KUN_RUNTIME_TOKEN: runtime.runtimeToken,
-    DEEPSEEK_API_KEY: runtime.apiKey || process.env.DEEPSEEK_API_KEY || '',
+    DEEPSEEK_API_KEY: defaultClientApiKey || process.env.DEEPSEEK_API_KEY || '',
     ...(activeProviderKind === 'agent-sdk' ? { KUN_RUNTIME_PROVIDER_KIND: 'agent-sdk' } : {}),
     ...(claudeBinary ? { KUN_CLAUDE_BINARY: claudeBinary } : {})
   }
@@ -458,8 +468,11 @@ export async function syncGuiManagedKunConfig(
   dataDir: string,
   runtime: Pick<
     KunRuntimeSettingsV1,
+    | 'apiKey'
     | 'mcpSearch'
+    | 'retry'
     | 'tokenEconomy'
+    | 'toolOutputLimits'
     | 'storage'
     | 'contextCompaction'
     | 'runtimeTuning'
@@ -470,6 +483,7 @@ export async function syncGuiManagedKunConfig(
     | 'computerUse'
     | 'modelProfiles'
     | 'memoryEnabled'
+    | 'instructions'
     | 'quality'
     | 'subagents'
     | 'smallModel'
@@ -488,7 +502,7 @@ export async function syncGuiManagedKunConfig(
     }
     mcpConfigPath?: string
   }
-): Promise<void> {
+): Promise<KunConfig> {
   const configPath = join(dataDir, 'config.json')
   const existing = sanitizeKunConfigSections(await readJsonObjectIfExists(configPath))
   const importedMcpServers = await readGuiManagedMcpServers(
@@ -509,6 +523,7 @@ export async function syncGuiManagedKunConfig(
   const search = objectValue(mcp.search)
   const attachments = objectValue(capabilities.attachments)
   const memory = objectValue(capabilities.memory)
+  const instructions = objectValue(capabilities.instructions)
   const web = objectValue(capabilities.web)
   const skills = objectValue(capabilities.skills)
   const imageGen = objectValue(capabilities.imageGen)
@@ -528,11 +543,19 @@ export async function syncGuiManagedKunConfig(
   const providers = options?.scheduleMcp?.settings
     ? providersConfigForRuntime(options.scheduleMcp.settings)
     : undefined
+  // When the active provider is Codex, emit its required headers as the default
+  // client's serve.headers (the bare access token goes to DEEPSEEK_API_KEY).
+  // Always set the key explicitly (undefined clears it) so switching away from
+  // Codex doesn't leave stale headers carried over by the `...serve` spread.
+  const defaultClientHeaders = resolveCodexOAuthApiKey(runtime.apiKey).headers
   const next = {
     serve: {
       ...serve,
       storage,
+      retry: runtime.retry,
       tokenEconomy: tokenEconomyConfigForRuntime(runtime.tokenEconomy, existingTokenEconomy),
+      toolOutputLimits: toolOutputLimitsConfigForRuntime(runtime.toolOutputLimits),
+      headers: defaultClientHeaders,
       ...(providers && Object.keys(providers).length ? { providers } : {})
     },
     models: modelConfigForRuntime(existingModels, runtime.modelProfiles),
@@ -563,6 +586,10 @@ export async function syncGuiManagedKunConfig(
       memory: {
         ...memory,
         enabled: runtime.memoryEnabled
+      },
+      instructions: {
+        ...instructions,
+        enabled: runtime.instructions?.enabled ?? true
       },
       subagents: subagentProfilesForRuntime(runtime.subagents ?? { enabled: true, profiles: [] }),
       mcp: {
@@ -602,9 +629,10 @@ export async function syncGuiManagedKunConfig(
     )
   }
   const nextText = `${JSON.stringify(next, null, 2)}\n`
-  if (existing && nextText === `${JSON.stringify(existing, null, 2)}\n`) return
+  if (existing && nextText === `${JSON.stringify(existing, null, 2)}\n`) return parsedNext.data
   await mkdir(dirname(configPath), { recursive: true })
   await writeFile(configPath, nextText, 'utf8')
+  return parsedNext.data
 }
 
 function buildGuiScheduleKunMcpServer(
@@ -814,10 +842,11 @@ function modelConfigForRuntime(
     const defaultProfile = objectValue(profileDefaults[modelId])
     const existingProfile = objectValue(existingProfiles[modelId])
     const guiProfile = objectValue(guiProfiles[modelId])
+    const baseProfile = Object.prototype.hasOwnProperty.call(guiProfiles, modelId)
+      ? { ...defaultProfile, ...guiProfile }
+      : { ...defaultProfile, ...existingProfile }
     profiles[modelId] = {
-      ...defaultProfile,
-      ...existingProfile,
-      ...guiProfile,
+      ...baseProfile,
       contextCompaction: {
         ...objectValue(defaultProfile.contextCompaction),
         ...objectValue(existingProfile.contextCompaction),
@@ -875,17 +904,24 @@ function providersConfigForRuntime(settings: AppSettingsV1): Record<string, Reco
     if (!id) continue
     // agent-sdk providers carry no usable HTTP endpoint; everyone else needs one.
     if (!baseUrl && !isAgentSdk) continue
-    // The runtime's own provider is already wired via the default CLI args, so
-    // we normally skip it here — EXCEPT agent-sdk: its turns must be routable to
-    // the embedded SDK via `serve.providers`, otherwise they fall back to the
-    // HTTP default client and 401 on api.anthropic.com (invalid x-api-key).
+    // The runtime's own provider is already wired via the default client
+    // (DEEPSEEK_API_KEY + serve.headers); we normally skip it here — EXCEPT
+    // agent-sdk: its turns must be routable to the embedded SDK via
+    // `serve.providers`, otherwise they fall back to the HTTP default client and
+    // 401 on api.anthropic.com (invalid x-api-key).
     if (id === runtimeProviderId && !isAgentSdk) continue
+    const rawApiKey = provider.apiKey?.trim() ?? ''
+    // Codex stores JSON OAuth creds in apiKey; unwrap to the bare token + the
+    // headers the backend requires. Plain keys (and agent-sdk tokens) pass through.
+    const resolved = resolveCodexOAuthApiKey(rawApiKey)
     out[id] = {
-      apiKey: provider.apiKey?.trim() ?? '',
+      apiKey: resolved.apiKey,
       ...(baseUrl ? { baseUrl } : {}),
       ...(provider.kind ? { kind: provider.kind } : {}),
       ...(provider.endpointFormat ? { endpointFormat: provider.endpointFormat } : {}),
-      ...(proxyUrl ? { modelProxyUrl: proxyUrl } : {})
+      retry: provider.retry,
+      ...(proxyUrl ? { modelProxyUrl: proxyUrl } : {}),
+      ...(resolved.headers ? { headers: resolved.headers } : {})
     }
   }
   return out
@@ -920,6 +956,15 @@ function tokenEconomyConfigForRuntime(
       maxToolArgumentStringTokens: normalized.historyHygiene.maxToolArgumentStringTokens,
       maxArrayItems: normalized.historyHygiene.maxArrayItems
     }
+  }
+}
+
+function toolOutputLimitsConfigForRuntime(
+  toolOutputLimits: Pick<KunRuntimeSettingsV1, 'toolOutputLimits'>['toolOutputLimits'] | undefined
+): Record<string, unknown> {
+  return {
+    maxLines: toolOutputLimits?.maxLines,
+    maxBytes: toolOutputLimits?.maxBytes
   }
 }
 
@@ -1020,18 +1065,22 @@ function imageGenConfigForRuntime(
     enabled: imageGeneration.enabled,
     timeoutMs: imageGeneration.timeoutMs
   }
+  const resolvedApiKey = resolveCodexOAuthApiKey(imageGeneration.apiKey)
   const fields = {
     protocol: imageGeneration.protocol,
     baseUrl: imageGeneration.baseUrl,
-    apiKey: imageGeneration.apiKey,
+    apiKey: resolvedApiKey.apiKey,
     model: imageGeneration.model,
-    defaultSize: imageGeneration.defaultSize
+    defaultSize: imageGeneration.defaultSize,
+    quality: imageGeneration.quality
   }
   for (const [key, value] of Object.entries(fields)) {
     const trimmed = value.trim()
     if (trimmed) next[key] = trimmed
     else delete next[key]
   }
+  if (resolvedApiKey.headers) next.headers = resolvedApiKey.headers
+  else delete next.headers
   return next
 }
 
@@ -1246,6 +1295,9 @@ function sanitizeKunCapabilitiesConfig(value: unknown): Record<string, unknown> 
   const next: Record<string, unknown> = {}
   if ('mcp' in raw) next.mcp = parseKunConfigSection(McpCapabilityConfig, raw.mcp)
   if ('web' in raw) next.web = parseKunConfigSection(WebCapabilityConfig, raw.web)
+  if ('instructions' in raw) {
+    next.instructions = parseKunConfigSection(InstructionsCapabilityConfig, raw.instructions)
+  }
   if ('skills' in raw) next.skills = parseKunConfigSection(SkillsCapabilityConfig, raw.skills)
   if ('subagents' in raw) {
     next.subagents = parseKunConfigSection(SubagentsCapabilityConfig, raw.subagents)

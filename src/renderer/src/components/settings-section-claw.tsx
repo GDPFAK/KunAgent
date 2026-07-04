@@ -339,6 +339,29 @@ export function ClawSettingsSection({ ctx }: { ctx: ClawSettingsContext }): Reac
             </div>
           }
         />
+        <SettingRow
+          title={t('clawRecentThreadListLimit')}
+          description={t('clawRecentThreadListLimitDesc')}
+          control={
+            <input
+              type="number"
+              min={1}
+              max={50}
+              step={1}
+              className={textInputClass('max-w-[120px]')}
+              value={form.claw.im.recentThreadListLimit}
+              onChange={(e) =>
+                update({
+                  claw: {
+                    im: {
+                      recentThreadListLimit: Number(e.target.value)
+                    }
+                  }
+                })
+              }
+            />
+          }
+        />
       </SettingsCard>
 
       {!hasTelegramChannel ? (

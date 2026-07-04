@@ -109,8 +109,8 @@ export class SkillRuntime {
   private lastInjection: SkillRuntimeDiagnostics['lastInjection']
 
   private constructor(
-    private readonly config: SkillsCapabilityConfig,
-    private readonly options: Required<SkillRuntimeOptions>,
+    private config: SkillsCapabilityConfig,
+    private options: Required<SkillRuntimeOptions>,
     loaded: { skills: LoadedSkill[]; validationErrors: Array<{ root: string; message: string }> }
   ) {
     this.skills = loaded.skills
@@ -136,6 +136,16 @@ export class SkillRuntime {
       ? await discoverSkills(normalized)
       : { skills: [], validationErrors: [] }
     return new SkillRuntime(normalized, resolvedOptions, loaded)
+  }
+
+  replaceWith(next: SkillRuntime): void {
+    this.config = next.config
+    this.options = next.options
+    this.skills = next.skills
+    this.validationErrors = next.validationErrors
+    this.workspaceSkillCache.clear()
+    this.lastActivations = []
+    this.lastInjection = undefined
   }
 
   async refresh(): Promise<void> {
