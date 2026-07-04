@@ -1072,9 +1072,14 @@ describe('Kun built-in tools', () => {
     const target = join(workspace, 'serial.txt')
     const order: string[] = []
 
+    let markFirstStarted!: () => void
+    const firstStarted = new Promise<void>((resolve) => {
+      markFirstStarted = resolve
+    })
     let releaseFirst!: () => void
     const first = withFileMutationQueue(target, async () => {
       order.push('first:start')
+      markFirstStarted()
       await new Promise<void>((resolve) => {
         releaseFirst = resolve
       })
@@ -1086,7 +1091,7 @@ describe('Kun built-in tools', () => {
       order.push('second:end')
     })
 
-    await new Promise((resolve) => setTimeout(resolve, 20))
+    await firstStarted
     expect(order).toEqual(['first:start'])
     releaseFirst()
     await Promise.all([first, second])
