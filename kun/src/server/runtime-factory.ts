@@ -193,7 +193,18 @@ export async function createKunServeRuntime(
       'system: keep the stable Kun prefix byte-stable for prompt-cache reuse'
     ]
   })
-  const threadService = new ThreadService({ threadStore, sessionStore, events, ids, nowIso })
+  const threadService = new ThreadService({
+    threadStore,
+    sessionStore,
+    events,
+    ids,
+    nowIso,
+    onDeleted: (threadId) => {
+      usageService.reset(threadId)
+      events.clearThread(threadId)
+      eventBus.clearThread(threadId)
+    }
+  })
   const artifactStore = new FileArtifactStore(join(activeOptions.dataDir, 'artifacts'), nowIso)
   let modelProfiles = modelContextProfilesFromConfig({
     contextCompaction: activeOptions.contextCompaction,

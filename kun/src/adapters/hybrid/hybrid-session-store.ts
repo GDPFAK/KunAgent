@@ -80,4 +80,8 @@ export class HybridSessionStore implements SessionStore {
   async resetMemory(): Promise<void> {
     await this.delegate.resetMemory()
   }
+
+  clearThreadMemory(threadId: string): void {
+    this.delegate.clearThreadMemory(threadId)
+  }
 }

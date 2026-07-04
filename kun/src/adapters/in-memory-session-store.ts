@@ -119,4 +119,10 @@ export class InMemorySessionStore implements SessionStore {
     this.items.clear()
     this.sessions.clear()
   }
+
+  clearThreadMemory(threadId: string): void {
+    this.events.delete(threadId)
+    this.items.delete(threadId)
+    this.sessions.delete(threadId)
+  }
 }

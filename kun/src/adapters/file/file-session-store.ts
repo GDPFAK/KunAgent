@@ -171,6 +171,11 @@ export class FileSessionStore implements SessionStore {
     this.itemsCacheVersion.clear()
   }
 
+  clearThreadMemory(threadId: string): void {
+    this.itemsCache.delete(threadId)
+    this.itemsCacheVersion.delete(threadId)
+  }
+
   private itemsVersionOf(threadId: string): number {
     return this.itemsCacheVersion.get(threadId) ?? 0
   }

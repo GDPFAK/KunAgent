@@ -27,6 +27,20 @@ describe('InMemoryEventBus', () => {
     bus.publish({ kind: 'heartbeat', seq: 2, timestamp: 't', threadId: 'a' })
     expect(received).toEqual([1])
   })
+
+  it('clears retained state for only the deleted thread', () => {
+    const bus = new InMemoryEventBus()
+    bus.publish({ kind: 'heartbeat', seq: 1, timestamp: 't', threadId: 'a' })
+    bus.publish({ kind: 'heartbeat', seq: 1, timestamp: 't', threadId: 'b' })
+
+    bus.clearThread('a')
+
+    expect(bus.snapshotSince('a', 0)).toEqual([])
+    expect(bus.highestSeq('a')).toBe(0)
+    expect(bus.allocateSeq('a')).toBe(1)
+    expect(bus.snapshotSince('b', 0)).toHaveLength(1)
+    expect(bus.highestSeq('b')).toBe(1)
+  })
 })
 
 describe('InMemoryApprovalGate', () => {
