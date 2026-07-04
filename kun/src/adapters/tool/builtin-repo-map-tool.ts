@@ -16,6 +16,7 @@ const DEFAULT_REPO_MAP_MAX_FILES = 20
 const DEFAULT_REPO_MAP_MAX_SYMBOLS = 12
 const DEFAULT_REPO_MAP_SCAN_LIMIT = 2500
 const REPO_MAP_CACHE_TTL_MS = 30_000
+const REPO_MAP_CACHE_MAX_ENTRIES = 8
 const MAX_SYMBOL_BYTES = 512 * 1024
 const MAX_GIT_RECENT_FILES = 250
 const INDEX_CONCURRENCY = 12
@@ -99,6 +100,17 @@ type RepoMapCacheEntry = {
 
 const repoMapCache = new Map<string, RepoMapCacheEntry>()
 
+function pruneRepoMapCache(now: number): void {
+  for (const [key, entry] of repoMapCache) {
+    if (entry.expiresAt <= now) repoMapCache.delete(key)
+  }
+  while (repoMapCache.size > REPO_MAP_CACHE_MAX_ENTRIES) {
+    const oldest = repoMapCache.keys().next().value
+    if (oldest === undefined) break
+    repoMapCache.delete(oldest)
+  }
+}
+
 export function createRepoMapLocalTool(): LocalTool {
   return {
     name: 'repo_map',
@@ -148,8 +160,9 @@ export function createRepoMapLocalTool(): LocalTool {
       const { workspaceRoot, absolutePath, relativePath } = await resolveWorkspacePath(rawPath, context)
       const cacheKey = `${workspaceRoot}\0${absolutePath}`
       const gitHead = await gitHeadForWorkspace(workspaceRoot)
-      const cached = repoMapCache.get(cacheKey)
       const now = Date.now()
+      pruneRepoMapCache(now)
+      const cached = repoMapCache.get(cacheKey)
       const cacheHit = Boolean(
         cached &&
         !refresh &&
@@ -167,11 +180,16 @@ export function createRepoMapLocalTool(): LocalTool {
             signal: context.abortSignal
           })
       if (!cacheHit) {
+        repoMapCache.delete(cacheKey)
         repoMapCache.set(cacheKey, {
           index,
           expiresAt: now + REPO_MAP_CACHE_TTL_MS,
           scanLimit: maxScanFiles
         })
+        pruneRepoMapCache(now)
+      } else {
+        repoMapCache.delete(cacheKey)
+        repoMapCache.set(cacheKey, cached!)
       }
 
       const ranked = rankRepoMapFiles(index.files, query, index.recentFiles)
