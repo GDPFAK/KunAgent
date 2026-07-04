@@ -1317,6 +1317,7 @@
   "clawHelpTitle": "可用命令",
   "clawHelpCommandHelp": "显示这份命令帮助",
   "clawHelpCommandNew": "清空当前飞书 / Lark 连接的对话",
+  "clawHelpCommandClear": "等同于 /new",
   "clawHelpCommandModelList": "列出可用文本模型",
   "clawHelpCommandModelSwitch": "切换到 /list-model 列出的模型",
   "clawTimelineInbound": "来自 {{source}}",

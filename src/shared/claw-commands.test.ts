@@ -5,6 +5,8 @@ describe('parseClawCommand', () => {
   it('parses IM help and new-topic commands', () => {
     expect(parseClawCommand('/help')).toEqual({ kind: 'help' })
     expect(parseClawCommand('/new')).toEqual({ kind: 'clear' })
+    expect(parseClawCommand('/clear')).toEqual({ kind: 'clear' })
+    expect(parseClawCommand('-clear')).toEqual({ kind: 'clear' })
     expect(parseClawCommand('/stop')).toEqual({ kind: 'stop' })
     expect(parseClawCommand('-stop')).toEqual({ kind: 'stop' })
   })

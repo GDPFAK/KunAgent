@@ -18,7 +18,7 @@ export type ClawCommand =
 export function parseClawCommand(text: string): ClawCommand | null {
   const raw = text.trim()
   const lower = raw.toLowerCase()
-  if (/^[/-]new$/.test(lower)) {
+  if (/^[/-](?:new|clear)$/.test(lower)) {
     return { kind: 'clear' }
   }
   if (/^[/-]stop$/.test(lower)) {

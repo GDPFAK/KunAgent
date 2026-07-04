@@ -1317,6 +1317,7 @@
   "clawHelpTitle": "Available commands",
   "clawHelpCommandHelp": "Show this command help",
   "clawHelpCommandNew": "Clear the current conversation for the active Feishu / Lark connection",
+  "clawHelpCommandClear": "Same as /new",
   "clawHelpCommandModelList": "List available text models",
   "clawHelpCommandModelSwitch": "Switch to a model listed by /list-model",
   "clawTimelineInbound": "From {{source}}",

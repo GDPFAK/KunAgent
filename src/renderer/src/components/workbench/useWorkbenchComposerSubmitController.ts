@@ -181,6 +181,7 @@ export function useWorkbenchComposerSubmitController({
       '',
       `- \`/help\`: ${t('clawHelpCommandHelp')}`,
       `- \`/new\`: ${t('clawHelpCommandNew')}`,
+      `- \`/clear\`: ${t('clawHelpCommandClear')}`,
       `- \`/list-model\`: ${t('clawHelpCommandModelList')}`,
       `- \`/model <number>\`: ${t('clawHelpCommandModelSwitch')}`
     ].join('\n'), [t])
