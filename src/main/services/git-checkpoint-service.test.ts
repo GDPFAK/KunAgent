@@ -241,7 +241,7 @@ describe('git checkpoint service', () => {
     // traversal that a lexical-only check misses.
     const outsideDir = join(sandbox, 'outside')
     await mkdir(outsideDir, { recursive: true })
-    await symlink(outsideDir, join(repoRoot, 'link'), 'dir')
+    await symlink(outsideDir, join(repoRoot, 'link'), process.platform === 'win32' ? 'junction' : 'dir')
 
     await expect(
       testResolvePathWithinRepository(repoRoot, 'link/payload.txt')
