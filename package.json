@@ -8,9 +8,9 @@
   "scripts": {
     "dev": "npm run build:kun && electron-vite dev",
     "build": "npm run build:kun && electron-vite build",
-    "build:kun": "node ./scripts/ensure-kun-install.cjs && npm --prefix kun run build",
+    "build:kun": "node ./scripts/generate-build-identity.cjs && node ./scripts/ensure-kun-install.cjs && npm --prefix kun run build",
     "lint": "eslint .",
-    "test": "vitest run",
+    "test": "node ./scripts/generate-build-identity.cjs && vitest run",
     "test:watch": "vitest",
     "dist": "npm run build && npx --yes electron-builder@26.8.1 --config electron-builder.config.cjs --publish never",
     "dist:mac": "rm -f dist/Kun-*-mac-* dist/DeepSeek-GUI-*-mac-* dist/latest-mac.yml && npm run build && npm run dist:mac:x64:dmg && npm run dist:mac:x64:zip && npm run dist:mac:arm64:dmg && npm run dist:mac:arm64:zip && node ./scripts/generate-mac-latest.cjs dist",
@@ -31,7 +31,7 @@
     "postinstall": "node ./scripts/postinstall.cjs",
     "verify:apple": "node ./scripts/verify-apple-signing.cjs",
     "preview": "electron-vite preview",
-    "typecheck": "tsc --noEmit -p tsconfig.web.json && tsc --noEmit -p tsconfig.node.json",
+    "typecheck": "node ./scripts/generate-build-identity.cjs && tsc --noEmit -p tsconfig.web.json && tsc --noEmit -p tsconfig.node.json",
     "prepare:whisper": "node ./scripts/prepare-whisper-runner.cjs",
     "mac:unquarantine": "bash ./scripts/mac-unquarantine.sh"
   },
