@@ -992,6 +992,29 @@ describe('Kun extension metadata mapping', () => {
       }
     })
   })
+
+  it('preserves background subagent message source on user messages', () => {
+    const block = chatBlockFromItem({
+      id: 'item_subagent_notice',
+      turnId: 'turn_1',
+      threadId: 'thr_1',
+      role: 'user',
+      status: 'completed',
+      createdAt: '2024-01-01T00:00:00.000Z',
+      kind: 'user_message',
+      text: '<background_subagent_completed><child_id>child-1</child_id><label>后台休眠</label><status>completed</status><summary>done</summary></background_subagent_completed>',
+      displayText: 'Background subagent 后台休眠 completed',
+      messageSource: 'background_subagent'
+    })
+
+    expect(block).toMatchObject({
+      kind: 'user',
+      meta: {
+        displayText: 'Background subagent 后台休眠 completed',
+        messageSource: 'background_subagent'
+      }
+    })
+  })
 })
 
 describe('usage event mapping', () => {

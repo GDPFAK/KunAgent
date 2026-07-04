@@ -754,7 +754,8 @@ export class DelegationRuntime {
           threadId: record.parentThreadId,
           turnId: runningTurn.id,
           text: notice,
-          displayText
+          displayText,
+          messageSource: 'background_subagent'
         })
         return
       }
@@ -763,7 +764,8 @@ export class DelegationRuntime {
       threadId: record.parentThreadId,
       request: {
         prompt: notice,
-        displayText
+        displayText,
+        messageSource: 'background_subagent'
       }
     })
     void this.runTurn(record.parentThreadId, started.turnId)
@@ -903,16 +905,27 @@ function formatDetachedChildDisplayText(record: ChildRunRecord): string {
 function formatDetachedChildNotice(record: ChildRunRecord): string {
   const label = record.label?.trim() || record.profile?.trim() || record.id
   const lines = [
-    `Background subagent "${label}" ${record.status}.`,
-    `Child id: ${record.id}`
+    '<background_subagent_completed>',
+    `<child_id>${escapeXml(record.id)}</child_id>`,
+    `<label>${escapeXml(label)}</label>`,
+    `<status>${record.status === 'failed' ? 'failed' : 'completed'}</status>`
   ]
   if (record.summary?.trim()) {
-    lines.push('', 'Summary:', record.summary.trim())
+    lines.push(`<summary>${escapeXml(record.summary.trim())}</summary>`)
   }
   if (record.error?.trim()) {
-    lines.push('', 'Error:', record.error.trim())
+    lines.push(`<error>${escapeXml(record.error.trim())}</error>`)
   }
+  lines.push('</background_subagent_completed>')
   return lines.join('\n')
+}
+
+function escapeXml(text: string): string {
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
 }
 
 const defaultExecutor: ChildRunExecutor = async (input) => {

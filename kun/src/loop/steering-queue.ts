@@ -1,3 +1,5 @@
+import type { UserMessageSource } from '../contracts/items.js'
+
 /**
  * Mid-turn steering queue. The renderer posts steering text while a
  * turn is running; the queue collects those messages and injects them
@@ -7,7 +9,7 @@
 export type SteeringEntry = {
   text: string
   displayText?: string
-  messageSource?: 'background_shell'
+  messageSource?: UserMessageSource
 }
 
 export class SteeringQueue {

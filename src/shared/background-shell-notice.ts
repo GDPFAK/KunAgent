@@ -42,11 +42,12 @@ export function isBackgroundShellNoticeSource(
   return messageSource === 'background_shell'
 }
 
-export type ClientUserMessageSource = 'background_shell'
+export type ClientUserMessageSource = 'background_shell' | BackgroundSubagentUserMessageSource
 
 /** Client-only hint derived from persisted user_message text, not from server metadata. */
 export function inferClientUserMessageSource(text: string): ClientUserMessageSource | undefined {
-  return parseBackgroundShellCompletionNotice(text) ? 'background_shell' : undefined
+  if (parseBackgroundShellCompletionNotice(text)) return 'background_shell'
+  return inferBackgroundSubagentUserMessageSource(text)
 }
 
 export function applyClientUserMessageSourceMeta(
@@ -63,5 +64,11 @@ export function isBackgroundShellNoticeUserMessage(input: {
   meta?: Record<string, unknown> | null
 }): boolean {
   if (isBackgroundShellNoticeSource(input.meta?.messageSource)) return true
+  if (isBackgroundSubagentNoticeSource(input.meta?.messageSource)) return false
   return inferClientUserMessageSource(input.text) === 'background_shell'
 }
+import {
+  inferBackgroundSubagentUserMessageSource,
+  isBackgroundSubagentNoticeSource,
+  type BackgroundSubagentUserMessageSource
+} from './background-subagent-notice'

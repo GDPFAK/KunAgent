@@ -26,7 +26,12 @@ import { useChatStore } from '../../store/chat-store'
 import { DiffView } from '../DiffView'
 import { AssistantMarkdown } from './AssistantMarkdown'
 import { MessageBubble } from './message-timeline-bubbles'
-import { blockHasPendingRuntimeWork, isBackgroundShellNoticeBlock, splitThink } from './message-timeline-turns'
+import {
+  blockHasPendingRuntimeWork,
+  isBackgroundShellNoticeBlock,
+  isBackgroundSubagentNoticeBlock,
+  splitThink
+} from './message-timeline-turns'
 import {
   formatDuration,
   formatToolTitle,
@@ -724,6 +729,7 @@ function processBlockIcon(block: ChatBlock): LucideIcon | null {
   if (block.kind === 'approval') return Wrench
   if (block.kind === 'user_input') return MessageSquareQuote
   if (isBackgroundShellNoticeBlock(block)) return BellRing
+  if (isBackgroundSubagentNoticeBlock(block)) return BellRing
   if (block.kind !== 'tool') return null
   return toolBlockIcon(block)
 }
@@ -870,6 +876,7 @@ type ProcessDetail =
   | { kind: 'approval' }
   | { kind: 'user_input' }
   | { kind: 'background_shell' }
+  | { kind: 'background_subagent' }
   | { kind: 'text'; text: string }
 
 function summarizeProcessText(text: string, max = 96): string {
@@ -1132,6 +1139,7 @@ function getProcessDetail(block: ChatBlock, summaryText?: string): ProcessDetail
   if (block.kind === 'approval') return { kind: 'approval' }
   if (block.kind === 'user_input') return { kind: 'user_input' }
   if (isBackgroundShellNoticeBlock(block)) return { kind: 'background_shell' }
+  if (isBackgroundSubagentNoticeBlock(block)) return { kind: 'background_subagent' }
   if (block.kind === 'system' && block.text.trim()) {
     if (block.detail?.trim()) return { kind: 'text', text: block.detail }
     // Short system messages already fit in the summary line — skip the
@@ -1202,7 +1210,7 @@ function ProcessEntryDetail({
   if (detail.kind === 'user_input' && block.kind === 'user_input') {
     return <MessageBubble block={block} nested />
   }
-  if (detail.kind === 'background_shell' && block.kind === 'user') {
+  if ((detail.kind === 'background_shell' || detail.kind === 'background_subagent') && block.kind === 'user') {
     return <MessageBubble block={block} nested />
   }
   return null
@@ -1223,6 +1231,9 @@ function describeProcessBlock(
   }
   if (block.kind === 'user' && isBackgroundShellNoticeBlock(block)) {
     return block.meta?.displayText?.trim() || t('backgroundShellNotice.title', { defaultValue: 'Background shell completed' })
+  }
+  if (block.kind === 'user' && isBackgroundSubagentNoticeBlock(block)) {
+    return block.meta?.displayText?.trim() || t('backgroundSubagentNotice.title', { defaultValue: 'Background subagent completed' })
   }
   if (block.kind === 'compaction') {
     if (block.status === 'running') return t('compactionRunning')

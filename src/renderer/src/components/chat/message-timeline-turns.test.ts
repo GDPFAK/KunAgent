@@ -68,4 +68,45 @@ describe('message timeline turns', () => {
     expect(turns[0]?.blocks).toHaveLength(1)
     expect(turns[0]?.blocks[0]?.id).toBe('notice_2')
   })
+
+  it('keeps background subagent notices inside the current turn', () => {
+    const notice: ChatBlock = {
+      kind: 'user',
+      id: 'notice_subagent_1',
+      text: '<background_subagent_completed><child_id>child-1</child_id><label>后台休眠</label><status>completed</status><summary>done</summary></background_subagent_completed>',
+      meta: {
+        displayText: 'Background subagent 后台休眠 completed',
+        messageSource: 'background_subagent'
+      }
+    }
+    const blocks: ChatBlock[] = [
+      { kind: 'user', id: 'user_1', text: 'Run one background subagent' },
+      { kind: 'assistant', id: 'assistant_1', text: 'Started.' },
+      notice,
+      { kind: 'assistant', id: 'assistant_2', text: 'Background finished.' }
+    ]
+
+    const turns = groupTurns(blocks)
+
+    expect(turns).toHaveLength(1)
+    expect(turns[0]?.user?.id).toBe('user_1')
+    expect(turns[0]?.blocks.map((block) => block.id)).toEqual([
+      'assistant_1',
+      'notice_subagent_1',
+      'assistant_2'
+    ])
+  })
+
+  it('does not treat ordinary user prompts as background subagent notices', () => {
+    const blocks: ChatBlock[] = [
+      { kind: 'user', id: 'user_1', text: 'Run one background subagent' },
+      { kind: 'assistant', id: 'assistant_1', text: 'Started.' },
+      { kind: 'user', id: 'user_2', text: 'Background subagent 后台休眠 completed' }
+    ]
+
+    const turns = groupTurns(blocks)
+
+    expect(turns).toHaveLength(2)
+    expect(turns[1]?.user?.id).toBe('user_2')
+  })
 })

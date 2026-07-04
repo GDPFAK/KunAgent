@@ -117,7 +117,14 @@ describe('DelegationRuntime abort handling', () => {
       expect(runTurn.mock.calls[0][0]).toBe('parent')
       const thread = await threadStore.get('parent')
       expect(thread?.status).toBe('running')
-      expect(thread?.turns.at(-1)?.prompt).toContain('Background subagent "research" completed.')
+      const resumedTurn = thread?.turns.at(-1)
+      expect(resumedTurn?.prompt).toContain('<background_subagent_completed>')
+      expect(resumedTurn?.prompt).toContain('<label>research</label>')
+      expect(resumedTurn?.items?.[0]).toMatchObject({
+        kind: 'user_message',
+        messageSource: 'background_subagent',
+        displayText: 'Background subagent research completed'
+      })
     } finally {
       await rm(dir, { recursive: true, force: true })
     }

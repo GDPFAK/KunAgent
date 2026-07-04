@@ -324,6 +324,9 @@ function applyRuntimeDisclosureMeta(
   if (displayText && displayText !== item.text?.trim()) {
     meta.displayText = displayText
   }
+  if (item.messageSource === 'background_shell' || item.messageSource === 'background_subagent') {
+    meta.messageSource = item.messageSource
+  }
   applyClientUserMessageSourceMeta(meta, item.text ?? '')
   if (attachmentIds) meta.attachmentIds = attachmentIds
   if (fileReferences) meta.fileReferences = fileReferences

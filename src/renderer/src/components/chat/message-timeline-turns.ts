@@ -1,5 +1,6 @@
 import type { ChatBlock } from '../../agent/types'
 import { isBackgroundShellNoticeUserMessage } from '@shared/background-shell-notice'
+import { isBackgroundSubagentNoticeUserMessage } from '@shared/background-subagent-notice'
 import { hasPendingRuntimeWork } from '../../store/chat-store-runtime-helpers'
 
 export type Turn = {
@@ -11,13 +12,21 @@ export function isBackgroundShellNoticeBlock(block: ChatBlock): boolean {
   return block.kind === 'user' && isBackgroundShellNoticeUserMessage(block)
 }
 
+export function isBackgroundSubagentNoticeBlock(block: ChatBlock): boolean {
+  return block.kind === 'user' && isBackgroundSubagentNoticeUserMessage(block)
+}
+
+export function isBackgroundNoticeBlock(block: ChatBlock): boolean {
+  return isBackgroundShellNoticeBlock(block) || isBackgroundSubagentNoticeBlock(block)
+}
+
 export function groupTurns(blocks: ChatBlock[]): Turn[] {
   const turns: Turn[] = []
   let current: Turn | null = null
 
   for (const block of blocks) {
     if (block.kind === 'user') {
-      if (isBackgroundShellNoticeBlock(block)) {
+      if (isBackgroundNoticeBlock(block)) {
         if (!current) current = { blocks: [] }
         current.blocks.push(block)
         continue
@@ -62,7 +71,7 @@ export function blockHasPendingRuntimeWork(block: ChatBlock): boolean {
 
 export function isProcessBlock(block: ChatBlock): boolean {
   return (
-    isBackgroundShellNoticeBlock(block) ||
+    isBackgroundNoticeBlock(block) ||
     block.kind === 'reasoning' ||
     block.kind === 'tool' ||
     block.kind === 'compaction' ||
