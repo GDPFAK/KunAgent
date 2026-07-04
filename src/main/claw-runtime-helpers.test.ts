@@ -4,11 +4,30 @@ import {
   finalAssistantReplyText,
   imCompletionReplyForPush,
   IM_COMPLETED_NO_TEXT_REPLY,
+  createDeferredCloseHandle,
   subscribeRuntimeThreadEvents,
   type RuntimeSseEvent,
   type ThreadDetailJson,
   type TurnItemJson
 } from './claw-runtime-helpers'
+
+describe('createDeferredCloseHandle', () => {
+  it('closes a subscription that resolves after the caller already closed', async () => {
+    let resolveSetup!: (handle: { close: () => void }) => void
+    const setup = new Promise<{ close: () => void }>((resolve) => {
+      resolveSetup = resolve
+    })
+    const close = vi.fn()
+    const handle = createDeferredCloseHandle(setup, vi.fn())
+
+    handle.close()
+    resolveSetup({ close })
+    await setup
+    await Promise.resolve()
+
+    expect(close).toHaveBeenCalledTimes(1)
+  })
+})
 
 // Global fetch mock for subscribeRuntimeThreadEvents
 const originalFetch = globalThis.fetch

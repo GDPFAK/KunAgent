@@ -595,6 +595,32 @@ export async function readRequestBody(req: IncomingMessage): Promise<string> {
 
 export type SseSubscriber = (signal: AbortSignal) => { close: () => void }
 
+export function createDeferredCloseHandle(
+  setup: Promise<{ close: () => void }>,
+  onError: (error: unknown) => void
+): { close: () => void } {
+  let handle: { close: () => void } | null = null
+  let closed = false
+  void setup.then(
+    (resolved) => {
+      if (closed) {
+        resolved.close()
+        return
+      }
+      handle = resolved
+    },
+    onError
+  )
+  return {
+    close: () => {
+      if (closed) return
+      closed = true
+      handle?.close()
+      handle = null
+    }
+  }
+}
+
 export type RuntimeSseEvent = { kind: string; turnId?: string; item?: { text?: unknown }; seq?: number; [key: string]: unknown }
 
 /**

@@ -71,6 +71,7 @@ import {
   type RunPromptOptions,
   type ThreadDetailJson,
   type ThreadRecordJson,
+  createDeferredCloseHandle,
   type SseSubscriber,
   subscribeRuntimeThreadEvents
 } from './claw-runtime-helpers'
@@ -1244,10 +1245,8 @@ export class ClawRuntime {
       // setup; if the setup itself throws (e.g. no base URL) we log via
       // deps.logError and continue with a no-op close. The streamer will
       // still rely on its own responseTimeoutMs abort as a backstop.
-      const setup = this.subscribeSse(settings, threadId, streamer, signal)
-      let close = (): void => undefined
-      void setup.then(
-        (handle) => { close = handle.close },
+      return createDeferredCloseHandle(
+        this.subscribeSse(settings, threadId, streamer, signal),
         (error) => {
           this.deps.logError('claw-feishu-stream', 'SSE subscription setup failed', {
             message: error instanceof Error ? error.message : String(error),
@@ -1255,7 +1254,6 @@ export class ClawRuntime {
           })
         }
       )
-      return { close: () => close() }
     }
   }
 
