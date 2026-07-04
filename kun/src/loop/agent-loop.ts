@@ -26,6 +26,7 @@ import type { IdGenerator } from '../ports/id-generator.js'
 import type { ImmutablePrefix } from '../cache/immutable-prefix.js'
 import type { CacheRequestSignature } from '../cache/cache-diagnostics.js'
 import { ContextCompactor } from './context-compactor.js'
+import { ContextCompiler } from './context-compiler/context-compiler.js'
 import {
   effectiveHistoryAfterLatestCompaction,
   insertCompactionIntoVisibleHistory,
@@ -510,6 +511,13 @@ const GOAL_NO_TOOL_REPEAT_MIN_LENGTH = 12
 const GOAL_NO_TOOL_REPEAT_MAX_RECOVERY_STEPS = 3
 const EMPTY_POST_TOOL_MAX_RECOVERY_STEPS = 1
 
+/**
+ * Maximum number of continuation attempts for a child agent that stops
+ * without tool calls (Issue #621). Prevents infinite loops while allowing
+ * the model to recover from premature stops in child-agent-executor.ts.
+ */
+const CHILD_AGENT_MAX_CONTINUATION_STEPS = 1
+
 function goalNoToolRecoveryInstruction(recoveryStep: number): string {
   return [
     'Goal continuation recovery:',
@@ -783,6 +791,8 @@ export class AgentLoop {
   private readonly lastNoToolTextByTurn = new Map<string, string>()
   private readonly goalNoToolRecoveryStepsByTurn = new Map<string, number>()
   private readonly emptyPostToolRecoveryStepsByTurn = new Map<string, number>()
+  /** Tracks continuation steps for child agents that stop early without tool calls. */
+  private readonly childAgentContinuationStepsByTurn = new Map<string, number>()
   private readonly turnFailures = new Map<string, TurnFailure>()
   /** Turns that executed at least one real (non-goal-status) tool call. */
   private readonly turnMadeProgress = new Set<string>()
@@ -794,6 +804,7 @@ export class AgentLoop {
    */
   private readonly goalResumeSuppressedByTurn = new Set<string>()
   private readonly goalResume: GoalResumeCoordinator
+  private readonly contextCompilers = new Map<string, ContextCompiler>()
 
   constructor(opts: AgentLoopOptions) {
     this.opts = opts
@@ -814,6 +825,15 @@ export class AgentLoop {
     this.goalResume.shutdown()
   }
 
+  /** Remove per-thread cached state so deleted threads do not leak memory. */
+  purgeThread(threadId: string): void {
+    this.autoModelRoutes.delete(threadId)
+    this.promptTokenPressure.delete(threadId)
+    this.hydratedPressureThreads.delete(threadId)
+    this.toolCatalogSnapshots.delete(threadId)
+    this.contextCompilers.delete(threadId)
+  }
+
   /**
    * Resume goals stranded by a runtime restart (path A). `threadIds` are the
    * threads whose in-flight turn was just reconciled to `failed`; only those
@@ -826,6 +846,17 @@ export class AgentLoop {
       if (await this.goalResume.resumeInterrupted(threadId)) resumed += 1
     }
     return resumed
+  }
+
+  private contextCompilerForThread(threadId: string): ContextCompiler {
+    let c = this.contextCompilers.get(threadId)
+    if (!c) { c = new ContextCompiler(); this.contextCompilers.set(threadId, c) }
+    return c
+  }
+  private async extractTurnAnchors(threadId: string, turnId: string): Promise<void> {
+    const items = await this.opts.sessionStore.loadItems(threadId)
+    const turnItems = items.filter((i) => i.turnId === turnId)
+    if (turnItems.length > 0) this.contextCompilerForThread(threadId).extractAnchorsFromTurn(turnItems)
   }
 
   /**
@@ -906,6 +937,7 @@ export class AgentLoop {
         // Fire-and-forget: generate an LLM title after the FIRST assistant
         // reply completes, only when the thread still has a default title.
         void this.maybeGenerateThreadTitle(threadId, turnId, signal).catch(() => {})
+        this.extractTurnAnchors(threadId, turnId).catch(() => {})
       }
       return status
     } catch (error) {
@@ -945,6 +977,7 @@ export class AgentLoop {
       this.turnMadeProgress.delete(turnId)
       this.goalResumeSuppressedByTurn.delete(turnId)
       this.emptyPostToolRecoveryStepsByTurn.delete(turnId)
+      this.childAgentContinuationStepsByTurn.delete(turnId)
       this.turnFailures.delete(turnId)
       await this.runTurnEndHooks(threadId, turnId, finalStatus ?? 'failed', finalError)
     }
@@ -1568,6 +1601,7 @@ export class AgentLoop {
         })
       : null
     const toolPreferenceInstruction = buildToolPreferenceInstruction(tools)
+    const factAnchorInstruction = this.contextCompilers.get(threadId)?.getFactAnchorInstruction() ?? null
     const contextInstructions = [
       ...(runtimeContextInstruction ? [runtimeContextInstruction] : []),
       ...(instructionResolution.instruction ? [instructionResolution.instruction] : []),
@@ -1590,6 +1624,7 @@ export class AgentLoop {
       ...skillResolution.instructions,
       ...(userInputDisabled ? [userInputUnavailableInstruction()] : []),
       ...(toolPreferenceInstruction ? [toolPreferenceInstruction] : []),
+      ...(factAnchorInstruction ? [factAnchorInstruction] : []),
       ...(effectiveToolSpecs.some((tool) => tool.name === 'bash') ? [shellRuntimeInstruction()] : []),
       ...(suggestVerification ? [verificationSuggestionInstruction()] : []),
       ...(toolCatalogDriftMessage ? [toolCatalogDriftMessage] : [])
