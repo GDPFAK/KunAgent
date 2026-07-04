@@ -113,6 +113,10 @@ function localizedRuntimeSummary(code: string | null, text: string): string | nu
     return i18n.t('common:runtimeUnhealthy')
   }
 
+  if (code === 'runtime_build_mismatch' || code === 'runtime_version_mismatch') {
+    return i18n.t('common:runtimeVersionMismatch')
+  }
+
   if (code === 'turn_in_progress' || lowered.includes('active turn')) {
     return i18n.t('common:runtimeActiveTurn')
   }

@@ -1922,6 +1922,7 @@
   "runtimeMissingApiKey": "DeepSeek API Key is missing. Open Settings and add it before the GUI can start the local runtime.",
   "runtimeAutoStartDisabled": "Kun is offline. Enable automatic startup in Settings, or start `kun serve` manually.",
   "runtimeUnhealthy": "The local runtime is currently unavailable. Check the port, token, or runtime status.",
+  "runtimeVersionMismatch": "The local runtime version does not match this GUI version. Fully quit and restart Kun; if the problem continues, reinstall the app.",
   "runtimeAuthRequired": "The local runtime requires a bearer token for thread APIs. Add the runtime token in Settings, or restart the GUI so it can manage the local runtime again.",
   "runtimePortConflict": "The runtime port is already in use. Free that port, or choose another port in Settings.",
   "runtimeRequestFailed": "Runtime request failed. Please try again.",

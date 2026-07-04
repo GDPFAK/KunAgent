@@ -19,6 +19,7 @@ import {
   JsonSettingsStore,
   devServerHintUrl
 } from './settings-store'
+import { KUN_GUI_BUILD_HASH } from '../shared/build-identity'
 import kunLogoPng from '../asset/img/kun.png?url'
 import kunMacLogoPng from '../asset/img/kun_mac.png?url'
 import kunTrayPng from '../asset/img/kun_tray.png?url'
@@ -743,7 +744,10 @@ function probeKunHealthOnce(
         headers: runtimeAuthHeaders(settings),
         signal: AbortSignal.timeout(Math.max(250, Math.min(1_000, remainingMs)))
       })
-      const healthy = res.ok && isKunHealthResponseBody(await res.text())
+      const healthy = res.ok && isKunHealthResponseBody(await res.text(), {
+        expectedVersion: app.getVersion(),
+        expectedBuildHash: KUN_GUI_BUILD_HASH
+      })
       return { healthy, error: healthy ? '' : `unexpected status ${res.status}` }
     } catch (error) {
       return {

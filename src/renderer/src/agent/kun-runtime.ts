@@ -9,6 +9,7 @@ import type {
   UserInputAnswer
 } from './types'
 import { getKunRuntimeSettings } from '@shared/app-settings'
+import { KUN_GUI_BUILD_HASH } from '@shared/build-identity'
 import {
   KUN_ATTACHMENT_DIAGNOSTICS_PATH,
   KUN_ATTACHMENTS_PATH,
@@ -108,6 +109,28 @@ function readRuntimeJson<T>(body: string, fallback: string): T {
   }
 }
 
+function readHealthVersion(body: string): string {
+  try {
+    const parsed = JSON.parse(body) as unknown
+    if (!parsed || typeof parsed !== 'object') return ''
+    const version = (parsed as Record<string, unknown>).version
+    return typeof version === 'string' ? version.trim() : ''
+  } catch {
+    return ''
+  }
+}
+
+function readHealthBuildHash(body: string): string {
+  try {
+    const parsed = JSON.parse(body) as unknown
+    if (!parsed || typeof parsed !== 'object') return ''
+    const buildHash = (parsed as Record<string, unknown>).buildHash
+    return typeof buildHash === 'string' ? buildHash.trim() : ''
+  } catch {
+    return ''
+  }
+}
+
 /**
  * GUI-side adapter for the Kun HTTP/SSE contract.
  *
@@ -133,6 +156,23 @@ export class KunRuntimeProvider implements AgentProvider {
     const health = await rendererRuntimeClient.runtimeRequest('/health', 'GET')
     if (!health.ok) {
       throw runtimeErrorToError(readRuntimeError(health.body, `runtime unhealthy (${health.status || 0})`))
+    }
+    const runtimeVersion = readHealthVersion(health.body)
+    const appVersion = (await rendererRuntimeClient.getAppVersion().catch(() => '')).trim()
+    const runtimeBuildHash = readHealthBuildHash(health.body)
+    if (runtimeBuildHash !== KUN_GUI_BUILD_HASH) {
+      throw runtimeErrorToError({
+        code: 'runtime_build_mismatch',
+        message: `Kun runtime build ${runtimeBuildHash || 'unknown'} does not match GUI build ${KUN_GUI_BUILD_HASH}. Restart Kun or reinstall the app.`,
+        details: { runtimeBuildHash, appBuildHash: KUN_GUI_BUILD_HASH }
+      })
+    }
+    if (appVersion && runtimeVersion !== appVersion) {
+      throw runtimeErrorToError({
+        code: 'runtime_version_mismatch',
+        message: `Kun runtime version ${runtimeVersion || 'unknown'} does not match GUI version ${appVersion}. Restart Kun or reinstall the app.`,
+        details: { runtimeVersion, appVersion }
+      })
     }
     const threads = await rendererRuntimeClient.runtimeRequest('/v1/threads?limit=1', 'GET')
     if (!threads.ok) {

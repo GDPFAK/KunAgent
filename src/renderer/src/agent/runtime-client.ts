@@ -50,6 +50,10 @@ class RendererRuntimeClient {
     return window.kunGui.restartRuntime()
   }
 
+  getAppVersion(): Promise<string> {
+    return window.kunGui.getAppVersion()
+  }
+
   startSse(threadId: string, sinceSeq: number, streamId?: string): Promise<{ streamId: string }> {
     return window.kunGui.startSse(threadId, sinceSeq, streamId)
   }

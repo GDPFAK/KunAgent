@@ -56,7 +56,7 @@
     "kun": "./dist/cli/serve-entry.js"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
+    "build": "node ../scripts/generate-build-identity.cjs && tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run",
     "test:watch": "vitest",

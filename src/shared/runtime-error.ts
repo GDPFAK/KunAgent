@@ -40,6 +40,8 @@ export type LegacyMainGuardCode =
   | 'runtime_offline'
   | 'runtime_port_conflict'
   | 'runtime_unhealthy'
+  | 'runtime_build_mismatch'
+  | 'runtime_version_mismatch'
   | 'runtime_request_user_input_unsupported'
   | 'missing_api_key'
 
@@ -78,6 +80,8 @@ const KNOWN_LEGACY_CODES: ReadonlySet<LegacyMainGuardCode> = new Set<LegacyMainG
   'runtime_offline',
   'runtime_port_conflict',
   'runtime_unhealthy',
+  'runtime_build_mismatch',
+  'runtime_version_mismatch',
   'runtime_request_user_input_unsupported',
   'missing_api_key'
 ])

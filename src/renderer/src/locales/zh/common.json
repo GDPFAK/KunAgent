@@ -1922,6 +1922,7 @@
   "runtimeMissingApiKey": "尚未配置 DeepSeek API Key。请先打开设置填写，然后 GUI 才能自动启动本地运行时。",
   "runtimeAutoStartDisabled": "Kun 当前未启动。请在设置中开启自动启动，或手动执行 `kun serve`。",
   "runtimeUnhealthy": "本地运行时当前不可用。请检查端口、令牌或运行状态。",
+  "runtimeVersionMismatch": "本地运行时版本与当前前端版本不一致。请完全退出并重启 Kun；如果仍然出现此问题，请重新安装。",
   "runtimeAuthRequired": "本地运行时要求 Bearer Token 才能访问会话接口。请在设置中填写运行时令牌，或重启 GUI 让它重新管理本地运行时。",
   "runtimePortConflict": "运行时端口已被占用。请释放该端口，或在设置中更换端口。",
   "runtimeRequestFailed": "运行时请求失败。请稍后重试。",

@@ -11,6 +11,7 @@ import {
   defaultTerminalSettings,
   type AppSettingsV1
 } from '@shared/app-settings'
+import { KUN_GUI_BUILD_HASH } from '@shared/build-identity'
 import { KunRuntimeProvider } from './kun-runtime'
 import { getProvider, resetProviderCacheForTests } from './registry'
 import { rendererRuntimeClient } from './runtime-client'
@@ -50,6 +51,7 @@ function installDsGui(overrides: Partial<Window['kunGui']>): void {
   vi.stubGlobal('window', {
     kunGui: {
       getSettings: vi.fn(async () => settings()),
+      getAppVersion: vi.fn(async () => '0.1.0'),
       runtimeRequest: vi.fn(async () => ({ ok: true, status: 200, body: '{}' })),
       startSse: vi.fn(async (_threadId: string, _sinceSeq: number, streamId?: string) => ({
         streamId: streamId ?? 'stream-1'
@@ -81,6 +83,52 @@ describe('KunRuntimeProvider', () => {
     expect(caps.stream).toBe(true)
     expect(caps.interrupt).toBe(true)
     expect(caps.approvals).toBe(true)
+  })
+
+  it('rejects a runtime whose build hash does not match the GUI', async () => {
+    const runtimeRequest = vi.fn(async (path: string) => {
+      if (path === '/health') {
+        return {
+          ok: true,
+          status: 200,
+          body: JSON.stringify({
+            status: 'ok',
+            service: 'kun',
+            mode: 'serve',
+            version: '0.1.0',
+            buildHash: 'different-build'
+          })
+        }
+      }
+      return { ok: true, status: 200, body: JSON.stringify({ threads: [] }) }
+    })
+    installDsGui({ runtimeRequest, getAppVersion: vi.fn(async () => '0.1.0') })
+
+    await expect(new KunRuntimeProvider().connect()).rejects.toThrow('runtime_build_mismatch')
+    expect(runtimeRequest).toHaveBeenCalledTimes(1)
+  })
+
+  it('rejects a runtime whose version does not match the GUI after build hash passes', async () => {
+    const runtimeRequest = vi.fn(async (path: string) => {
+      if (path === '/health') {
+        return {
+          ok: true,
+          status: 200,
+          body: JSON.stringify({
+            status: 'ok',
+            service: 'kun',
+            mode: 'serve',
+            version: '0.0.9',
+            buildHash: KUN_GUI_BUILD_HASH
+          })
+        }
+      }
+      return { ok: true, status: 200, body: JSON.stringify({ threads: [] }) }
+    })
+    installDsGui({ runtimeRequest, getAppVersion: vi.fn(async () => '0.1.0') })
+
+    await expect(new KunRuntimeProvider().connect()).rejects.toThrow('runtime_version_mismatch')
+    expect(runtimeRequest).toHaveBeenCalledTimes(1)
   })
 
   it('reports invalid runtime JSON responses with a stable error message', async () => {
