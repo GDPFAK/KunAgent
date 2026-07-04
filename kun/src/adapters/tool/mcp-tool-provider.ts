@@ -126,6 +126,8 @@ export type McpToolProviderOptions = {
    * exercise the authorize-then-register + reconnect path without a network.
    */
   authorize?: (serverId: string, server: McpServerConfig) => Promise<McpOAuthAuthorizeResult>
+  /** Called when a server's connection status changes (GUI observability). */
+  onStatusChange?: (diagnostic: McpServerDiagnostic) => void
 }
 
 export type McpBackgroundReconnectOptions = {
@@ -166,6 +168,8 @@ type McpConnectionState = {
   nextReconnectAt?: string
   /** Live diagnostic object — the SAME reference stored in the diagnostics array. */
   diagnostic?: McpServerDiagnostic
+  /** Status change callback, wired from options.onStatusChange. */
+  onStatusChange?: (diagnostic: McpServerDiagnostic) => void
   intentionallyClosing?: boolean
 }
 
@@ -245,7 +249,8 @@ export async function buildMcpToolProviders(
           status: 'connected',
           reconnectAttempts: 0,
           reconnectBackoffMs: DEFAULT_MCP_RECONNECT_BASE_DELAY_MS,
-          lastConnectedAt: nowIso()
+          lastConnectedAt: nowIso(),
+          onStatusChange: options.onStatusChange
         }
         attachMcpClientLifecycle(state)
         const listed = await refreshMcpConnectionCatalog(state)
@@ -370,7 +375,8 @@ export async function buildMcpToolProviders(
       status: 'connected',
       reconnectAttempts: 0,
       reconnectBackoffMs: DEFAULT_MCP_RECONNECT_BASE_DELAY_MS,
-      lastConnectedAt: nowIso()
+      lastConnectedAt: nowIso(),
+      onStatusChange: options.onStatusChange
     }
     attachMcpClientLifecycle(state)
     let listed: McpToolDescriptor[]
@@ -463,7 +469,8 @@ export async function buildMcpToolProviders(
         register,
         isAborted: () => reconnectAborted,
         delay: options.delay ?? defaultMcpReconnectDelay,
-        options: options.backgroundReconnect
+        options: options.backgroundReconnect,
+        onStatusChange: options.onStatusChange
       })
     },
     clearOAuthCredentials: async (serverId) => {
@@ -509,6 +516,7 @@ type McpBackgroundReconnectParams = {
   isAborted: () => boolean
   delay: (ms: number) => Promise<void>
   options?: McpBackgroundReconnectOptions
+  onStatusChange?: (diagnostic: McpServerDiagnostic) => void
 }
 
 /**
@@ -552,7 +560,8 @@ async function reconnectFailedMcpServer(
         status: 'connected',
         reconnectAttempts: 0,
         reconnectBackoffMs: DEFAULT_MCP_RECONNECT_BASE_DELAY_MS,
-        lastConnectedAt: params.nowIso()
+        lastConnectedAt: params.nowIso(),
+        onStatusChange: params.onStatusChange
       }
       attachMcpClientLifecycle(state)
       const listed = await refreshMcpConnectionCatalog(state)
@@ -959,6 +968,7 @@ function syncMcpDiagnostic(
   status: McpServerDiagnostic['status'] = state.status,
   toolCount = state.diagnostic?.toolCount ?? 0
 ): McpServerDiagnostic {
+  const previousStatus = state.diagnostic?.status
   const diagnostic: McpServerDiagnostic = {
     id: state.serverId,
     enabled: state.server.enabled,
@@ -981,11 +991,14 @@ function syncMcpDiagnostic(
   // anyone holding the array without re-indexing.
   if (!state.diagnostic) {
     state.diagnostic = diagnostic
-    return diagnostic
+  } else {
+    for (const key of Object.keys(state.diagnostic) as Array<keyof McpServerDiagnostic>) {
+      delete (state.diagnostic as Record<string, unknown>)[key]
+    }
+    Object.assign(state.diagnostic, diagnostic)
   }
-  for (const key of Object.keys(state.diagnostic) as Array<keyof McpServerDiagnostic>) {
-    delete (state.diagnostic as Record<string, unknown>)[key]
+  if (previousStatus !== state.diagnostic.status) {
+    state.onStatusChange?.(state.diagnostic)
   }
-  Object.assign(state.diagnostic, diagnostic)
   return state.diagnostic
 }

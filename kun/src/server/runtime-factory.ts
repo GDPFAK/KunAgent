@@ -24,6 +24,7 @@ import { createReadArtifactTool } from '../adapters/tool/artifact-tool.js'
 import { FileArtifactStore } from '../artifacts/artifact-store.js'
 import { createTaskGraphTool } from '../adapters/tool/task-graph-tool.js'
 import { buildMcpToolProviders } from '../adapters/tool/mcp-tool-provider.js'
+import { McpRuntimeManager } from '../adapters/tool/mcp-runtime-manager.js'
 import { buildMemoryToolProviders } from '../adapters/tool/memory-tool-provider.js'
 import { buildSkillToolProviders } from '../adapters/tool/skill-tool-provider.js'
 import { buildDelegationToolProviders } from '../adapters/tool/delegation-tool-provider.js'
@@ -216,11 +217,18 @@ export async function createKunServeRuntime(
       })).encryptor
     : undefined
   // Independent I/O; all must still finish before the server listens.
+  const mcpRuntimeManager = new McpRuntimeManager({
+    oauthStorageDir: join(activeOptions.dataDir, 'mcp-oauth'),
+    ...(oauthEncryptor ? { oauthEncryptor } : {}),
+    onMcpStatusEvent: (serverId, status, diagnostic) => {
+      // MCP status changes are available via event callback for GUI
+      // observability. The diagnostics array is already mutated in-place
+      // by syncMcpDiagnostic (in mcp-tool-provider.ts), so the pull-based
+      // GET /v1/runtime/tools endpoint always reflects current state.
+    }
+  })
   let [mcpProviders, skillRuntime] = await Promise.all([
-    buildMcpToolProviders(activeOptions.capabilities?.mcp, {
-      oauthStorageDir: join(activeOptions.dataDir, 'mcp-oauth'),
-      ...(oauthEncryptor ? { oauthEncryptor } : {})
-    }),
+    mcpRuntimeManager.initialize(activeOptions.capabilities?.mcp),
     SkillRuntime.create(activeOptions.capabilities?.skills),
     seedUsageCarryover({ threadStore, sessionStore, usageService })
   ])
@@ -577,10 +585,16 @@ export async function createKunServeRuntime(
 	      })
 	    }
 	  }
-	  const loop = new AgentLoop(loopOptions)
-	  backgroundShellRuntime.bindAgentLoop({
-	    runTurn: (threadId, turnId) => loop.runTurn(threadId, turnId)
-	  })
+  const loop = new AgentLoop(loopOptions)
+  backgroundShellRuntime.bindAgentLoop({
+    runTurn: (threadId, turnId) => loop.runTurn(threadId, turnId)
+  })
+  threadService.setCleanupHook(async (threadId: string) => {
+    loop.purgeThread(threadId)
+    usageService.reset(threadId)
+    backgroundShellRuntime.purgeThread?.(threadId)
+    delegationRuntime?.purgeThread?.(threadId)
+  })
 	  const startedAt = activeOptions.startedAt ?? nowIso()
 	  const rebuildCapabilities = (): typeof capabilities => buildRuntimeCapabilityManifest({
 	    config: activeOptions.capabilities,
