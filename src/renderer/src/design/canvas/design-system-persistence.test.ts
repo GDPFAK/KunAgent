@@ -29,6 +29,30 @@ describe('design-system-persistence', () => {
     expect(parseDesignSystem('{}')).toEqual(createEmptyDesignSystem())
   })
 
+  it('repairs missing names and discards malformed persisted entries', () => {
+    expect(
+      parseDesignSystem(
+        JSON.stringify({
+          tokens: {
+            'brand/primary': { kind: 'color', value: '#3b82d8' },
+            broken: null
+          },
+          components: {
+            Card: { id: 'component-card', version: 1, tree: [], slots: [] },
+            broken: { name: 'Broken' }
+          }
+        })
+      )
+    ).toEqual({
+      tokens: {
+        'brand/primary': { name: 'brand/primary', kind: 'color', value: '#3b82d8' }
+      },
+      components: {
+        Card: { id: 'component-card', name: 'Card', version: 1, tree: [], slots: [] }
+      }
+    })
+  })
+
   describe('debounced save', () => {
     afterEach(() => {
       vi.useRealTimers()
