@@ -321,7 +321,7 @@ export function defaultKunContextCompactionSettings(): KunContextCompactionSetti
     // Falls back to the heuristic summary automatically on timeout/failure.
     summaryMode: 'model',
     summaryTimeoutMs: 15_000,
-    summaryMaxTokens: 1_200,
+    summaryMaxTokens: 2_048,
     summaryInputMaxBytes: 96 * 1024
   }
 }

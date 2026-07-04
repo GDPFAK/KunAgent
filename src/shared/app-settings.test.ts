@@ -298,7 +298,7 @@ describe('kun defaults', () => {
         defaultHardThreshold: 108800,
         summaryMode: 'model',
         summaryTimeoutMs: 15000,
-        summaryMaxTokens: 1200,
+        summaryMaxTokens: 2048,
         summaryInputMaxBytes: 98304
       },
       runtimeTuning: {
