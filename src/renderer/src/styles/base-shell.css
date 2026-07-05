@@ -2884,8 +2884,8 @@ pre {
 
 .timeline-jump-rail {
   position: fixed;
-  top: 50%;
-  left: 1rem;
+  top: 7.6rem;
+  right: var(--timeline-jump-rail-right-offset, 4rem);
   z-index: 15;
   display: flex;
   box-sizing: border-box;

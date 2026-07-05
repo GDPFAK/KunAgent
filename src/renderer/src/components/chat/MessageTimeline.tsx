@@ -1,4 +1,4 @@
-import type { ReactElement, RefObject } from 'react'
+import type { CSSProperties, ReactElement, RefObject } from 'react'
 import { memo, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { ChatBlock, RuntimeConnectionStatus } from '../../agent/types'
@@ -59,9 +59,13 @@ type Props = {
   onOpenPlan?: () => void
   compactCards?: boolean
   onOpenChildThread?: OpenChildThreadHandler
+  timelineJumpRailRightOffset?: number
 }
 
 type CompactionTimelineBlock = Extract<ChatBlock, { kind: 'compaction' }>
+type TimelineJumpRailStyle = CSSProperties & {
+  '--timeline-jump-rail-right-offset'?: string
+}
 
 const TURN_PAGE_SIZE = 18
 const AUTO_COLLAPSE_THRESHOLD = 24
@@ -208,7 +212,8 @@ export function MessageTimeline({
   onBuildPlan,
   onOpenPlan,
   compactCards = false,
-  onOpenChildThread
+  onOpenChildThread,
+  timelineJumpRailRightOffset
 }: Props): ReactElement {
   const { t } = useTranslation('common')
   const {
@@ -376,17 +381,10 @@ export function MessageTimeline({
     target.scrollIntoView({ behavior: 'smooth', block: 'start' })
   }
 
-  const showJumpRailPreview = (
-    anchor: { label: string; title: string; prompt: string },
-    node: HTMLButtonElement
-  ): void => {
-    const rect = node.getBoundingClientRect()
-    setJumpRailPreview({
-      title: t('timelineJumpTurn', { index: anchor.label }),
-      prompt: anchor.prompt || anchor.title,
-      top: rect.top + rect.height / 2
-    })
-  }
+  const timelineJumpRailStyle: TimelineJumpRailStyle | undefined =
+    typeof timelineJumpRailRightOffset === 'number' && Number.isFinite(timelineJumpRailRightOffset)
+      ? { '--timeline-jump-rail-right-offset': `${Math.max(12, Math.round(timelineJumpRailRightOffset))}px` }
+      : undefined
 
   return (
     <TimelineFilePreviewWorkspaceProvider workspaceRoot={filePreviewWorkspaceRoot}>
@@ -396,7 +394,7 @@ export function MessageTimeline({
         <nav
           aria-label={t('timelineJumpRailLabel')}
           className="timeline-jump-rail"
-          style={jumpRailLeft === null ? undefined : { left: `${jumpRailLeft}px` }}
+          style={timelineJumpRailStyle}
         >
           {visibleTurnAnchors.map((anchor) => (
             <button
