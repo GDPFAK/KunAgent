@@ -79,6 +79,8 @@ export function WorkbenchConversationStage({
   sideRail
 }: WorkbenchConversationStageProps): ReactElement {
   const fileTreeSidePanelOffset = fileTree.open ? fileTree.width + 24 : 0
+  const timelineJumpRailRightOffset = 16 + (rightPanelDockedVisible ? rightSidebarWidth : 0) + (fileTreeSidePanelOffset ? fileTreeSidePanelOffset - 24 : 0) + RAIL_WIDTH
+
   return (
     <>
       {runtimeBanner}
@@ -89,7 +91,10 @@ export function WorkbenchConversationStage({
               <SddDraftEditorView {...sdd} />
             </Suspense>
           ) : (
-            <WorkbenchChatStage {...chat} />
+            <WorkbenchChatStage
+              {...chat}
+              timelineJumpRailRightOffset={timelineJumpRailRightOffset}
+            />
           )}
         </div>
 

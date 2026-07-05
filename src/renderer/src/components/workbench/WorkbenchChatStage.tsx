@@ -45,6 +45,7 @@ export type WorkbenchChatStageProps = {
   terminalOpen: boolean
   terminalWorkspaceRoot: string
   terminalHeight: number
+  timelineJumpRailRightOffset?: number
   onToggleLeftSidebar: () => void
   onRetryConnection: () => void
   onOpenSettings: () => void
@@ -83,6 +84,7 @@ export function WorkbenchChatStage({
   terminalOpen,
   terminalWorkspaceRoot,
   terminalHeight,
+  timelineJumpRailRightOffset,
   onToggleLeftSidebar,
   onRetryConnection,
   onOpenSettings,
@@ -134,6 +136,7 @@ export function WorkbenchChatStage({
               onOpenSettings={onOpenSettings}
               onSelectSuggestion={onSelectSuggestion}
               focusModeEnabled={focusModeEnabled}
+              timelineJumpRailRightOffset={timelineJumpRailRightOffset}
               planActionsBusy={planActionsBusy}
               onBuildPlan={onBuildPlan}
               onOpenPlan={onOpenPlan}

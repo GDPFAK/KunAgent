@@ -2864,7 +2864,7 @@ pre {
 .timeline-jump-rail {
   position: fixed;
   top: 7.6rem;
-  right: 1.55rem;
+  right: var(--timeline-jump-rail-right-offset, 4rem);
   z-index: 15;
   display: flex;
   box-sizing: border-box;
