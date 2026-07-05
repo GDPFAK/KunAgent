@@ -47,10 +47,12 @@ import type { AttachmentReference, ChatBlock, ReviewTarget } from '../../agent/t
 import { useChatStore } from '../../store/chat-store'
 import { normalizeWorkspaceRoot } from '../../lib/workspace-path'
 import {
+  composerFileReferenceKey,
   composerFileReferenceFromPath,
   filterWorkspaceFileMentionSuggestions,
   formatComposerFileMentionToken,
   getFileMentionAtCursor,
+  hasComposerFileMentionToken,
   isComposerDirectoryReference,
   removeComposerFileMentionToken,
   replaceFileMentionInInput,
@@ -227,6 +229,13 @@ type Props = {
 }
 
 type SkillCommand = NonNullable<Props['skillCommands']>[number]
+
+export function shouldCaptureFileMentionCommitKey(
+  event: Pick<ReactKeyboardEvent<HTMLTextAreaElement>, 'key' | 'shiftKey' | 'metaKey' | 'ctrlKey'>
+): boolean {
+  if (event.key === 'Tab') return true
+  return event.key === 'Enter' && !event.shiftKey && !event.metaKey && !event.ctrlKey
+}
 
 const EMPTY_CONTEXT_BLOCKS: ChatBlock[] = []
 const EMPTY_MODEL_GROUPS: ModelProviderModelGroup[] = []
@@ -683,6 +692,7 @@ export function FloatingComposer({
   const composerMenuPanelRef = useRef<HTMLDivElement | null>(null)
   const goalPanelRef = useRef<HTMLDivElement | null>(null)
   const contextCapacityRef = useRef<HTMLDivElement | null>(null)
+  const fileMentionPresenceRef = useRef<Map<string, boolean>>(new Map())
   const messageTokenCacheRef = useRef<WeakMap<object, number>>(new WeakMap())
   // Cache the last-known runtime capacity inputs. `runtimeInfo` (and thus these
   // props) goes null whenever the runtime drops/reconnects; without caching, the
@@ -1121,6 +1131,29 @@ export function FloatingComposer({
   ])
 
   useEffect(() => {
+    const previous = fileMentionPresenceRef.current
+    const next = new Map<string, boolean>()
+    const removedRelativePaths: string[] = []
+
+    for (const reference of fileReferences) {
+      const isDirectory = isComposerDirectoryReference(reference)
+      const key = composerFileReferenceKey(reference)
+      const present = hasComposerFileMentionToken(input, reference.relativePath, isDirectory)
+      if (previous.get(key) === true && !present) {
+        removedRelativePaths.push(reference.relativePath)
+      }
+      next.set(key, present)
+    }
+
+    fileMentionPresenceRef.current = next
+
+    if (!onRemoveFileReference || removedRelativePaths.length === 0) return
+    for (const relativePath of removedRelativePaths) {
+      onRemoveFileReference(relativePath)
+    }
+  }, [fileReferences, input, onRemoveFileReference])
+
+  useEffect(() => {
     if (!composerMenuOpen && !goalPanelOpen) return
 
     const onPointerDown = (event: PointerEvent): void => {
@@ -1412,6 +1445,7 @@ export function FloatingComposer({
 
   const removeFileReference = (reference: ComposerFileReference): void => {
     onRemoveFileReference?.(reference.relativePath)
+    fileMentionPresenceRef.current.set(composerFileReferenceKey(reference), false)
     const nextInput = removeComposerFileMentionToken(
       input,
       reference.relativePath,
@@ -1528,9 +1562,11 @@ export function FloatingComposer({
         )
         return
       }
-      if ((event.key === 'Enter' || event.key === 'Tab') && highlightedFileMention) {
+      if (shouldCaptureFileMentionCommitKey(event)) {
         event.preventDefault()
-        applyFileMention(highlightedFileMention)
+        if (highlightedFileMention) {
+          applyFileMention(highlightedFileMention)
+        }
         return
       }
       if (event.key === 'Escape') {

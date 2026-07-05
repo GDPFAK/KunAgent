@@ -134,6 +134,44 @@ function isMentionTokenBoundary(char: string | undefined): boolean {
   return !MENTION_TOKEN_CONTINUATION.test(char)
 }
 
+function isMentionTokenStartBoundary(char: string | undefined): boolean {
+  if (char === undefined) return true
+  return /[\s([{，。；：、]/u.test(char)
+}
+
+function composerFileMentionTokenCandidates(relativePath: string, isDirectory: boolean): string[] {
+  const normalized = trimTrailingSlash(relativePath)
+  return isDirectory
+    ? [
+        formatComposerFileMentionToken(normalized, true),
+        formatComposerFileMentionToken(normalized, false)
+      ]
+    : [formatComposerFileMentionToken(normalized, false)]
+}
+
+export function hasComposerFileMentionToken(
+  input: string,
+  relativePath: string,
+  isDirectory = false
+): boolean {
+  const candidates = composerFileMentionTokenCandidates(relativePath, isDirectory)
+  return candidates.some((token) => {
+    let from = 0
+    while (from <= input.length) {
+      const index = input.indexOf(token, from)
+      if (index < 0) return false
+      if (
+        isMentionTokenStartBoundary(input[index - 1]) &&
+        isMentionTokenBoundary(input[index + token.length])
+      ) {
+        return true
+      }
+      from = index + token.length
+    }
+    return false
+  })
+}
+
 export function removeComposerFileMentionToken(
   input: string,
   relativePath: string,

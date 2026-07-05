@@ -13,6 +13,7 @@ import {
   parseNewCommand,
   parseResearchCommand,
   parseReviewCommand,
+  shouldCaptureFileMentionCommitKey,
   shouldShowGoalFloater
 } from './FloatingComposer'
 import {
@@ -40,6 +41,7 @@ import {
   filterWorkspaceFileMentionSuggestions,
   formatComposerFileMentionToken,
   getFileMentionAtCursor,
+  hasComposerFileMentionToken,
   isFileWithinDirectory,
   removeComposerFileMentionToken,
   replaceFileMentionInInput,
@@ -176,6 +178,33 @@ describe('FloatingComposer goal helpers', () => {
 })
 
 describe('FloatingComposer file references', () => {
+  it('captures file mention commit keys while the menu is active before candidates load', () => {
+    expect(shouldCaptureFileMentionCommitKey({
+      key: 'Enter',
+      shiftKey: false,
+      metaKey: false,
+      ctrlKey: false
+    })).toBe(true)
+    expect(shouldCaptureFileMentionCommitKey({
+      key: 'Tab',
+      shiftKey: false,
+      metaKey: false,
+      ctrlKey: false
+    })).toBe(true)
+    expect(shouldCaptureFileMentionCommitKey({
+      key: 'Enter',
+      shiftKey: true,
+      metaKey: false,
+      ctrlKey: false
+    })).toBe(false)
+    expect(shouldCaptureFileMentionCommitKey({
+      key: 'Enter',
+      shiftKey: false,
+      metaKey: true,
+      ctrlKey: false
+    })).toBe(false)
+  })
+
   it('parses @ file mention queries at the current cursor', () => {
     expect(getFileMentionAtCursor('please inspect @src/ren', 'please inspect @src/ren'.length)).toEqual({
       start: 15,
@@ -231,6 +260,14 @@ describe('FloatingComposer file references', () => {
     expect(removeComposerFileMentionToken(reordered, 'src', true)).toBe('review @src/App.tsx and now')
   })
 
+  it('detects exact inserted mention tokens without matching path prefixes', () => {
+    expect(hasComposerFileMentionToken('review @src/renderer/src/App.tsx now', 'src/renderer/src/App.tsx')).toBe(true)
+    expect(hasComposerFileMentionToken('review @"docs/product plan.md" now', 'docs/product plan.md')).toBe(true)
+    expect(hasComposerFileMentionToken('review @src/ now', 'src', true)).toBe(true)
+    expect(hasComposerFileMentionToken('review @src/App.tsx now', 'src', true)).toBe(false)
+    expect(hasComposerFileMentionToken('email test@src/App.tsx now', 'src/App.tsx')).toBe(false)
+  })
+
   it('ranks directories alongside files and favors them for trailing-slash queries', () => {
     const entries: ComposerFileReference[] = [
       { path: '/repo/src', relativePath: 'src', name: 'src', type: 'directory' },
@@ -240,6 +277,18 @@ describe('FloatingComposer file references', () => {
     const suggestions = filterWorkspaceFileMentionSuggestions(entries, 'src/')
     expect(suggestions[0]).toEqual(entries[0])
     expect(suggestions.map((entry) => entry.relativePath)).toContain('src/App.tsx')
+  })
+
+  it('filters path-like @ queries and excludes already selected duplicate paths', () => {
+    const entries: ComposerFileReference[] = [
+      { path: '/repo/src/renderer', relativePath: 'src/renderer', name: 'renderer', type: 'directory' },
+      { path: '/repo/src/renderer/src/FloatingComposer.tsx', relativePath: 'src/renderer/src/FloatingComposer.tsx', name: 'FloatingComposer.tsx', type: 'file' },
+      { path: '/repo/packages/ui/src/FloatingComposer.tsx', relativePath: 'packages/ui/src/FloatingComposer.tsx', name: 'FloatingComposer.tsx', type: 'file' }
+    ]
+
+    const suggestions = filterWorkspaceFileMentionSuggestions(entries, 'src/ren', [entries[1]!])
+
+    expect(suggestions.map((entry) => entry.relativePath)).toEqual(['src/renderer'])
   })
 
   it('lists every indexed file beneath a referenced directory', () => {
