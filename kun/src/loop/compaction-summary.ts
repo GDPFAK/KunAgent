@@ -20,7 +20,14 @@ export const DEFAULT_COMPACTION_SUMMARY_INPUT_MAX_BYTES = 96 * 1024
 export const COMPACTION_SYSTEM_PROMPT = [
   'You are summarizing a long coding-agent conversation so the work can continue past the context window.',
   '',
-  'Provide a detailed but concise summary. Focus on information that would be helpful for continuing the work, including:',
+  'Write a structured handoff summary with these sections:',
+  '## Goal',
+  '## Durable Context',
+  '## Completed and Decisions',
+  '## Files, Commands, and Results',
+  '## Open Issues and Next Steps',
+  '',
+  'Focus on information that would be helpful for continuing the work, including:',
   '- What was requested and the overall goal',
   '- What has been done and the decisions that were made (and why)',
   '- Which files are being created, edited, or inspected (with their paths)',
@@ -28,6 +35,7 @@ export const COMPACTION_SYSTEM_PROMPT = [
   '- What still needs to be done next',
   '- User requests, constraints, and preferences that must persist',
   '',
+  'If the conversation contains a numbered or bulleted list of issues, tasks, TODOs, problems, requirements, or user findings, preserve every item that is still relevant. Do not collapse middle items into a range, "etc.", or an omitted-count line.',
   'Preserve concrete identifiers verbatim: file paths, function and variable names, commands, URLs, IDs, and error messages.',
   'Do not invent facts and do not add generic advice. Write in the same language as the conversation.',
   'Your summary should be comprehensive enough to provide full context but concise enough to be quickly understood.'
@@ -45,7 +53,8 @@ export function buildCompactionContinuationMessage(pinnedConstraints?: readonly 
     'Provide a detailed summary of our conversation above, written so a new session with no access to ' +
       'this history can continue the work seamlessly. Cover what we set out to do, what has been done, ' +
       'which files and locations are involved, the key findings and decisions, and what remains to be done next. ' +
-      'Preserve concrete identifiers (file paths, function/variable names, commands, URLs, IDs, error messages) verbatim.'
+      'Preserve concrete identifiers (file paths, function/variable names, commands, URLs, IDs, error messages) verbatim. ' +
+      'If there are numbered or bulleted issue/task/problem/TODO/requirement lists, keep every still-relevant item rather than summarizing them as a range or omitted middle.'
   ]
   const pins = (pinnedConstraints ?? []).map((pin) => pin.trim()).filter((pin) => pin.length > 0)
   if (pins.length > 0) {

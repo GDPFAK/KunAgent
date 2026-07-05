@@ -12,6 +12,7 @@ import { expandHomePath } from './workspace-service'
 import { readWritePdfText, type WritePdfTextPage } from './write-pdf-text-service'
 
 const INDEX_CACHE_TTL_MS = 30_000
+const INDEX_CACHE_MAX_ENTRIES = 8
 const MAX_INDEX_BUILD_MS = 250
 const MAX_ASSISTANT_INDEX_BUILD_MS = 2_500
 const MAX_SCAN_ENTRIES = 8_000
@@ -125,6 +126,17 @@ type QueryModel = {
 
 const indexCache = new Map<string, WorkspaceIndex>()
 const inFlightIndexCache = new Map<string, Promise<WorkspaceIndex>>()
+
+function pruneIndexCache(now: number): void {
+  for (const [key, index] of indexCache) {
+    if (now - index.builtAt > INDEX_CACHE_TTL_MS) indexCache.delete(key)
+  }
+  while (indexCache.size > INDEX_CACHE_MAX_ENTRIES) {
+    const oldest = indexCache.keys().next().value
+    if (oldest === undefined) break
+    indexCache.delete(oldest)
+  }
+}
 
 type WorkspaceIndexOptions = {
   includePdf: boolean
@@ -454,14 +466,21 @@ async function loadWorkspaceIndex(
   options: WorkspaceIndexOptions
 ): Promise<WorkspaceIndex> {
   const cacheKey = workspaceIndexCacheKey(workspaceRoot, options.includePdf)
+  pruneIndexCache(Date.now())
   const cached = indexCache.get(cacheKey)
-  if (cached && Date.now() - cached.builtAt <= INDEX_CACHE_TTL_MS) return cached
+  if (cached) {
+    indexCache.delete(cacheKey)
+    indexCache.set(cacheKey, cached)
+    return cached
+  }
   const existing = inFlightIndexCache.get(cacheKey)
   if (existing) return existing
 
   const build = buildWorkspaceIndex(workspaceRoot, options)
     .then((index) => {
+      indexCache.delete(cacheKey)
       indexCache.set(cacheKey, index)
+      pruneIndexCache(Date.now())
       return index
     })
     .finally(() => {

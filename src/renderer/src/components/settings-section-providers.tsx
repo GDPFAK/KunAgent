@@ -29,6 +29,7 @@ import {
   MODEL_PROVIDER_PRESETS,
   TOKEN_PLAN_PROVIDER_ID_SUFFIX,
   defaultMiniMaxMediaGenerationKunPatch,
+  defaultModelRequestRetrySettings,
   defaultModelProviderSettings,
   getModelProviderPreset,
   modelProviderPresetProfile,
@@ -623,6 +624,26 @@ function CodexLoginSection({
 const fieldLabelClass = 'grid gap-1.5 text-[12px] font-semibold text-ds-muted'
 const textInputClass =
   'w-full min-w-0 rounded-xl border border-ds-border bg-ds-card px-3 py-2 text-[14px] font-normal text-ds-ink shadow-sm focus:border-accent/40 focus:outline-none focus:ring-1 focus:ring-accent/30'
+const ENABLED_MODEL_REQUEST_RETRY_ATTEMPTS = 3
+
+function retryStatusCodesText(codes: readonly number[] | undefined): string {
+  return (codes?.length ? codes : defaultModelRequestRetrySettings().httpStatusCodes).join(',')
+}
+
+function providerRetrySettings(provider: ModelProviderProfileV1) {
+  return provider.retry ?? defaultModelRequestRetrySettings()
+}
+
+function parseRetryStatusCodes(value: string): number[] {
+  const codes = new Set<number>()
+  for (const part of value.split(/[\s,]+/)) {
+    const code = Number(part.trim())
+    if (Number.isInteger(code) && code >= 400 && code <= 599) codes.add(code)
+  }
+  return codes.size > 0
+    ? [...codes].sort((a, b) => a - b)
+    : defaultModelRequestRetrySettings().httpStatusCodes
+}
 
 function DetailSection({
   title,
@@ -815,6 +836,7 @@ export function ProvidersSettingsSection({ ctx }: { ctx: Record<string, any> }):
   const activeProvider =
     displayProviders.find((item) => item.id === selectedProviderId) ??
     modelProviders[0]
+  const activeRetry = activeProvider ? providerRetrySettings(activeProvider) : defaultModelRequestRetrySettings()
   const isDraftActive = Boolean(draftProvider && activeProvider?.id === draftProvider.id)
   const canEditActiveProviderId = Boolean(
     activeProvider &&
@@ -1043,6 +1065,7 @@ export function ProvidersSettingsSection({ ctx }: { ctx: Record<string, any> }):
       apiKey: '',
       baseUrl: 'https://api.example.com/v1',
       endpointFormat: 'chat_completions',
+      retry: defaultModelRequestRetrySettings(),
       models: [],
       modelProfiles: {}
     })
@@ -1712,6 +1735,77 @@ export function ProvidersSettingsSection({ ctx }: { ctx: Record<string, any> }):
                     <p className="text-[12px] leading-5 text-ds-muted">
                       {t('modelEndpointCustomEndpointDesc')}
                     </p>
+                  ) : null}
+                </DetailSection>
+                <DetailSection
+                  title={t('modelProviderRetrySection')}
+                  action={
+                    <Toggle
+                      checked={activeRetry.maxAttempts > 0}
+                      onChange={(enabled) => updateModelProvider(activeProvider.id, {
+                        retry: {
+                          ...activeRetry,
+                          maxAttempts: enabled ? ENABLED_MODEL_REQUEST_RETRY_ATTEMPTS : 0
+                        }
+                      })}
+                    />
+                  }
+                >
+                  {activeRetry.maxAttempts > 0 ? (
+                    <div className="grid gap-3">
+                      <p className="text-[12px] leading-5 text-ds-faint">
+                        {t('modelProviderRetryStatusCodesHint')}
+                      </p>
+                      <div className="grid gap-3 md:grid-cols-3">
+                        <label className={fieldLabelClass}>
+                          {t('modelProviderRetryMaxAttempts')}
+                          <input
+                            type="number"
+                            min={1}
+                            max={10}
+                            step={1}
+                            className={textInputClass}
+                            value={activeRetry.maxAttempts}
+                            onChange={(e) => updateModelProvider(activeProvider.id, {
+                              retry: {
+                                ...activeRetry,
+                                maxAttempts: Math.min(10, Math.max(1, Math.round(Number(e.target.value) || 1)))
+                              }
+                            })}
+                          />
+                        </label>
+                        <label className={fieldLabelClass}>
+                          {t('modelProviderRetryInitialDelayMs')}
+                          <input
+                            type="number"
+                            min={0}
+                            max={600000}
+                            step={100}
+                            className={textInputClass}
+                            value={activeRetry.initialDelayMs}
+                            onChange={(e) => updateModelProvider(activeProvider.id, {
+                              retry: {
+                                ...activeRetry,
+                                initialDelayMs: Math.min(600_000, Math.max(0, Math.round(Number(e.target.value) || 0)))
+                              }
+                            })}
+                          />
+                        </label>
+                        <label className={fieldLabelClass}>
+                          {t('modelProviderRetryStatusCodes')}
+                          <input
+                            className={textInputClass}
+                            value={retryStatusCodesText(activeRetry.httpStatusCodes)}
+                            onChange={(e) => updateModelProvider(activeProvider.id, {
+                              retry: {
+                                ...activeRetry,
+                                httpStatusCodes: parseRetryStatusCodes(e.target.value)
+                              }
+                            })}
+                          />
+                        </label>
+                      </div>
+                    </div>
                   ) : null}
                 </DetailSection>
                 <DetailSection

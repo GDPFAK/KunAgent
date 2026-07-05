@@ -150,14 +150,16 @@ function parseRatio(aspectRatio: string | undefined): { w: number; h: number } |
 /**
  * Whether the configured image protocol performs a GENUINE image-to-image edit
  * (real `/images/edits`). Allowlist on purpose: a new protocol defaults to "no
- * edit" until its edit path is verified. MiniMax's reference feature is
- * `subject_reference` = character/identity preservation, NOT a general edit, so
- * routing canvas "edit this image" requests through it silently produces a fresh
- * (wrong) generation — better to fail loudly and have the agent retry without
- * references. `undefined` = the default factory path (OpenAI-compat /images/edits).
+ * edit" until its edit path is verified. Codex's Responses image_generation
+ * path accepts `input_image` references and an explicit `action: "edit"`.
+ * MiniMax's reference feature is `subject_reference` = character/identity
+ * preservation, NOT a general edit, so routing canvas "edit this image"
+ * requests through it silently produces a fresh (wrong) generation — better to
+ * fail loudly and have the agent retry without references. `undefined` = the
+ * default factory path (OpenAI-compat /images/edits).
  */
 export function protocolSupportsImageEdit(protocol: string | undefined): boolean {
-  return protocol === undefined || protocol === 'openai-images'
+  return protocol === undefined || protocol === 'openai-images' || protocol === 'codex-responses-image'
 }
 
 export function buildImageGenToolProviders(
@@ -267,7 +269,7 @@ export function buildImageGenToolProviders(
           if (endpoint === 'edits' && (error.status === 404 || error.status === 405 || error.status === 501)) {
             return toolError(
               'edits_unsupported',
-              'the configured image provider does not support reference images (/images/edits); retry generate_image without reference_image_paths'
+              'the configured image provider does not support reference image edits; retry generate_image without reference_image_paths'
             )
           }
           return toolError('provider_error', error.message, telemetry(startedAt, client.id))
@@ -774,7 +776,7 @@ export class CodexResponsesImageClient implements ImageGenClient {
       tools: [
         {
           type: 'image_generation',
-          action: 'generate',
+          action: inputImages.length > 0 ? 'edit' : 'generate',
           model: request.model,
           quality: request.quality ?? 'auto',
           output_format: 'png',

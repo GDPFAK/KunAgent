@@ -81,7 +81,10 @@ export function createWriteFileActions({
         return
       }
       const current = get()
-      if (current.workspaceRoot === normalized && current.rootDirectory) return
+      if (current.workspaceRoot === normalized && current.rootDirectory) {
+        await get().refreshWorkspace(normalized)
+        return
+      }
 
       setLastSavedContent('')
       cancelExternalSyncAnimation()

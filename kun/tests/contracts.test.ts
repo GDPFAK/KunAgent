@@ -683,7 +683,12 @@ describe('cli', () => {
       await writeFile(join(dataDir, 'config.json'), JSON.stringify({
         serve: {
           baseUrl: 'https://example.invalid/v1',
-          model: 'deepseek-v4-flash'
+          model: 'deepseek-v4-flash',
+          retry: {
+            maxAttempts: 3,
+            initialDelayMs: 1000,
+            httpStatusCodes: [429]
+          }
         },
         contextCompaction: {
           defaultSoftThreshold: 12_345,
@@ -697,6 +702,11 @@ describe('cli', () => {
       expect(parsed.dataDir).toBe(dataDir)
       expect(parsed.baseUrl).toBe('https://example.invalid/v1')
       expect(parsed.model).toBe('deepseek-v4-flash')
+      expect(parsed.retry).toEqual({
+        maxAttempts: 3,
+        initialDelayMs: 1000,
+        httpStatusCodes: [429]
+      })
       expect(parsed.approvalPolicy).toBe(DEFAULT_APPROVAL_POLICY)
       expect(parsed.contextCompaction?.defaultHardThreshold).toBe(23_456)
     } finally {

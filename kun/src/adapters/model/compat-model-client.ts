@@ -10,6 +10,10 @@ import { extractToolResultImages, toolResultTextWithoutImages } from '../../loop
 import { repairToolArguments } from './tool-argument-repair.js'
 import { isDeepSeekHost, probeDeepSeekReachable } from './model-error-probe.js'
 import {
+  DEFAULT_MODEL_REQUEST_RETRY_CONFIG,
+  type ModelRequestRetryConfig
+} from '../../config/kun-config.js'
+import {
   DEFAULT_MODEL_ENDPOINT_FORMAT,
   isCustomModelEndpointFormat,
   modelEndpointPath,
@@ -44,6 +48,8 @@ export type CompatModelClientConfig = {
   nonStreaming?: boolean
   /** Maximum idle time between streaming chunks before the turn fails. */
   streamIdleTimeoutMs?: number
+  /** 流式响应开始前,遇到临时失败或限流响应时使用的 HTTP 重试策略。 */
+  retry?: ModelRequestRetryConfig
   /** Optional model capability resolver used for provider-specific reasoning translation. */
   modelCapabilities?: (model: string) => ModelCapabilityMetadata
   /** Optional troubleshooting sink that captures each request body + raw output. */
@@ -264,18 +270,23 @@ export class CompatModelClient implements ModelClient {
       round.url = redactUrlForLog(url)
     }
     const headers = this.buildHeaders(stream, endpointFormat)
+    const retry = normalizeModelRequestRetryConfig(this.config.retry)
+    const retryStatuses = new Set(retry.httpStatusCodes)
     let result = await this.postChatCompletion(url, headers, body, request.abortSignal)
-    // Retry transient gateway failures (502/503/504) a few times before giving
-    // up. These are upstream load-balancer hiccups (e.g. an ALB returning
-    // "502 Bad Gateway"), not request errors — failing the whole turn on the
-    // first blip is needlessly fragile, especially for flaky providers. No
-    // response body has been streamed yet, so re-POSTing the same request is
-    // safe. Aborts short-circuit the backoff.
-    for (let attempt = 0; attempt < MAX_TRANSIENT_RETRIES; attempt += 1) {
+    for (let attempt = 0; attempt < retry.maxAttempts; attempt += 1) {
       if (result.kind === 'error') break
-      if (result.response.ok || !TRANSIENT_RETRY_STATUSES.has(result.response.status)) break
+      if (result.response.ok || !retryStatuses.has(result.response.status)) break
+      const delayMs = retryDelayMs(result.response, retry.initialDelayMs, attempt)
+      const status = result.response.status
       await result.response.body?.cancel().catch(() => {})
-      const aborted = await sleepWithAbort(TRANSIENT_RETRY_BASE_MS * 2 ** attempt, request.abortSignal)
+      yield {
+        kind: 'retrying',
+        status,
+        attempt: attempt + 1,
+        maxAttempts: retry.maxAttempts,
+        delayMs
+      }
+      const aborted = await sleepWithAbort(delayMs, request.abortSignal)
       if (aborted || request.abortSignal.aborted) {
         yield { kind: 'error', message: 'request was aborted during retry backoff' }
         return
@@ -2394,11 +2405,55 @@ function normalizeReasoningEffortValue(effort: string | undefined): NormalizedRe
   }
 }
 
-// Transient upstream gateway statuses worth retrying — load balancers and
-// reverse proxies return these for momentary backend unavailability.
-const TRANSIENT_RETRY_STATUSES = new Set([502, 503, 504])
-const MAX_TRANSIENT_RETRIES = 2
-const TRANSIENT_RETRY_BASE_MS = 500
+function normalizeModelRequestRetryConfig(input: ModelRequestRetryConfig | undefined): {
+  maxAttempts: number
+  initialDelayMs: number
+  httpStatusCodes: number[]
+} {
+  const defaults = DEFAULT_MODEL_REQUEST_RETRY_CONFIG
+  return {
+    maxAttempts: boundedNonNegativeInteger(input?.maxAttempts, defaults.maxAttempts, 10),
+    initialDelayMs: boundedNonNegativeInteger(input?.initialDelayMs, defaults.initialDelayMs, 600_000),
+    httpStatusCodes: normalizeRetryHttpStatusCodes(input?.httpStatusCodes, defaults.httpStatusCodes)
+  }
+}
+
+function normalizeRetryHttpStatusCodes(input: unknown, fallback: readonly number[]): number[] {
+  const values = Array.isArray(input) ? input : fallback
+  const codes = new Set<number>()
+  for (const raw of values) {
+    const code = typeof raw === 'number' ? raw : Number(raw)
+    if (!Number.isInteger(code) || code < 400 || code > 599) continue
+    codes.add(code)
+  }
+  return codes.size > 0 ? [...codes].sort((a, b) => a - b) : [...fallback]
+}
+
+function boundedNonNegativeInteger(value: unknown, fallback: number, max: number): number {
+  const num = typeof value === 'number' ? value : Number(value)
+  if (!Number.isFinite(num)) return fallback
+  return Math.min(max, Math.max(0, Math.round(num)))
+}
+
+function retryDelayMs(response: Response, initialDelayMs: number, attempt: number): number {
+  const retryAfterMs = parseRetryAfterMs(response.headers.get('retry-after'))
+  if (retryAfterMs !== undefined) return retryAfterMs
+  const exponential = Math.min(600_000, initialDelayMs * 2 ** attempt)
+  if (exponential <= 0) return 0
+  return Math.round(exponential * (0.8 + Math.random() * 0.4))
+}
+
+function parseRetryAfterMs(value: string | null): number | undefined {
+  const trimmed = value?.trim()
+  if (!trimmed) return undefined
+  const seconds = Number(trimmed)
+  if (Number.isFinite(seconds) && seconds >= 0) {
+    return Math.min(600_000, Math.round(seconds * 1000))
+  }
+  const dateMs = Date.parse(trimmed)
+  if (!Number.isFinite(dateMs)) return undefined
+  return Math.min(600_000, Math.max(0, dateMs - Date.now()))
+}
 
 /** Sleep `ms`, resolving early to `true` if the signal aborts first. */
 function sleepWithAbort(ms: number, signal: AbortSignal): Promise<boolean> {

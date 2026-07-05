@@ -914,6 +914,8 @@ async function postToDeepSeekGuiWebhook(message: WeixinMessage, accountId: strin
     signal: AbortSignal.timeout(650_000)
   })
   const data = await readJsonResponse(res)
+  const reply = recordString(data, 'reply') || recordString(data, 'text')
+  if (reply) return data
   if (!res.ok || data.ok === false) {
     throw new Error(recordString(data, 'message') || `Kun webhook HTTP ${res.status}`)
   }
@@ -1209,14 +1211,16 @@ export async function getWeixinBridgeAccountUserId(accountId: string): Promise<s
 export async function sendWeixinBridgeMessage(options: {
   accountId: string
   to: string
-  text: string
+  text?: string
+  files?: readonly WeixinOutboundFile[]
 }): Promise<WeixinBridgeSendResult> {
   const accountId = normalizeAccountId(options.accountId)
   const to = options.to.trim()
-  const text = options.text.trim()
+  const text = options.text?.trim() ?? ''
+  const files = options.files ?? []
   if (!accountId) return { ok: false, message: 'WeChat account id is missing.' }
   if (!to) return { ok: false, message: 'WeChat recipient is missing.' }
-  if (!text) return { ok: false, message: 'Message is empty.' }
+  if (!text && files.length === 0) return { ok: false, message: 'Message is empty.' }
 
   try {
     await ensureWeixinBridgeRpcUrl()
@@ -1227,13 +1231,21 @@ export async function sendWeixinBridgeMessage(options: {
       return { ok: false as const, message: 'WeChat account is not configured.' }
     }
     await restoreContextTokens(account.accountId)
-    const result = await sendMessageWeixin({
-      account,
-      to,
-      text,
-      contextToken: getContextToken(account.accountId, to)
-    })
-    return { ok: true as const, messageId: result.messageId }
+    const contextToken = getContextToken(account.accountId, to)
+    let messageId = ''
+    if (text) {
+      const result = await sendMessageWeixin({
+        account,
+        to,
+        text,
+        contextToken
+      })
+      messageId = result.messageId
+    }
+    if (files.length > 0) {
+      await sendGeneratedFilesWeixin(account, to, files, contextToken)
+    }
+    return { ok: true as const, messageId }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
     logError('weixin-bridge', 'Failed to send WeChat message from GUI.', {
@@ -1258,5 +1270,6 @@ export function stopWeixinBridgeRuntime(): void {
 export const weixinBridgeRuntimeInternals = {
   buildBaseInfo,
   normalizeAccountId,
+  postToDeepSeekGuiWebhook,
   webhookGeneratedFiles
 }

@@ -12,6 +12,7 @@ import { createReadLocalTool } from './builtin-read-tool.js'
 import { createFindLocalTool, createGrepLocalTool, createLsLocalTool } from './builtin-search-tools.js'
 import { createRepoMapLocalTool } from './builtin-repo-map-tool.js'
 import { createVerifyChangesLocalTool } from './builtin-verify-tool.js'
+import { createSendImAttachmentLocalTool } from './im-attachment-tool.js'
 
 export * from './builtin-tool-types.js'
 export * from './builtin-tool-operations.js'
@@ -21,6 +22,7 @@ export * from './builtin-search-tools.js'
 export * from './builtin-repo-map-tool.js'
 export * from './builtin-bash-tool.js'
 export * from './builtin-verify-tool.js'
+export * from './im-attachment-tool.js'
 
 export function createBuiltinLocalTool(
   toolName: BuiltinToolName,
@@ -47,6 +49,8 @@ export function createBuiltinLocalTool(
       return createRepoMapLocalTool()
     case 'verify_changes':
       return createVerifyChangesLocalTool()
+    case 'send_im_attachment':
+      return createSendImAttachmentLocalTool()
   }
 }
 
@@ -69,7 +73,8 @@ export function buildBuiltinLocalTools(options: BuiltinLocalToolsOptions = {}): 
     createLsLocalTool(options.ls),
     createLspLocalTool(),
     createRepoMapLocalTool(),
-    createVerifyChangesLocalTool()
+    createVerifyChangesLocalTool(),
+    createSendImAttachmentLocalTool()
   ]
 }
 
@@ -117,7 +122,8 @@ export function buildBuiltinLocalToolRecord(
     ls: createLsLocalTool(options.ls),
     lsp: createLspLocalTool(),
     repo_map: createRepoMapLocalTool(),
-    verify_changes: createVerifyChangesLocalTool()
+    verify_changes: createVerifyChangesLocalTool(),
+    send_im_attachment: createSendImAttachmentLocalTool()
   }
 }
 

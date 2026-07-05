@@ -75,7 +75,6 @@ export function normalizeAppSettings(settings: AppSettingsV1): AppSettingsV1 {
     kunPatch: rawMediaPatch
   })
   return {
-    ...migrated,
     version: 1,
     locale: maybeSettings.locale === 'zh' ? 'zh' : 'en',
     theme:

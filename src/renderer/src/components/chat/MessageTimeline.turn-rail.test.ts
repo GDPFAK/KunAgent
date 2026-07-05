@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { activeTimelineTurnKey } from './MessageTimeline'
+import { activeTimelineTurnKey, timelineJumpRailLeft, timelineJumpWaveLevel } from './MessageTimeline'
 
 describe('activeTimelineTurnKey', () => {
   const positions = [
@@ -21,5 +21,21 @@ describe('activeTimelineTurnKey', () => {
 
   it('returns null for an empty timeline', () => {
     expect(activeTimelineTurnKey([])).toBeNull()
+  })
+})
+
+describe('timelineJumpWaveLevel', () => {
+  it('cycles compact rail items through a wave pattern', () => {
+    expect(Array.from({ length: 7 }, (_, index) => timelineJumpWaveLevel(index))).toEqual([2, 4, 5, 3, 1, 2, 4])
+  })
+})
+
+describe('timelineJumpRailLeft', () => {
+  it('keeps the rail beside the content when the content width is capped', () => {
+    expect(timelineJumpRailLeft(300, 1000, 800)).toBe(382)
+  })
+
+  it('reserves space when the requested content width is wider than the stage', () => {
+    expect(timelineJumpRailLeft(300, 1000, 1200)).toBe(324)
   })
 })

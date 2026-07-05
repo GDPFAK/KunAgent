@@ -5,12 +5,11 @@ import {
 } from './composer-model-selection'
 
 describe('composer model selection helpers', () => {
-  it('builds assistant pick lists from defaults, available models, and the current model', () => {
+  it('builds assistant pick lists from defaults and available models only', () => {
     expect(buildComposerAssistantPickList({
       defaultModelIds: ['auto', 'deepseek-chat'],
-      composerPickList: ['claude-sonnet', ' auto ', 'deepseek-chat'],
-      currentModel: ' custom-model '
-    })).toEqual(['deepseek-chat', 'claude-sonnet', 'custom-model'])
+      composerPickList: ['claude-sonnet', ' auto ', 'deepseek-chat']
+    })).toEqual(['deepseek-chat', 'claude-sonnet'])
   })
 
   it('keeps a stored provider when it still owns the selected model', () => {

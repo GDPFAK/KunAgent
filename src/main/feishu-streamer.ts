@@ -30,6 +30,7 @@ export class FeishuStreamer {
   private subscription: { close: () => void } | null = null
   private startAbortController: AbortController | null = null
   private failed = false
+  private ended = false
 
   constructor(opts: FeishuStreamerOptions) {
     this.opts = opts
@@ -40,6 +41,7 @@ export class FeishuStreamer {
       const controller = new AbortController()
       this.startAbortController = controller
       this.failed = false
+      this.ended = false
       let resolved = false
       const onComplete = (result: FeishuStreamerResult): void => {
         if (resolved) return
@@ -99,7 +101,9 @@ export class FeishuStreamer {
         }
       }
 
-      this.subscription = input.subscribe(controller.signal)
+      const subscription = input.subscribe(controller.signal)
+      if (this.ended || controller.signal.aborted) subscription.close()
+      else this.subscription = subscription
       const onAbort = (): void => {
         this.state = 'closed'
         this.subscription?.close()
@@ -134,7 +138,7 @@ export class FeishuStreamer {
   }
 
   onSseEvent(event: Record<string, unknown>): void {
-    if (this.state !== 'streaming') return
+    if (this.state === 'closed' || this.ended) return
     const kind = event.kind
     // 关键：读 event.item.text,不是 event.item.delta
     if (kind === 'assistant_text_delta' && event.turnId === this.opts.turnId) {
@@ -152,6 +156,7 @@ export class FeishuStreamer {
       event.turnId === this.opts.turnId
     ) {
       if (kind === 'turn_failed') this.failed = true
+      this.ended = true
       this.subscription?.close()
       this.subscription = null
       this.push(null)

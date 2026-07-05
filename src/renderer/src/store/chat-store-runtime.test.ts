@@ -334,6 +334,169 @@ describe('busy watchdog re-arming on live ticks (#goal-recovering-banner)', () =
 })
 
 describe('thread event sink runtime errors', () => {
+  it('keeps detached delegate_task events from restoring parent busy after interrupt', () => {
+    const { getState, set, get } = makeSinkHarness({
+      activeThreadId: 'thread-current',
+      busy: false,
+      currentTurnId: null,
+      currentTurnUserId: null,
+      blocks: []
+    })
+    const sink = buildThreadEventSink(set, get, { threadId: 'thread-current' })
+
+    sink.onTool({
+      itemId: 'tool_delegate_background',
+      summary: 'delegate_task',
+      status: 'running',
+      toolKind: 'tool_call',
+      createdAt: '2026-07-04T00:00:00.000Z',
+      detail: JSON.stringify({
+        childId: 'child-background',
+        status: 'queued',
+        detached: true
+      }),
+      meta: {
+        child: {
+          parentThreadId: 'thread-current',
+          parentTurnId: 'turn-current',
+          childId: 'child-background',
+          childLabel: '通用代理',
+          childStatus: 'queued',
+          childSeq: 1,
+          detached: true
+        }
+      }
+    })
+
+    expect(getState().busy).toBe(false)
+    expect(getState().blocks).toHaveLength(1)
+    expect(getState().blocks[0]).toMatchObject({
+      kind: 'tool',
+      id: 'tool_delegate_background',
+      status: 'running',
+      meta: {
+        child: {
+          childId: 'child-background',
+          childStatus: 'queued',
+          detached: true
+        }
+      }
+    })
+  })
+
+  it('updates detached child lifecycle cards without creating duplicates or restoring busy', () => {
+    const { getState, set, get } = makeSinkHarness({
+      activeThreadId: 'thread-current',
+      busy: false,
+      currentTurnId: null,
+      currentTurnUserId: null,
+      blocks: [
+        {
+          kind: 'tool',
+          id: 'tool_delegate_background',
+          createdAt: '2026-07-04T00:00:00.000Z',
+          summary: 'delegate_task',
+          status: 'running',
+          toolKind: 'tool_call',
+          detail: JSON.stringify({
+            childId: 'child-background',
+            status: 'queued',
+            detached: true
+          }),
+          meta: {
+            child: {
+              parentThreadId: 'thread-current',
+              parentTurnId: 'turn-current',
+              childId: 'child-background',
+              childLabel: '通用代理',
+              childStatus: 'queued',
+              childSeq: 1,
+              detached: true
+            }
+          }
+        }
+      ]
+    })
+    const sink = buildThreadEventSink(set, get, { threadId: 'thread-current' })
+
+    sink.onTool({
+      itemId: 'child_lifecycle_child-background',
+      summary: '通用代理',
+      status: 'running',
+      updateOnly: true,
+      createdAt: '2026-07-04T00:00:02.000Z',
+      toolKind: 'tool_call',
+      detail: JSON.stringify({
+        childId: 'child-background',
+        status: 'running',
+        detached: true
+      }),
+      meta: {
+        child: {
+          parentThreadId: 'thread-current',
+          parentTurnId: 'turn-current',
+          childId: 'child-background',
+          childLabel: '通用代理',
+          childStatus: 'running',
+          childSeq: 1,
+          detached: true
+        }
+      }
+    })
+
+    expect(getState().busy).toBe(false)
+    expect(getState().blocks).toHaveLength(1)
+    expect(getState().blocks[0]).toMatchObject({
+      kind: 'tool',
+      id: 'tool_delegate_background',
+      createdAt: '2026-07-04T00:00:00.000Z',
+      status: 'running',
+      detail: JSON.stringify({
+        childId: 'child-background',
+        status: 'running',
+        detached: true
+      }),
+      meta: {
+        child: {
+          childId: 'child-background',
+          childStatus: 'running',
+          detached: true
+        }
+      }
+    })
+  })
+
+  it('adds model request retry events as runtime status instead of a banner error', () => {
+    const { getState, set, get } = makeSinkHarness({
+      activeThreadId: 'thread-current',
+      busy: true,
+      blocks: [{ kind: 'user', id: 'user-current', text: 'hello' }]
+    })
+    const sink = buildThreadEventSink(set, get, { threadId: 'thread-current' })
+
+    sink.onRuntimeStatus?.({
+      kind: 'model_request_retry',
+      itemId: 'runtime_status_turn-current_model_retry',
+      turnId: 'turn-current',
+      createdAt: '2026-06-08T00:00:00.000Z',
+      status: 429,
+      attempt: 1,
+      maxAttempts: 3,
+      delayMs: 3000
+    })
+
+    const systemBlocks = getState().blocks.filter((block) => block.kind === 'system')
+    expect(systemBlocks).toHaveLength(1)
+    expect(systemBlocks[0]).toMatchObject({
+      kind: 'system',
+      id: 'runtime_status_turn-current_model_retry'
+    })
+    expect(systemBlocks[0].text).toContain('429')
+    expect(systemBlocks[0].text).toContain('1')
+    expect(systemBlocks[0].text).toContain('3')
+    expect(getState().error).toBeNull()
+  })
+
   it('adds runtime error events to the timeline with details', () => {
     const { getState, set, get } = makeSinkHarness({
       activeThreadId: 'thread-current',

@@ -75,7 +75,7 @@ export async function resolveWorkspacePath(inputPath: string, context: ToolHostC
     return {
       workspaceRoot: root,
       absolutePath: resolve(lexicalAbsolutePath),
-      relativePath: relative(root, resolve(lexicalAbsolutePath)) || '.'
+      relativePath: normalizeToolPath(relative(root, resolve(lexicalAbsolutePath)) || '.')
     }
   }
   // In full-access mode the workspace boundary is not enforced: the user has
@@ -88,7 +88,7 @@ export async function resolveWorkspacePath(inputPath: string, context: ToolHostC
     return {
       workspaceRoot: root,
       absolutePath: lexicalAbsolutePath,
-      relativePath: relative(root, lexicalAbsolutePath) || '.'
+      relativePath: normalizeToolPath(relative(root, lexicalAbsolutePath) || '.')
     }
   }
   const resolvedRoot = await safeRealpath(root)
@@ -110,7 +110,7 @@ export async function resolveWorkspacePath(inputPath: string, context: ToolHostC
   return {
     workspaceRoot: root,
     absolutePath: lexicalAbsolutePath,
-    relativePath: relative(root, lexicalAbsolutePath) || '.'
+    relativePath: normalizeToolPath(relative(root, lexicalAbsolutePath) || '.')
   }
 }
 

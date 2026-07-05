@@ -90,6 +90,7 @@ export function WorkbenchLeftSidebar({
         {route === 'design' ? (
           <DesignSidebar
             onCodeOpen={onCodeOpen}
+            onWorkflowOpen={onWorkflowOpen}
             onWriteOpen={onWriteOpen}
             onDesignOpen={onDesignOpen}
             onOpenSettings={onOpenSettings}
@@ -101,6 +102,7 @@ export function WorkbenchLeftSidebar({
               activeView="write"
               connectPhoneSidebarOpen={connectPhoneSidebarOpen}
               onCodeOpen={onCodeOpen}
+              onWorkflowOpen={onWorkflowOpen}
               onWriteOpen={onWriteOpen}
               onDesignOpen={onDesignOpen}
               onOpenSettings={onOpenSettings}

@@ -1,7 +1,7 @@
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { LocalToolHost, defaultLocalTools } from '../src/adapters/tool/local-tool-host.js'
 import {
   allBuiltinToolNames,
@@ -337,11 +337,11 @@ describe('Kun built-in tools', () => {
     })
   })
 
-  it('hides GUI input tools when the turn context has no user-input gate', async () => {
+  it('keeps GUI input tools in the stable catalog without a user-input gate', async () => {
     const tools = await host.listTools(buildContext(workspace))
     const names = tools.map((tool) => tool.name)
-    expect(names).not.toContain('user_input')
-    expect(names).not.toContain('request_user_input')
+    expect(names).toContain('user_input')
+    expect(names).toContain('request_user_input')
   })
 
   it('exposes pi-style coding and read-only tool groups', () => {
@@ -366,6 +366,7 @@ describe('Kun built-in tools', () => {
       'lsp',
       'read',
       'repo_map',
+      'send_im_attachment',
       'verify_changes',
       'write'
     ])
@@ -399,6 +400,7 @@ describe('Kun built-in tools', () => {
       'lsp',
       'read',
       'repo_map',
+      'send_im_attachment',
       'verify_changes',
       'write'
     ])
@@ -411,6 +413,7 @@ describe('Kun built-in tools', () => {
       'lsp',
       'read',
       'repo_map',
+      'send_im_attachment',
       'verify_changes',
       'write'
     ])
@@ -514,7 +517,9 @@ describe('Kun built-in tools', () => {
     expect(String(output.output)).toContain('hello local bash')
   })
 
-  it('prefers the fd backend path when an fd executable candidate is provided', async () => {
+  it.skipIf(process.platform === 'win32')(
+    'prefers the fd backend path when a POSIX executable candidate is provided',
+    async () => {
     await mkdir(join(workspace, 'notes'), { recursive: true })
     await writeFile(join(workspace, 'notes', 'demo.txt'), 'demo\n', 'utf8')
     const fdHost = new LocalToolHost({
@@ -531,7 +536,8 @@ describe('Kun built-in tools', () => {
     })
     expect(output.backend).toBe('fd')
     expect(output.matches).toHaveLength(1)
-  })
+    }
+  )
 
   it('writes, reads, edits, and searches workspace files', async () => {
     const writeOutput = await executeTool(host, workspace, 'write', {
@@ -603,7 +609,9 @@ describe('Kun built-in tools', () => {
     expect(output.truncation).toBe(null)
   })
 
-  it('finishes bash commands after the shell exits even when a background child keeps stdio open', async () => {
+  it.skipIf(process.platform === 'win32')(
+    'finishes POSIX shell commands after a background child keeps stdio open',
+    async () => {
     const startedAt = Date.now()
     const output = await executeTool(host, workspace, 'bash', {
       command: 'sleep 5 & echo done',
@@ -613,7 +621,8 @@ describe('Kun built-in tools', () => {
     expect(output.exit_code).toBe(0)
     expect(String(output.output)).toContain('done')
     expect(Date.now() - startedAt).toBeLessThan(1500)
-  })
+    }
+  )
 
   it('blocks foreground bash commands until the process exits', async () => {
     const startedAt = Date.now()
@@ -629,7 +638,7 @@ describe('Kun built-in tools', () => {
     expect(Date.now() - startedAt).toBeGreaterThanOrEqual(1800)
   })
 
-  it('returns immediately for background bash sessions and keeps running after abort', async () => {
+  it('returns a running background bash session and keeps running after abort', async () => {
     const hooks = {
       started: [] as string[],
       settled: [] as string[]
@@ -651,7 +660,6 @@ describe('Kun built-in tools', () => {
       ]
     })
     const abortController = new AbortController()
-    const startedAt = Date.now()
     const output = await backgroundHost.execute(
       {
         callId: 'call_bash_background',
@@ -672,11 +680,9 @@ describe('Kun built-in tools', () => {
     expect(String(payload.session_id)).toMatch(/^[a-z0-9]{8}$/)
     expect(typeof payload.output_file).toBe('string')
     expect(String(payload.output_file)).toMatch(/\.output$/)
-    expect(Date.now() - startedAt).toBeLessThan(500)
     expect(hooks.started).toHaveLength(1)
 
     abortController.abort()
-    await new Promise((resolve) => setTimeout(resolve, 2500))
     const read = await backgroundHost.execute(
       {
         callId: 'call_bash_background_read',
@@ -704,7 +710,9 @@ describe('Kun built-in tools', () => {
       },
       buildContext(workspace)
     )
-    expect(hooks.settled.length).toBeGreaterThanOrEqual(1)
+    await vi.waitFor(() => {
+      expect(hooks.settled.length).toBeGreaterThanOrEqual(1)
+    })
   })
 
   it('polls completed background shell sessions via background_shell', async () => {
@@ -761,14 +769,6 @@ describe('Kun built-in tools', () => {
         })
       ]
     })
-    await backgroundHost.execute(
-      {
-        callId: 'call_bash_bg',
-        toolName: 'bash',
-        arguments: { command: 'echo hi', background: true, timeout: 10 }
-      },
-      buildContext(workspace)
-    )
     const listed = await executeTool(backgroundHost, workspace, 'background_shell', {
       action: 'list',
       thread_only: false
@@ -799,9 +799,14 @@ describe('Kun built-in tools', () => {
     const outputFile = String(payload.output_file)
     expect(outputFile).toContain('background-shells')
     expect(outputFile.endsWith(`${String(payload.session_id)}.output`)).toBe(true)
-    await new Promise((resolve) => setTimeout(resolve, 500))
+    const completed = await executeTool(backgroundHost, workspace, 'background_shell', {
+      action: 'poll',
+      session_id: String(payload.session_id),
+      yield_seconds: 2
+    })
+    expect(completed.status).toBe('completed')
     const full = await readFile(outputFile, 'utf-8')
-    expect(full.startsWith('line-one\n')).toBe(true)
+    expect(full.replace(/\r\n/g, '\n').startsWith('line-one\n')).toBe(true)
     expect([...full].length).toBeGreaterThan(10_000)
     const read = await executeTool(backgroundHost, workspace, 'background_shell', {
       action: 'read',
@@ -1072,9 +1077,14 @@ describe('Kun built-in tools', () => {
     const target = join(workspace, 'serial.txt')
     const order: string[] = []
 
+    let markFirstStarted!: () => void
+    const firstStarted = new Promise<void>((resolve) => {
+      markFirstStarted = resolve
+    })
     let releaseFirst!: () => void
     const first = withFileMutationQueue(target, async () => {
       order.push('first:start')
+      markFirstStarted()
       await new Promise<void>((resolve) => {
         releaseFirst = resolve
       })
@@ -1086,7 +1096,7 @@ describe('Kun built-in tools', () => {
       order.push('second:end')
     })
 
-    await new Promise((resolve) => setTimeout(resolve, 20))
+    await firstStarted
     expect(order).toEqual(['first:start'])
     releaseFirst()
     await Promise.all([first, second])

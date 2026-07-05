@@ -64,12 +64,48 @@ describe('design prompt router', () => {
     })).toEqual({ kind: 'attachment-unsupported' })
   })
 
-  it('routes from-scratch generate briefs to the multi-page lane', () => {
+  it('routes from-scratch generate briefs to a single turn by default', () => {
     expect(routeDesignPrompt({
       value: 'Design an operations app',
       attachments: [],
       attachmentUploadEnabled: true,
       designState: state(),
+      selectedCount: 0,
+      imageOnlyDisplay: 'image display',
+      imageOnlyPrompt: 'image prompt'
+    })).toMatchObject({
+      kind: 'single-turn',
+      promptText: 'Design an operations app',
+      workspaceRoot: '/workspace'
+    })
+  })
+
+  it('routes from-scratch briefs to the multi-page lane when explicitly enabled', () => {
+    expect(routeDesignPrompt({
+      value: 'Design an operations app',
+      attachments: [],
+      attachmentUploadEnabled: true,
+      designState: state({ multiPageMode: true }),
+      selectedCount: 0,
+      imageOnlyDisplay: 'image display',
+      imageOnlyPrompt: 'image prompt'
+    })).toEqual({
+      kind: 'multi-page',
+      brief: 'Design an operations app',
+      workspaceRoot: '/workspace'
+    })
+  })
+
+  it('routes active-page briefs to the multi-page lane when explicitly enabled', () => {
+    expect(routeDesignPrompt({
+      value: 'Design an operations app',
+      attachments: [],
+      attachmentUploadEnabled: true,
+      designState: state({
+        artifacts: [artifact('board', 'canvas'), artifact('home', 'html')],
+        activeArtifactId: 'home',
+        multiPageMode: true
+      }),
       selectedCount: 0,
       imageOnlyDisplay: 'image display',
       imageOnlyPrompt: 'image prompt'

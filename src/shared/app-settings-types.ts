@@ -98,6 +98,7 @@ export type VideoGenerationProtocol = (typeof VIDEO_GENERATION_PROTOCOLS)[number
 export const DEFAULT_VIDEO_GENERATION_PROTOCOL: VideoGenerationProtocol = 'minimax-video'
 export const DEFAULT_CLAW_MODEL = 'auto'
 export const CLAW_MODEL_IDS = ['auto', 'deepseek-v4-pro', 'deepseek-v4-flash'] as const
+export const DEFAULT_CLAW_RECENT_THREAD_LIST_LIMIT = 5
 export const DEFAULT_SCHEDULE_MODEL = 'deepseek-v4-flash'
 export const SCHEDULE_MODEL_IDS = ['deepseek-v4-pro', 'deepseek-v4-flash'] as const
 export const DEFAULT_SCHEDULE_REASONING_EFFORT = 'medium'
@@ -113,6 +114,13 @@ export const DEFAULT_WRITE_WORKSPACE_ROOT = '~/.kun/write_workspace'
 // (defaultConversationWorkspaceRoot)各自按平台推导。
 export const DEFAULT_KUN_DATA_DIR = '~/.kun/data'
 export const DEFAULT_KUN_MODEL = 'deepseek-v4-pro'
+export const DEFAULT_PROMPT_OPTIMIZATION_PROMPT = [
+  'You rewrite rough spoken or typed instructions into a clear prompt for a coding agent.',
+  'Keep the user intent, constraints, names, paths, and concrete details intact.',
+  'Make the prompt actionable, concise, and well structured.',
+  'Do not add requirements the user did not ask for.',
+  'Return only the rewritten prompt text. Do not add markdown fences or explanations.'
+].join('\n')
 export const DEFAULT_WRITE_INLINE_COMPLETION_BASE_URL = 'https://api.deepseek.com/beta'
 export const DEFAULT_WRITE_INLINE_COMPLETION_MODEL = 'deepseek-v4-flash'
 export const WRITE_INLINE_COMPLETION_MODEL_IDS = ['deepseek-v4-pro', 'deepseek-v4-flash'] as const
@@ -141,6 +149,14 @@ export type NetworkProxySettingsV1 = {
   url: string
 }
 export type { ModelEndpointFormat }
+export const DEFAULT_MODEL_REQUEST_RETRY_MAX_ATTEMPTS = 0
+export const DEFAULT_MODEL_REQUEST_RETRY_INITIAL_DELAY_MS = 3_000
+export const DEFAULT_MODEL_REQUEST_RETRY_HTTP_STATUS_CODES = [429, 503] as const
+export type ModelRequestRetrySettingsV1 = {
+  maxAttempts: number
+  initialDelayMs: number
+  httpStatusCodes: number[]
+}
 export const MODEL_PROVIDER_INPUT_MODALITIES = ['text', 'image'] as const
 export type ModelProviderInputModality = (typeof MODEL_PROVIDER_INPUT_MODALITIES)[number]
 export const MODEL_PROVIDER_MESSAGE_PARTS = ['text', 'image_url', 'input_image'] as const
@@ -204,6 +220,8 @@ export type ModelProviderProfileV1 = {
   apiKey: string
   baseUrl: string
   endpointFormat: ModelEndpointFormat
+  /** 模型请求遇到临时失败或限流响应时使用的 HTTP 重试策略。 */
+  retry?: ModelRequestRetrySettingsV1
   /**
    * Transport kind. `agent-sdk` delegates whole turns to the embedded Claude
    * Agent SDK (Claude Pro/Max subscription); `apiKey` then carries the
@@ -232,6 +250,7 @@ export type ModelProviderMusicCapabilityPatchV1 = Partial<ModelProviderMusicCapa
 export type ModelProviderVideoCapabilityPatchV1 = Partial<ModelProviderVideoCapabilityV1>
 export type ModelProviderModelProfilePatchV1 = Partial<ModelProviderModelProfileV1>
 export type ModelProviderProfilePatchV1 = Partial<Omit<ModelProviderProfileV1, 'image' | 'speech' | 'textToSpeech' | 'music' | 'video' | 'modelProfiles'>> & {
+  retry?: Partial<ModelRequestRetrySettingsV1>
   modelProfiles?: Record<string, ModelProviderModelProfilePatchV1 | null>
   image?: ModelProviderImageCapabilityPatchV1 | null
   speech?: ModelProviderSpeechCapabilityPatchV1 | null
@@ -297,6 +316,8 @@ export type KunRuntimeSettingsV1 = {
   providerId: string
   /** Effective model request format. Resolved from the selected model provider. */
   endpointFormat: ModelEndpointFormat
+  /** 当前生效的模型请求重试策略,由所选模型供应商解析得到。 */
+  retry: ModelRequestRetrySettingsV1
   runtimeToken: string
   dataDir: string
   model: string
@@ -324,6 +345,8 @@ export type KunRuntimeSettingsV1 = {
   speechToText: KunSpeechToTextSettingsV1
   /** Text-to-speech provider exposed to agents as generate_speech. */
   textToSpeech: KunTextToSpeechSettingsV1
+  /** Model + prompt used by the composer prompt optimization button. */
+  promptOptimization: KunPromptOptimizationSettingsV1
   /** Music generation provider exposed to agents as generate_music. */
   musicGeneration: KunMusicGenerationSettingsV1
   /** Video generation provider exposed to agents as generate_video. */
@@ -484,6 +507,17 @@ export type KunTextToSpeechSettingsV1 = {
   timeoutMs: number
 }
 
+export type KunPromptOptimizationSettingsV1 = {
+  enabled: boolean
+  /** Existing provider profile to use. Empty means inherit the active Kun provider. */
+  providerId: string
+  /** Empty means smallModel || main conversation model. */
+  model: string
+  /** Empty means use DEFAULT_PROMPT_OPTIMIZATION_PROMPT. */
+  prompt: string
+  timeoutMs: number
+}
+
 export type KunMusicGenerationSettingsV1 = {
   enabled: boolean
   /** Existing provider profile to use for music generation. Empty or "custom" uses the fields below. */
@@ -613,7 +647,7 @@ export type KunTokenEconomySettingsPatchV1 = Partial<
 export type KunRuntimeSettingsPatchV1 = Partial<
   Omit<
     KunRuntimeSettingsV1,
-    'mcpSearch' | 'storage' | 'contextCompaction' | 'runtimeTuning' | 'tokenEconomy' | 'toolOutputLimits' | 'imageGeneration' | 'speechToText' | 'textToSpeech' | 'musicGeneration' | 'videoGeneration' | 'instructions' | 'computerUse' | 'quality' | 'modelProfiles'
+    'mcpSearch' | 'storage' | 'contextCompaction' | 'runtimeTuning' | 'tokenEconomy' | 'toolOutputLimits' | 'imageGeneration' | 'speechToText' | 'textToSpeech' | 'promptOptimization' | 'musicGeneration' | 'videoGeneration' | 'instructions' | 'computerUse' | 'quality' | 'modelProfiles'
   >
 > & {
   mcpSearch?: Partial<KunMcpSearchSettingsV1>
@@ -625,6 +659,7 @@ export type KunRuntimeSettingsPatchV1 = Partial<
   imageGeneration?: Partial<KunImageGenerationSettingsV1>
   speechToText?: Partial<KunSpeechToTextSettingsV1>
   textToSpeech?: Partial<KunTextToSpeechSettingsV1>
+  promptOptimization?: Partial<KunPromptOptimizationSettingsV1>
   musicGeneration?: Partial<KunMusicGenerationSettingsV1>
   videoGeneration?: Partial<KunVideoGenerationSettingsV1>
   instructions?: Partial<KunInstructionSettingsV1>
@@ -1448,6 +1483,7 @@ export type ClawImSettingsV1 = {
   model: string
   mode: ClawRunMode
   responseTimeoutMs: number
+  recentThreadListLimit: number
 }
 
 export type ClawTaskScheduleV1 = {
@@ -1520,6 +1556,10 @@ export type ClawImConversationV1 = {
   /** Kun thread id this conversation maps to. */
   localThreadId: string
   workspaceRoot: string
+  /** Model provider used by this IM conversation. Empty inherits channel/IM/global provider. */
+  providerId?: string
+  /** Model used by this IM conversation. Empty inherits channel/IM model. */
+  model?: string
   createdAt: string
   updatedAt: string
 }

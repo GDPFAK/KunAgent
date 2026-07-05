@@ -464,9 +464,6 @@ function createUserInputTool(name: string): LocalTool {
       required: []
     },
     policy: 'auto',
-    // Only advertised when the turn can actually resolve structured
-    // input (IM bridges and headless runs omit `awaitUserInput`).
-    shouldAdvertise: (context) => typeof context.awaitUserInput === 'function',
     execute: async (args, context) => {
       if (!context.awaitUserInput) {
         return {

@@ -630,6 +630,8 @@ export function initializeGuiUpdater(
 }
 
 export async function showPostUpdateReleaseNotes(): Promise<void> {
+  if (!app.isPackaged) return
+
   const currentVersion = app.getVersion().trim()
   const state = await readGuiVersionState()
   if (!state.lastSeenVersion) {
@@ -637,6 +639,7 @@ export async function showPostUpdateReleaseNotes(): Promise<void> {
     return
   }
   if (state.lastSeenVersion === currentVersion) return
+  if (!isVersionGreater(currentVersion, state.lastSeenVersion)) return
 
   const pendingUpdate =
     state.pendingUpdate?.version === currentVersion ? state.pendingUpdate : undefined

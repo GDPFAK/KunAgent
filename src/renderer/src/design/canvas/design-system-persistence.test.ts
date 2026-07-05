@@ -5,6 +5,7 @@ import {
   persistDesignSystem,
   serializeDesignSystem
 } from './design-system-persistence'
+import { createDefaultShape } from './canvas-types'
 import { createEmptyDesignSystem, type DesignSystem } from './design-system-types'
 
 describe('design-system-persistence', () => {
@@ -27,6 +28,47 @@ describe('design-system-persistence', () => {
   it('returns null on garbage and an empty system on a bare object', () => {
     expect(parseDesignSystem('not json {')).toBeNull()
     expect(parseDesignSystem('{}')).toEqual(createEmptyDesignSystem())
+  })
+
+  it('repairs missing names and discards malformed persisted entries', () => {
+    const componentRoot = createDefaultShape('frame', 0, 0)
+    componentRoot.id = 'component-card-root'
+    componentRoot.name = 'Card Root'
+
+    expect(
+      parseDesignSystem(
+        JSON.stringify({
+          tokens: {
+            'brand/primary': { kind: 'color', value: '#3b82d8' },
+            broken: null
+          },
+          components: {
+            Card: {
+              id: 'component-card',
+              version: 1,
+              tree: [componentRoot],
+              slots: [{ path: 'Title', kind: 'text' }]
+            },
+            EmptyTree: { id: 'empty-tree', version: 1, tree: [], slots: [] },
+            BrokenSlot: { id: 'broken-slot', version: 1, tree: [componentRoot], slots: [null] },
+            broken: { name: 'Broken' }
+          }
+        })
+      )
+    ).toEqual({
+      tokens: {
+        'brand/primary': { name: 'brand/primary', kind: 'color', value: '#3b82d8' }
+      },
+      components: {
+        Card: {
+          id: 'component-card',
+          name: 'Card',
+          version: 1,
+          tree: [componentRoot],
+          slots: [{ path: 'Title', kind: 'text' }]
+        }
+      }
+    })
   })
 
   describe('debounced save', () => {

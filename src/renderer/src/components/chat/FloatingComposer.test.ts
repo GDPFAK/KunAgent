@@ -23,6 +23,7 @@ import {
   composerModelMenuItemSelected,
   composerMenuSupportsModel,
   composerReasoningEffortRequestValue,
+  buildComposerModelOptions,
   canSwitchComposerModelFromCurrent,
   filterComposerModelIds,
   normalizeComposerReasoningEffort
@@ -406,6 +407,16 @@ describe('FloatingComposer model controls', () => {
       label: 'Other models',
       modelIds: ['loose-model']
     })
+  })
+
+  it('builds model picker options only from configured picks, not the current model', () => {
+    expect(buildComposerModelOptions([
+      ' deepseek-v4-pro ',
+      'mock-model',
+      'deepseek-v4-pro',
+      ' '
+    ])).toEqual(['deepseek-v4-pro', 'mock-model'])
+    expect(buildComposerModelOptions(['deepseek-v4-pro'])).not.toContain('stale-thread-model')
   })
 
   it('deduplicates models within a provider but keeps the same model id across providers', () => {

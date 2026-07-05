@@ -24,6 +24,7 @@ export const RuntimeEventKind = z.enum([
   'assistant_text_delta',
   'assistant_reasoning_delta',
   'tool_call_ready',
+  'model_request_retry',
   'tool_result_upload_wait',
   'tool_storm_suppressed',
   'tool_catalog_changed',
@@ -77,6 +78,7 @@ const RuntimeEventBase = z.object({
     childLabel: z.string().optional(),
     childStatus: z.enum(['queued', 'running', 'completed', 'failed', 'aborted']),
     childSeq: z.number().int().nonnegative(),
+    detached: z.boolean().optional(),
     // Observability metrics carried alongside the child lifecycle event so
     // the GUI can show prefix reuse, tool fan-out, timing, and cost per
     // subagent without a separate diagnostics fetch.
@@ -176,6 +178,15 @@ export const ToolCallReadyEvent = RuntimeEventBase.extend({
   readyCount: z.number().int().positive()
 })
 export type ToolCallReadyEvent = z.infer<typeof ToolCallReadyEvent>
+
+export const ModelRequestRetryEvent = RuntimeEventBase.extend({
+  kind: z.literal('model_request_retry'),
+  status: z.number().int().min(100).max(599),
+  attempt: z.number().int().positive(),
+  maxAttempts: z.number().int().positive(),
+  delayMs: z.number().int().nonnegative()
+})
+export type ModelRequestRetryEvent = z.infer<typeof ModelRequestRetryEvent>
 
 export const ToolUploadStatusEvent = RuntimeEventBase.extend({
   kind: z.literal('tool_result_upload_wait'),
@@ -285,6 +296,7 @@ export const RuntimeEvent = z.discriminatedUnion('kind', [
   ApprovalEvent,
   UserInputEvent,
   ToolCallReadyEvent,
+  ModelRequestRetryEvent,
   ToolUploadStatusEvent,
   ToolStormSuppressedEvent,
   ToolCatalogEvent,

@@ -75,4 +75,11 @@ export class InMemoryEventBus implements EventBus {
     this.nextSeq.clear()
     this.highestSeqByThread.clear()
   }
+
+  clearThread(threadId: string): void {
+    this.events.delete(threadId)
+    this.subscribers.delete(threadId)
+    this.nextSeq.delete(threadId)
+    this.highestSeqByThread.delete(threadId)
+  }
 }

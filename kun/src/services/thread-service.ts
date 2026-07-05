@@ -43,6 +43,7 @@ export type ThreadServiceOptions = {
   events: RuntimeEventRecorder
   ids: IdGenerator
   nowIso: () => string
+  onDeleted?: (threadId: string) => void
 }
 
 export type ListThreadsOptions = ThreadStoreListOptions
@@ -78,6 +79,7 @@ export class ThreadService {
   private readonly events: RuntimeEventRecorder
   private readonly ids: IdGenerator
   private readonly nowIso: () => string
+  private readonly onDeleted?: (threadId: string) => void
 
   constructor(options: ThreadServiceOptions) {
     this.threadStore = options.threadStore
@@ -85,6 +87,7 @@ export class ThreadService {
     this.events = options.events
     this.ids = options.ids
     this.nowIso = options.nowIso
+    this.onDeleted = options.onDeleted
   }
 
   async list(options: ListThreadsOptions = {}): Promise<ThreadSummary[]> {
@@ -377,6 +380,8 @@ export class ThreadService {
   async delete(threadId: string): Promise<boolean> {
     const ok = await this.threadStore.delete(threadId)
     if (!ok) return false
+    this.sessionStore.clearThreadMemory(threadId)
+    this.onDeleted?.(threadId)
     return true
   }
 

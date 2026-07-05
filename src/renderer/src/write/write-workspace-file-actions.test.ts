@@ -58,6 +58,7 @@ function makeBaseState(): WriteWorkspaceState {
 function createHarness(): {
   actions: ReturnType<typeof createWriteFileActions>
   get: WriteWorkspaceGet
+  set: WriteWorkspaceSet
 } {
   let state = makeBaseState()
   const set: WriteWorkspaceSet = (partial) => {
@@ -72,7 +73,7 @@ function createHarness(): {
     setLastSavedContent: vi.fn()
   })
   state = { ...state, ...actions }
-  return { actions, get }
+  return { actions, get, set }
 }
 
 function installDsGui(overrides: Partial<Window['kunGui']>): void {
@@ -86,6 +87,44 @@ afterEach(() => {
 })
 
 describe('write workspace file actions', () => {
+  it('refreshes an initialized workspace without resetting the active draft', async () => {
+    const listWorkspaceDirectory = vi.fn(async () => ({
+      ok: true as const,
+      root: '/tmp/write',
+      entries: [{
+        name: 'new.md',
+        path: '/tmp/write/new.md',
+        type: 'file' as const,
+        ext: '.md'
+      }]
+    }))
+    installDsGui({ listWorkspaceDirectory })
+    const { actions, get, set } = createHarness()
+    set({
+      workspaceRoot: '/tmp/write',
+      rootDirectory: '/tmp/write',
+      expandedDirs: new Set(['/tmp/write']),
+      activeFilePath: '/tmp/write/draft.md',
+      fileContent: 'unsaved draft',
+      saveStatus: 'dirty'
+    })
+
+    await actions.initializeWorkspace('/tmp/write')
+
+    expect(listWorkspaceDirectory).toHaveBeenCalledWith({
+      workspaceRoot: '/tmp/write',
+      path: '/tmp/write'
+    })
+    expect(get().entriesByDir['/tmp/write']).toEqual([
+      expect.objectContaining({ name: 'new.md' })
+    ])
+    expect(get()).toMatchObject({
+      activeFilePath: '/tmp/write/draft.md',
+      fileContent: 'unsaved draft',
+      saveStatus: 'dirty'
+    })
+  })
+
   it('clears loading state and records list errors when directory IPC throws', async () => {
     installDsGui({
       listWorkspaceDirectory: vi.fn(async () => {

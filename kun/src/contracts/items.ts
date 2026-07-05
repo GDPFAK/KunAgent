@@ -51,7 +51,7 @@ export const UserFileReferenceSchema = z.object({
 })
 export type UserFileReference = z.infer<typeof UserFileReferenceSchema>
 
-export const UserMessageSource = z.enum(['background_shell'])
+export const UserMessageSource = z.enum(['background_shell', 'background_subagent'])
 export type UserMessageSource = z.infer<typeof UserMessageSource>
 
 export const UserTurnItem = TurnItemBase.extend({

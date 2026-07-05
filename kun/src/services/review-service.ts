@@ -210,7 +210,7 @@ export class ReviewService {
       request: {
         prompt: input.prompt,
         model: input.model,
-        providerId: input.providerId,
+        ...(input.providerId?.trim() ? { providerId: input.providerId.trim() } : {}),
         mode: 'agent',
         reasoningEffort: normalizeRoleReasoningEffort(this.deps.reasoningEffort)
       }

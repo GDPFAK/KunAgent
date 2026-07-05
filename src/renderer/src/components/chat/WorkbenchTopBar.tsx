@@ -53,6 +53,15 @@ type Props = {
 }
 
 const TOPBAR_ICON_CLASS = 'h-4 w-4'
+const SIDE_RAIL_BUTTON_BASE =
+  'ds-side-rail-button inline-flex h-8 w-8 items-center justify-center rounded-[0.9rem] border shadow-[inset_0_1px_0_rgba(255,255,255,0.45)] transition dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]'
+const SIDE_RAIL_BUTTON_ACTIVE = 'border-ds-border-strong bg-white/70 text-ds-ink dark:bg-white/10'
+const SIDE_RAIL_BUTTON_IDLE =
+  'border-transparent bg-white/38 text-ds-faint opacity-90 hover:border-ds-border-muted hover:bg-white/55 hover:text-ds-ink hover:opacity-100 dark:bg-white/4 dark:hover:bg-white/8'
+
+function sideRailButtonClass(active: boolean, extra?: string): string {
+  return `${SIDE_RAIL_BUTTON_BASE} ${active ? SIDE_RAIL_BUTTON_ACTIVE : SIDE_RAIL_BUTTON_IDLE}${extra ? ` ${extra}` : ''}`
+}
 
 export function WorkbenchSideRail({
   rightPanelMode,
@@ -90,6 +99,9 @@ export function WorkbenchSideRail({
     () => editors.find((editor) => editor.id === selectedEditorId) ?? editors[0],
     [editors, selectedEditorId]
   )
+  const editorButtonTitle = selectedEditor
+    ? t('editorPickerTitleWithEditor', { editor: selectedEditor.label })
+    : t('editorPickerTitle')
 
   useEffect(() => {
     let cancelled = false
@@ -280,7 +292,8 @@ export function WorkbenchSideRail({
           type="button"
           onClick={() => void runGuiUpdateAction()}
           disabled={guiUpdateBusy}
-          className="relative inline-flex h-8 w-8 items-center justify-center rounded-[0.9rem] border border-amber-300/75 bg-amber-50/92 text-amber-950 shadow-[inset_0_1px_0_rgba(255,255,255,0.55)] transition hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-amber-700/70 dark:bg-amber-950/35 dark:text-amber-100 dark:hover:bg-amber-900/45"
+          className="ds-side-rail-button relative inline-flex h-8 w-8 items-center justify-center rounded-[0.9rem] border border-amber-300/75 bg-amber-50/92 text-amber-950 shadow-[inset_0_1px_0_rgba(255,255,255,0.55)] transition hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-amber-700/70 dark:bg-amber-950/35 dark:text-amber-100 dark:hover:bg-amber-900/45"
+          data-tooltip={guiUpdateBusy ? guiUpdateLabel : guiUpdateTitle}
           aria-label={guiUpdateBusy ? guiUpdateLabel : guiUpdateTitle}
           title={guiUpdateBusy ? guiUpdateLabel : guiUpdateTitle}
         >
@@ -295,14 +308,11 @@ export function WorkbenchSideRail({
         <button
           type="button"
           onClick={() => setEditorMenuOpen((value) => !value)}
-          className="inline-flex h-8 w-8 items-center justify-center rounded-[0.9rem] border border-transparent bg-white/38 text-ds-faint opacity-90 shadow-[inset_0_1px_0_rgba(255,255,255,0.45)] transition hover:border-ds-border-muted hover:bg-white/55 hover:text-ds-ink hover:opacity-100 dark:bg-white/4 dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] dark:hover:bg-white/8"
+          className={sideRailButtonClass(false)}
+          data-tooltip={editorButtonTitle}
           aria-label={t('editorPickerTitle')}
           aria-expanded={editorMenuOpen}
-          title={
-            selectedEditor
-              ? t('editorPickerTitleWithEditor', { editor: selectedEditor.label })
-              : t('editorPickerTitle')
-          }
+          title={editorButtonTitle}
         >
           {renderEditorIcon(selectedEditor, 'h-4 w-4')}
         </button>
@@ -345,11 +355,8 @@ export function WorkbenchSideRail({
           type="button"
           onClick={onOpenSideChat}
           disabled={!sideChatEnabled}
-          className={`relative inline-flex h-8 w-8 items-center justify-center rounded-[0.9rem] border shadow-[inset_0_1px_0_rgba(255,255,255,0.45)] transition disabled:cursor-not-allowed disabled:opacity-45 dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] ${
-            sideChatOpen
-              ? 'border-ds-border-strong bg-white/70 text-ds-ink dark:bg-white/10'
-              : 'border-transparent bg-white/38 text-ds-faint opacity-90 hover:border-ds-border-muted hover:bg-white/55 hover:text-ds-ink hover:opacity-100 dark:bg-white/4 dark:hover:bg-white/8'
-          }`}
+          className={sideRailButtonClass(sideChatOpen, 'relative disabled:cursor-not-allowed disabled:opacity-45')}
+          data-tooltip={t('sidePanelOpen')}
           aria-label={t('sidePanelOpen')}
           aria-pressed={sideChatOpen}
           title={t('sidePanelOpen')}
@@ -375,11 +382,8 @@ export function WorkbenchSideRail({
             <button
               type="button"
               onClick={() => onToggleRightPanelMode(item.mode)}
-              className={`inline-flex h-8 w-8 items-center justify-center rounded-[0.9rem] border shadow-[inset_0_1px_0_rgba(255,255,255,0.45)] transition dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] ${
-                active
-                  ? 'border-ds-border-strong bg-white/70 text-ds-ink dark:bg-white/10'
-                  : 'border-transparent bg-white/38 text-ds-faint opacity-90 hover:border-ds-border-muted hover:bg-white/55 hover:text-ds-ink hover:opacity-100 dark:bg-white/4 dark:hover:bg-white/8'
-              }`}
+              className={sideRailButtonClass(active)}
+              data-tooltip={item.label}
               aria-label={item.label}
               aria-pressed={active}
               title={item.label}
@@ -390,11 +394,8 @@ export function WorkbenchSideRail({
               <button
                 type="button"
                 onClick={onToggleTerminal}
-                className={`inline-flex h-8 w-8 items-center justify-center rounded-[0.9rem] border shadow-[inset_0_1px_0_rgba(255,255,255,0.45)] transition dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] ${
-                  terminalOpen
-                    ? 'border-ds-border-strong bg-white/70 text-ds-ink dark:bg-white/10'
-                    : 'border-transparent bg-white/38 text-ds-faint opacity-90 hover:border-ds-border-muted hover:bg-white/55 hover:text-ds-ink hover:opacity-100 dark:bg-white/4 dark:hover:bg-white/8'
-                }`}
+                className={sideRailButtonClass(terminalOpen)}
+                data-tooltip={t('rightPanelTerminal')}
                 aria-label={t('rightPanelTerminal')}
                 aria-pressed={terminalOpen}
                 title={t('rightPanelTerminal')}
@@ -411,11 +412,8 @@ export function WorkbenchSideRail({
           type="button"
           onClick={onToggleFileTree}
           disabled={!fileTreeEnabled}
-          className={`inline-flex h-8 w-8 items-center justify-center rounded-[0.9rem] border shadow-[inset_0_1px_0_rgba(255,255,255,0.45)] transition disabled:cursor-not-allowed disabled:opacity-45 dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] ${
-            fileTreeOpen
-              ? 'border-ds-border-strong bg-white/70 text-ds-ink dark:bg-white/10'
-              : 'border-transparent bg-white/38 text-ds-faint opacity-90 hover:border-ds-border-muted hover:bg-white/55 hover:text-ds-ink hover:opacity-100 dark:bg-white/4 dark:hover:bg-white/8'
-          }`}
+          className={sideRailButtonClass(fileTreeOpen, 'disabled:cursor-not-allowed disabled:opacity-45')}
+          data-tooltip={t('rightPanelFiles')}
           aria-label={t('rightPanelFiles')}
           aria-pressed={fileTreeOpen}
           title={t('rightPanelFiles')}

@@ -34,8 +34,8 @@ function gate(input: Partial<DesignMultiPageGateInput> = {}) {
 }
 
 describe('design pages gate', () => {
-  it('routes from-scratch generate briefs to the multi-page pipeline', () => {
-    expect(gate()).toEqual({ route: 'multi-page', reason: 'from-scratch' })
+  it('keeps from-scratch briefs in the single-turn lane by default', () => {
+    expect(gate()).toEqual({ route: 'single-turn', reason: 'multi-page-disabled' })
   })
 
   it('lets the explicit multi-page toggle force the pipeline when pages already exist', () => {
@@ -45,10 +45,18 @@ describe('design pages gate', () => {
     })).toEqual({ route: 'multi-page', reason: 'explicit-toggle' })
   })
 
+  it('lets the explicit multi-page toggle force the pipeline from an active page', () => {
+    expect(gate({
+      artifacts: [artifact('board', 'canvas'), artifact('home', 'html')],
+      activeArtifactId: 'home',
+      multiPageMode: true
+    })).toEqual({ route: 'multi-page', reason: 'explicit-toggle' })
+  })
+
   it('keeps incremental existing-page work in the single-turn lane', () => {
     expect(gate({
       artifacts: [artifact('board', 'canvas'), artifact('home', 'html')]
-    })).toEqual({ route: 'single-turn', reason: 'incremental-existing-pages' })
+    })).toEqual({ route: 'single-turn', reason: 'multi-page-disabled' })
   })
 
   it('does not fan out selected, attached, active-page, or running prompts', () => {
@@ -59,6 +67,21 @@ describe('design pages gate', () => {
       activeArtifactId: 'home'
     })).toEqual({ route: 'single-turn', reason: 'active-html-artifact' })
     expect(gate({ pagesRunActive: true })).toEqual({ route: 'single-turn', reason: 'pages-run-active' })
+  })
+
+  it('keeps safety short-circuits ahead of the explicit multi-page toggle', () => {
+    expect(gate({ selectedCount: 1, multiPageMode: true })).toEqual({
+      route: 'single-turn',
+      reason: 'canvas-selection'
+    })
+    expect(gate({ attachmentCount: 1, multiPageMode: true })).toEqual({
+      route: 'single-turn',
+      reason: 'has-attachments'
+    })
+    expect(gate({ pagesRunActive: true, multiPageMode: true })).toEqual({
+      route: 'single-turn',
+      reason: 'pages-run-active'
+    })
   })
 
   it('keeps standalone image asset prompts out of the multi-page pipeline', () => {

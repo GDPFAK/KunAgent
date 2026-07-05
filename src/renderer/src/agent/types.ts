@@ -62,6 +62,16 @@ export type RuntimeChildMetadata = {
   childToolPolicy?: 'readOnly' | 'inherit'
   childStatus: 'queued' | 'running' | 'completed' | 'failed' | 'aborted'
   childSeq: number
+  detached?: boolean
+  prefixReused?: boolean
+  inheritedHistoryItems?: number
+  toolInvocations?: number
+  durationMs?: number
+  queuedMs?: number
+  totalTokens?: number
+  cacheHitRate?: number | null
+  costUsd?: number
+  costCny?: number
 }
 
 export type WebCitationSource = {
@@ -73,7 +83,7 @@ export type WebCitationSource = {
 
 export type RuntimeDisclosureMetadata = {
   displayText?: string
-  messageSource?: 'background_shell' // client-only rendering hint; never sent to the runtime
+  messageSource?: 'background_shell' | 'background_subagent' // client-only rendering hint; never sent to the runtime
   turnId?: string
   workspaceCheckpointId?: string
   attachmentIds?: string[]
@@ -325,6 +335,8 @@ export type ToolEventPayload = {
   itemId: string
   summary: string
   status: 'running' | 'success' | 'error'
+  updateOnly?: boolean
+  createdAt?: string
   toolKind?: ToolItemKind
   detail?: string
   filePath?: string
@@ -334,6 +346,7 @@ export type ToolEventPayload = {
 export type RuntimeStatusEventPayload = {
   kind:
     | 'tool_result_upload_wait'
+    | 'model_request_retry'
     | 'tool_catalog_changed'
     | 'tool_storm_suppressed'
     | 'compaction_summary_fallback'
@@ -342,6 +355,10 @@ export type RuntimeStatusEventPayload = {
   createdAt?: string
   message?: string
   toolResultCount?: number
+  status?: number
+  attempt?: number
+  maxAttempts?: number
+  delayMs?: number
   changeKind?: 'additive' | 'breaking'
   toolName?: string
   callId?: string

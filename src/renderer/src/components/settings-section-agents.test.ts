@@ -46,6 +46,11 @@ const labels: Record<string, string> = {
   modelProviderApiKeyPlaceholder: 'Enter provider API key',
   modelProviderBaseUrl: 'Provider base URL',
   modelProviderEndpointFormat: 'Endpoint format',
+  modelProviderRetrySection: 'Failure retry',
+  modelProviderRetryMaxAttempts: 'Retry attempts',
+  modelProviderRetryInitialDelayMs: 'Initial retry delay (ms)',
+  modelProviderRetryStatusCodes: 'Retry HTTP status codes',
+  modelProviderRetryStatusCodesHint: 'Separate multiple status codes with commas, for example 429,503.',
   modelProviderFetchEmpty: 'No models found',
   modelEndpointChatCompletions: '/v1/chat/completions (openai)',
   modelEndpointResponses: '/v1/responses (openai)',
@@ -178,6 +183,7 @@ const labels: Record<string, string> = {
   kunMemoryRecordsDesc: 'Memory records description',
   kunMemoryEmpty: 'No memories',
   kunMemoryDisable: 'Disable memory',
+  memoryRestore: 'Restore',
   kunMemoryDelete: 'Delete memory',
   kunMemoryDisabled: 'Disabled',
   skill: 'Skill',
@@ -524,6 +530,45 @@ describe('AgentsSettingsSection Kun diagnostics smoke', () => {
     expect(html).toContain('No API key')
   })
 
+  it('renders retry status codes without spaces and explains comma separation before retry fields', () => {
+    const provider = defaultModelProviderSettings()
+    const customProvider = {
+      id: 'retry-provider',
+      name: 'Retry Provider',
+      apiKey: 'sk-test',
+      baseUrl: 'https://api.example.com/v1',
+      endpointFormat: 'chat_completions',
+      retry: {
+        maxAttempts: 3,
+        initialDelayMs: 3000,
+        httpStatusCodes: [429, 503]
+      },
+      models: ['retry-model'],
+      modelProfiles: {}
+    } satisfies ModelProviderProfileV1
+    const html = renderToStaticMarkup(createElement(ProvidersSettingsSection, {
+      ctx: {
+        ...baseCtx(),
+        provider: {
+          ...provider,
+          providers: [...provider.providers, customProvider]
+        },
+        kun: {
+          ...defaultKunRuntimeSettings(),
+          providerId: customProvider.id
+        }
+      }
+    }))
+
+    expect(html).toContain('Failure retry')
+    expect(html).toContain('Retry HTTP status codes')
+    expect(html).toContain('value="429,503"')
+    expect(html).not.toContain('value="429, 503"')
+    expect(html).toContain('Separate multiple status codes with commas, for example 429,503.')
+    expect(html.indexOf('Separate multiple status codes with commas, for example 429,503.'))
+      .toBeLessThan(html.indexOf('Retry attempts'))
+  })
+
   it('locks preset and default provider ids and shows the danger zone only for removable providers', () => {
     const provider = defaultModelProviderSettings()
     const xiaomi = getModelProviderPreset('xiaomi')
@@ -648,7 +693,8 @@ describe('AgentsSettingsSection Kun diagnostics smoke', () => {
           id: 'mem_1',
           content: 'Prefer pnpm for this workspace',
           scope: 'workspace',
-          tags: ['tooling']
+          tags: ['tooling'],
+          disabledAt: '2026-06-21T01:00:00.000Z'
         }
       ]
     }
@@ -667,7 +713,8 @@ describe('AgentsSettingsSection Kun diagnostics smoke', () => {
     expect(html).toContain('Discovered Skills')
     expect(html).toContain('Prefer pnpm for this workspace')
     expect(html).toContain('mem_1')
-    expect(html).toContain('Disable memory')
+    expect(html).toContain('aria-label="Restore"')
+    expect(html).not.toContain('aria-label="Disable memory"')
     expect(html).toContain('Delete memory')
   })
 

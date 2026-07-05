@@ -6,6 +6,8 @@ import type { ToolHostContext } from '../../ports/tool-host.js'
 import { resolveWorkspacePath } from './builtin-tool-utils.js'
 import { resolveBackgroundShellOutputPaths } from '../../services/background-shell-output.js'
 
+const directoryLinkType = process.platform === 'win32' ? 'junction' : 'dir'
+
 function context(workspace: string): ToolHostContext {
   return {
     threadId: 'thread_symlink',
@@ -37,12 +39,12 @@ describe('resolveWorkspacePath symlink escape', () => {
   it('rejects a DANGLING symlink whose target is outside the workspace (write/create case)', async () => {
     // `outside` deliberately does NOT exist — realpath() reports ENOENT for the
     // link exactly as for a missing file. This is the hole the fix closes.
-    await symlink(outside, join(workspace, 'evil'))
+    await symlink(outside, join(workspace, 'evil'), directoryLinkType)
     await expect(resolveWorkspacePath('evil', context(workspace))).rejects.toThrow(/escapes the workspace root/)
   })
 
   it('rejects a path that traverses through a dangling symlink to an outside dir', async () => {
-    await symlink(outside, join(workspace, 'dlink'))
+    await symlink(outside, join(workspace, 'dlink'), directoryLinkType)
     await expect(resolveWorkspacePath('dlink/sub/new.txt', context(workspace))).rejects.toThrow(
       /escapes the workspace root/
     )
@@ -50,7 +52,7 @@ describe('resolveWorkspacePath symlink escape', () => {
 
   it('rejects an EXISTING symlink that points outside the workspace', async () => {
     await mkdir(outside, { recursive: true })
-    await symlink(outside, join(workspace, 'link'))
+    await symlink(outside, join(workspace, 'link'), directoryLinkType)
     await expect(resolveWorkspacePath('link/file.txt', context(workspace))).rejects.toThrow(
       /escapes the workspace root/
     )
@@ -58,9 +60,9 @@ describe('resolveWorkspacePath symlink escape', () => {
 
   it('allows a dangling symlink that stays inside the workspace', async () => {
     // Link target is absent but in-workspace — a legitimate write/create target.
-    await symlink(join(workspace, 'data', 'note.txt'), join(workspace, 'good'))
-    const resolved = await resolveWorkspacePath('good', context(workspace))
-    expect(resolved.absolutePath).toBe(join(workspace, 'good'))
+    await symlink(join(workspace, 'data'), join(workspace, 'good'), directoryLinkType)
+    const resolved = await resolveWorkspacePath('good/note.txt', context(workspace))
+    expect(resolved.absolutePath).toBe(join(workspace, 'good', 'note.txt'))
   })
 
   it('allows creating a new nested file with no symlinks involved', async () => {

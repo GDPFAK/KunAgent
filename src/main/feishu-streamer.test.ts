@@ -47,6 +47,27 @@ function makeSubscriber(
 }
 
 describe('FeishuStreamer', () => {
+  it('buffers synchronous events until the stream controller is ready', async () => {
+    const { bridge, controller, messageId } = makeBridge()
+    const streamer = new FeishuStreamer({
+      bridge, chatId: 'oc_chat_1', turnId: 'turn_1', threadId: 'thr_1',
+      replyOptions: {}, logger: vi.fn()
+    })
+    const close = vi.fn()
+    const subscribe: SseSubscriber = () => {
+      streamer.onSseEvent({ kind: 'assistant_text_delta', turnId: 'turn_1', item: { text: 'early' } })
+      streamer.onSseEvent({ kind: 'turn_completed', turnId: 'turn_1' })
+      return { close }
+    }
+
+    const result = await streamer.start({ subscribe })
+
+    expect(close).toHaveBeenCalledTimes(1)
+    expect(controller.append).toHaveBeenCalledWith('early')
+    expect(controller.setContent).toHaveBeenCalledWith('early')
+    expect(result).toEqual({ ok: true, messageId, finalText: 'early', fellBack: false })
+  })
+
   it('streams assistant_text_delta in order, calls setContent once on turn_completed, resolves with messageId', async () => {
     const { bridge, controller, messageId } = makeBridge()
     const streamer = new FeishuStreamer({

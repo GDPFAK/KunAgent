@@ -261,9 +261,8 @@ const PLAN_READ_ONLY_TOOL_NAMES = new Set([
 /** Interactive tools allowed during the investigation phase (step 0) of a
  * Plan-mode turn so the model can ask the user a structured clarifying
  * question (with options) and continue to `create_plan` in the same turn
- * instead of stopping with a prose question. Only effective on GUI turns:
- * these tools advertise off `awaitUserInput`, so IM/headless plan turns never
- * surface them and the prose-and-stop fallback applies there. */
+ * instead of stopping with a prose question. IM/headless turns retain the
+ * stable catalog but receive an instruction not to call these tools. */
 const PLAN_INTERACTIVE_TOOL_NAMES = new Set(['user_input', 'request_user_input'])
 
 /**
@@ -617,16 +616,10 @@ function latestUserMessageText(items: readonly TurnItem[], turnId: string): stri
   return ''
 }
 
-/**
- * Injected when the turn runs without an interactive user (IM bridges,
- * headless runs). The user-input tools are also withheld from the tool
- * catalog; this line keeps the model from promising a GUI dialog that
- * nobody can answer.
- */
 function userInputUnavailableInstruction(): string {
   return [
-    'Interactive user input is unavailable for this turn: the user is on a remote channel (IM) and cannot answer GUI prompts.',
-    'Do not ask for structured input or wait for confirmation. If information is missing, state your assumption and continue, or finish your reply with the question so the user can answer in their next message.'
+    'The `user_input` and `request_user_input` tools are unavailable for this turn because the user cannot answer GUI prompts.',
+    'Do not call either tool. If information is missing, ask the question in your normal response and end the turn so the user can answer in their next message.'
   ].join(' ')
 }
 
@@ -1443,9 +1436,9 @@ export class AgentLoop {
       ),
       this.opts.forcedAllowedToolNames
     )
-    // IM/headless turns run without the user-input gate; the tools key
-    // their advertisement off `awaitUserInput`, so omitting it hides
-    // `user_input`/`request_user_input` and rejects stray calls.
+    // IM/headless turns run without the user-input gate. The tools stay
+    // advertised so GUI/IM transitions keep a stable provider tool
+    // catalog; execution returns a tool error if the model calls them.
     const userInputDisabled = turn?.disableUserInput === true
     const toolContext: ToolHostContext = {
       threadId,
@@ -1454,6 +1447,7 @@ export class AgentLoop {
       threadMode: effectiveMode,
       ...(activePlanContext ? { guiPlan: activePlanContext } : {}),
       ...(turn?.guiDesignCanvas ? { guiDesignCanvas: true } : {}),
+      ...(turn?.imContext ? { imContext: true } : {}),
       model: modelCapabilities,
       activeSkillIds: skillResolution.activeSkillIds,
       memoryPolicy: { enabled: Boolean(this.opts.memoryStore) },
@@ -1753,6 +1747,17 @@ export class AgentLoop {
           })
           break
         case 'tool_call_delta':
+          break
+        case 'retrying':
+          await this.opts.events.record({
+            kind: 'model_request_retry',
+            threadId,
+            turnId,
+            status: chunk.status,
+            attempt: chunk.attempt,
+            maxAttempts: chunk.maxAttempts,
+            delayMs: chunk.delayMs
+          })
           break
         case 'tool_call_complete': {
           const provider = toolProviderMetadata.get(chunk.toolName)
@@ -2112,6 +2117,7 @@ export class AgentLoop {
       activeSkillIds: skillResolution.activeSkillIds,
       allowedToolNames,
       userInputDisabled,
+      imContext: turn?.imContext === true,
       toolProviderKinds: new Map(tools.map((tool) => [tool.name, tool.providerKind])),
       approvalPolicy,
       sandboxMode,
@@ -2134,6 +2140,7 @@ export class AgentLoop {
     activeSkillIds: readonly string[]
     allowedToolNames?: readonly string[]
     userInputDisabled?: boolean
+    imContext?: boolean
     toolProviderKinds: ReadonlyMap<string, ToolProviderKind | undefined>
     approvalPolicy: ToolHostContext['approvalPolicy']
     sandboxMode: NonNullable<ToolHostContext['sandboxMode']>
@@ -2276,6 +2283,7 @@ export class AgentLoop {
     activeSkillIds: readonly string[]
     allowedToolNames?: readonly string[]
     userInputDisabled?: boolean
+    imContext?: boolean
     approvalPolicy: ToolHostContext['approvalPolicy']
     sandboxMode: NonNullable<ToolHostContext['sandboxMode']>
     signal: AbortSignal
@@ -2287,6 +2295,7 @@ export class AgentLoop {
       threadMode: input.threadMode,
       ...(input.activePlanContext ? { guiPlan: input.activePlanContext } : {}),
       ...(input.guiDesignCanvas ? { guiDesignCanvas: true } : {}),
+      ...(input.imContext ? { imContext: true } : {}),
       model: input.modelCapabilities,
       activeSkillIds: input.activeSkillIds,
       memoryPolicy: { enabled: Boolean(this.opts.memoryStore) },

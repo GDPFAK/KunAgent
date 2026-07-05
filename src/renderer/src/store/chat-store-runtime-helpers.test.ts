@@ -5,8 +5,11 @@ import {
 } from '@shared/background-shell-notice'
 import type { ChatBlock } from '../agent/types'
 import {
+  hasPendingRuntimeWork,
   isOptimisticUserBlockId,
   reconcileOptimisticUserBlock,
+  settlePendingRuntimeWorkAfterInterrupt,
+  threadHasPendingRuntimeWork,
   upsertUserBlock
 } from './chat-store-runtime-helpers'
 
@@ -65,6 +68,50 @@ describe('chat store runtime helpers', () => {
       kind: 'user',
       id: 'item_steered_notice',
       meta: { messageSource: 'background_shell' }
+    })
+  })
+
+  it('does not count detached running subagents as pending parent work', () => {
+    const detachedSubagent: ChatBlock = {
+      kind: 'tool',
+      id: 'tool_delegate_background',
+      summary: 'delegate_task',
+      status: 'running',
+      toolKind: 'tool_call',
+      detail: JSON.stringify({
+        childId: 'child-background',
+        status: 'running',
+        detached: true
+      })
+    }
+
+    expect(hasPendingRuntimeWork(detachedSubagent)).toBe(false)
+    expect(threadHasPendingRuntimeWork([{ kind: 'user', id: 'user-1', text: 'run background' }, detachedSubagent])).toBe(false)
+    expect(settlePendingRuntimeWorkAfterInterrupt([detachedSubagent])[0]).toMatchObject({
+      kind: 'tool',
+      status: 'running'
+    })
+  })
+
+  it('still settles foreground running subagents after interrupt', () => {
+    const foregroundSubagent: ChatBlock = {
+      kind: 'tool',
+      id: 'tool_delegate_foreground',
+      summary: 'delegate_task',
+      status: 'running',
+      toolKind: 'tool_call',
+      detail: JSON.stringify({
+        childId: 'child-foreground',
+        status: 'running',
+        detached: false
+      })
+    }
+
+    expect(hasPendingRuntimeWork(foregroundSubagent)).toBe(true)
+    expect(threadHasPendingRuntimeWork([{ kind: 'user', id: 'user-1', text: 'run foreground' }, foregroundSubagent])).toBe(true)
+    expect(settlePendingRuntimeWorkAfterInterrupt([foregroundSubagent])[0]).toMatchObject({
+      kind: 'tool',
+      status: 'error'
     })
   })
 })

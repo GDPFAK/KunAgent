@@ -604,13 +604,21 @@ export function createClawActions(options: CreateClawActionsOptions): Pick<
       }
     },
 
-    setClawChannelModel: async (channelId, model) => {
+    setClawChannelModel: async (channelId, model, providerId) => {
       if (typeof window.kunGui === 'undefined') return
       const normalized = normalizeClawComposerModel(model)
+      const normalizedProviderId = providerId?.trim() ?? ''
       const settings = await rendererRuntimeClient.getSettings()
       const now = new Date().toISOString()
       const channels = settings.claw.channels.map((channel) =>
-        channel.id === channelId ? { ...channel, model: normalized, updatedAt: now } : channel
+        channel.id === channelId
+          ? {
+              ...channel,
+              model: normalized,
+              ...(normalizedProviderId ? { providerId: normalizedProviderId } : {}),
+              updatedAt: now
+            }
+          : channel
       )
       const saved = await rendererRuntimeClient.setSettings({ claw: { channels } })
       emitRendererSettingsChanged(saved)

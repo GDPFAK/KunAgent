@@ -113,10 +113,6 @@ export function buildKunServeArgs(input: {
   host: string
   port: number
   dataDir: string
-  baseUrl?: string
-  modelProxyUrl?: string
-  endpointFormat?: string
-  model: string
   approvalPolicy: string
   sandboxMode: string
   tokenEconomyMode: boolean
@@ -130,11 +126,6 @@ export function buildKunServeArgs(input: {
     String(input.port),
     '--data-dir',
     input.dataDir,
-    ...(input.baseUrl ? ['--base-url', input.baseUrl] : []),
-    ...(input.modelProxyUrl ? ['--model-proxy-url', input.modelProxyUrl] : []),
-    ...(input.endpointFormat ? ['--endpoint-format', input.endpointFormat] : []),
-    '--model',
-    input.model,
     '--approval-policy',
     input.approvalPolicy,
     '--sandbox-mode',

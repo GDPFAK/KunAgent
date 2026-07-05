@@ -1,4 +1,6 @@
 import { EventEmitter } from 'node:events'
+import { join, resolve } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 const { accessMock, spawnMock } = vi.hoisted(() => ({
@@ -241,24 +243,27 @@ describe('LSP notifications', () => {
       throw new Error(`Unexpected spawn: ${command}`)
     })
 
-    const session = await acquireLspSession('/workspace/diagnostics', 'typescript')
+    const workspaceRoot = resolve('/workspace/diagnostics')
+    const filePath = join(workspaceRoot, 'app.ts')
+    const fileUri = pathToFileURL(filePath).href
+    const session = await acquireLspSession(workspaceRoot, 'typescript')
     emitJsonRpc(serverProcess as MockProcess, {
       jsonrpc: '2.0',
       method: 'textDocument/publishDiagnostics',
       params: {
-        uri: 'file:///workspace/diagnostics/app.ts',
+        uri: fileUri,
         diagnostics: [{ message: 'boom', severity: 1 }]
       }
     })
 
-    expect(session.diagnostics.get('file:///workspace/diagnostics/app.ts')).toEqual([
+    expect(session.diagnostics.get(fileUri)).toEqual([
       { message: 'boom', severity: 1 }
     ])
-    await expect(lspGetDiagnostics(session, '/workspace/diagnostics/app.ts')).resolves.toEqual({
+    await expect(lspGetDiagnostics(session, filePath)).resolves.toEqual({
       diagnostics: [{ message: 'boom', severity: 1 }],
       source: 'publishDiagnostics-cache'
     })
-    releaseLspSession('/workspace/diagnostics', 'typescript')
+    releaseLspSession(workspaceRoot, 'typescript')
   })
 
   it('logs server messages from window/logMessage notifications', async () => {

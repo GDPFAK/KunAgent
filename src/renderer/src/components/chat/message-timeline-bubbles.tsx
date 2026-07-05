@@ -9,8 +9,9 @@ import { getProvider } from '../../agent/registry'
 import { parseWritePromptForDisplay } from '../../write/quoted-selection'
 import { parseClawUserPromptForDisplay, type ClawUserPromptDisplay } from '@shared/app-settings'
 import { parseBackgroundShellCompletionNotice } from '@shared/background-shell-notice'
+import { parseBackgroundSubagentCompletionNotice } from '@shared/background-subagent-notice'
 import type { WriteExportFormat } from '@shared/write-export'
-import { isBackgroundShellNoticeBlock } from './message-timeline-turns'
+import { isBackgroundShellNoticeBlock, isBackgroundSubagentNoticeBlock } from './message-timeline-turns'
 import { openWorkspacePathInEditor } from '../../lib/open-workspace-path'
 import { DiffView } from '../DiffView'
 import { AssistantMarkdown } from './AssistantMarkdown'
@@ -119,6 +120,83 @@ function BackgroundShellNoticeBubble({
                 {t('backgroundShellNotice.outputFile', { defaultValue: 'Full output file' })}: {parsed.outputFile}
               </p>
             ) : null}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function BackgroundSubagentNoticeBubble({
+  block,
+  nested = false
+}: {
+  block: Extract<ChatBlock, { kind: 'user' }>
+  nested?: boolean
+}): ReactElement {
+  const { t } = useTranslation('common')
+  const parsed = useMemo(() => parseBackgroundSubagentCompletionNotice(block.text), [block.text])
+  const title =
+    block.meta?.displayText?.trim() ||
+    t('backgroundSubagentNotice.title', { defaultValue: 'Background subagent completed' })
+  const isFailed = parsed?.status === 'failed'
+  const statusTone = isFailed
+    ? 'border-orange-400/30 bg-orange-500/10 text-orange-800 dark:text-orange-200'
+    : 'border-emerald-500/25 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300'
+
+  return (
+    <div className={nested ? 'min-w-0' : 'flex w-full justify-start'}>
+      <div className="w-full max-w-[min(640px,calc(100vw-3rem))] rounded-[18px] border border-accent/25 bg-[linear-gradient(180deg,rgba(79,124,255,0.06),rgba(79,124,255,0.1))] px-3.5 py-3 text-ds-muted shadow-sm">
+        <div className="mb-2 flex flex-wrap items-center gap-2">
+          <span className="rounded-full border border-accent/25 bg-accent/10 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-accent">
+            {t('backgroundSubagentNotice.kindLabel', { defaultValue: 'Background callback' })}
+          </span>
+          {parsed ? (
+            <>
+              <span
+                className="inline-flex items-center gap-1 rounded-full border border-ds-border/80 bg-ds-card/70 px-2 py-0.5 font-mono text-[11px] text-ds-ink"
+                title={parsed.childId}
+              >
+                <span className="font-sans font-medium text-ds-muted">
+                  {t('backgroundSubagentNotice.childId', { defaultValue: 'Child' })}
+                </span>
+                <span>{parsed.childId}</span>
+              </span>
+              <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] ${statusTone}`}>
+                <span className="font-medium opacity-80">
+                  {t('backgroundSubagentNotice.status', { defaultValue: 'Status' })}
+                </span>
+                <span>{parsed.status}</span>
+              </span>
+            </>
+          ) : null}
+        </div>
+        <div className="min-w-0">
+          <p className="text-[13px] font-medium text-ds-ink">{title}</p>
+          {parsed?.label ? (
+            <dl className="mt-2 space-y-1.5 text-[12.5px] leading-5">
+              <div className="flex flex-wrap gap-x-2">
+                <dt className="font-medium text-ds-muted">
+                  {t('backgroundSubagentNotice.agent', { defaultValue: 'Agent' })}
+                </dt>
+                <dd className="min-w-0 break-words text-ds-ink">{parsed.label}</dd>
+              </div>
+            </dl>
+          ) : null}
+          {parsed?.summary ? (
+            <div className="mt-2.5">
+              <p className="text-[12px] font-medium text-ds-muted">
+                {t('backgroundSubagentNotice.summary', { defaultValue: 'Summary' })}
+              </p>
+              <div className="ds-markdown mt-1 rounded-[10px] border border-ds-border/70 bg-ds-card/70 px-2.5 py-2 text-[12.5px] leading-5 text-ds-ink">
+                <AssistantMarkdown text={parsed.summary} streaming={false} />
+              </div>
+            </div>
+          ) : null}
+          {parsed?.error ? (
+            <pre className="mt-2.5 overflow-auto whitespace-pre-wrap break-words rounded-[10px] border border-orange-400/30 bg-orange-500/10 px-2.5 py-2 font-mono text-[11.5px] leading-5 text-orange-900 dark:text-orange-100">
+              {parsed.error}
+            </pre>
+          ) : null}
         </div>
       </div>
     </div>
@@ -1469,6 +1547,9 @@ function MessageBubbleImpl({
   const resolveApproval = useChatStore((s) => s.resolveApproval)
   if (block.kind === 'user' && isBackgroundShellNoticeBlock(block)) {
     return <BackgroundShellNoticeBubble block={block} nested={nested} />
+  }
+  if (block.kind === 'user' && isBackgroundSubagentNoticeBlock(block)) {
+    return <BackgroundSubagentNoticeBubble block={block} nested={nested} />
   }
   if (block.kind === 'user') {
     return <UserMessageBubble block={block} />

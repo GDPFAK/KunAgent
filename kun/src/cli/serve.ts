@@ -107,6 +107,7 @@ export function parseServeOptions(
           : env.KUN_ENDPOINT_FORMAT as ServeOptions['endpointFormat'] | undefined ??
             configServe.endpointFormat ??
             DEFAULT_SERVE_OPTIONS.endpointFormat,
+    retry: configServe.retry ?? DEFAULT_SERVE_OPTIONS.retry,
     model:
       typeof raw.model === 'string'
         ? raw.model

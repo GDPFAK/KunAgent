@@ -2163,10 +2163,11 @@ describe('CompatModelClient', () => {
     expect(chunks[0].kind).toBe('error')
     expect(chunks[0]).toMatchObject({
       kind: 'error',
-      message: `model request failed with status 400: ${body}`,
+      message: expect.stringContaining('model request failed with status 400: {"error":{"code":"400","message":"Not supported model mimo-v2.5-pro-ultraspeed'),
       code: 'http_400'
     })
-    expect(JSON.stringify(chunks[0])).toContain(providerMessage)
+    expect(JSON.stringify(chunks[0])).toContain('...')
+    expect(JSON.stringify(chunks[0])).not.toContain(providerMessage)
   })
 
   it('adds a proxy hint when a proxied model request fails before receiving a response', async () => {
@@ -2428,6 +2429,141 @@ describe('CompatModelClient', () => {
     expect(sentBodies[1]).not.toHaveProperty('stream_options')
     expect(text).toBe('retried')
     expect(usage && usage.kind === 'usage' ? usage.usage.totalTokens : 0).toBe(7)
+  })
+
+  it('retries configured HTTP statuses before streaming starts', async () => {
+    const statuses = [429, 200]
+    const fetchImpl: typeof fetch = async () => {
+      const status = statuses.shift() ?? 200
+      if (status !== 200) return new Response('rate limited', { status })
+      return new Response(
+        'data: {"choices":[{"delta":{"content":"retried"}}]}\n\ndata: [DONE]\n\n',
+        { status: 200, headers: { 'content-type': 'text/event-stream' } }
+      )
+    }
+    const client = new CompatModelClient({
+      baseUrl: 'https://example.com/beta',
+      apiKey: 'k',
+      model: 'deepseek-chat',
+      fetchImpl,
+      retry: {
+        maxAttempts: 1,
+        initialDelayMs: 0,
+        httpStatusCodes: [429]
+      }
+    })
+    const chunks = []
+    for await (const chunk of client.stream(buildRequest(new AbortController().signal))) {
+      chunks.push(chunk)
+    }
+
+    const text = chunks
+      .filter((c) => c.kind === 'assistant_text_delta')
+      .map((c) => (c as { text: string }).text)
+      .join('')
+    expect(text).toBe('retried')
+    expect(statuses).toHaveLength(0)
+  })
+
+  it('uses Retry-After before retrying configured HTTP statuses', async () => {
+    vi.useFakeTimers()
+    try {
+      const fetchImpl = vi.fn<typeof fetch>(async () => {
+        if (fetchImpl.mock.calls.length === 1) {
+          return new Response('rate limited', { status: 429, headers: { 'retry-after': '2' } })
+        }
+        return new Response('{"choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop","index":0}]}', {
+          status: 200,
+          headers: { 'content-type': 'application/json' }
+        })
+      })
+      const client = new CompatModelClient({
+        baseUrl: 'https://example.com/beta',
+        apiKey: 'k',
+        model: 'deepseek-chat',
+        fetchImpl,
+        nonStreaming: true,
+        retry: {
+          maxAttempts: 1,
+          initialDelayMs: 0,
+          httpStatusCodes: [429]
+        }
+      })
+      const chunksPromise = (async () => {
+        const chunks = []
+        for await (const chunk of client.stream(buildRequest(new AbortController().signal))) {
+          chunks.push(chunk)
+        }
+        return chunks
+      })()
+
+      await vi.waitFor(() => expect(fetchImpl).toHaveBeenCalledTimes(1))
+      await vi.advanceTimersByTimeAsync(1_999)
+      expect(fetchImpl).toHaveBeenCalledTimes(1)
+      await vi.advanceTimersByTimeAsync(1)
+      const chunks = await chunksPromise
+
+      expect(fetchImpl).toHaveBeenCalledTimes(2)
+      expect(chunks.some((chunk) => chunk.kind === 'assistant_text_delta')).toBe(true)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('uses exponential backoff when Retry-After is absent', async () => {
+    vi.useFakeTimers()
+    const randomSpy = vi.spyOn(Math, 'random').mockReturnValue(0.5)
+    try {
+      const fetchImpl = vi.fn<typeof fetch>(async () => {
+        if (fetchImpl.mock.calls.length <= 2) {
+          return new Response('rate limited', { status: 429 })
+        }
+        return new Response('{"choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop","index":0}]}', {
+          status: 200,
+          headers: { 'content-type': 'application/json' }
+        })
+      })
+      const client = new CompatModelClient({
+        baseUrl: 'https://example.com/beta',
+        apiKey: 'k',
+        model: 'deepseek-chat',
+        fetchImpl,
+        nonStreaming: true,
+        retry: {
+          maxAttempts: 2,
+          initialDelayMs: 3000,
+          httpStatusCodes: [429]
+        }
+      })
+      const chunksPromise = (async () => {
+        const chunks: ModelStreamChunk[] = []
+        for await (const chunk of client.stream(buildRequest(new AbortController().signal))) {
+          chunks.push(chunk)
+        }
+        return chunks
+      })()
+
+      await vi.advanceTimersByTimeAsync(0)
+      expect(fetchImpl).toHaveBeenCalledTimes(1)
+      await vi.advanceTimersByTimeAsync(2999)
+      expect(fetchImpl).toHaveBeenCalledTimes(1)
+      await vi.advanceTimersByTimeAsync(1)
+      expect(fetchImpl).toHaveBeenCalledTimes(2)
+      await vi.advanceTimersByTimeAsync(5999)
+      expect(fetchImpl).toHaveBeenCalledTimes(2)
+      await vi.advanceTimersByTimeAsync(1)
+      const chunks = await chunksPromise
+
+      expect(fetchImpl).toHaveBeenCalledTimes(3)
+      expect(chunks.filter((chunk) => chunk.kind === 'retrying')).toEqual([
+        { kind: 'retrying', status: 429, attempt: 1, maxAttempts: 2, delayMs: 3000 },
+        { kind: 'retrying', status: 429, attempt: 2, maxAttempts: 2, delayMs: 6000 }
+      ])
+      expect(chunks.some((chunk) => chunk.kind === 'assistant_text_delta')).toBe(true)
+    } finally {
+      randomSpy.mockRestore()
+      vi.useRealTimers()
+    }
   })
 
   it('merges streamed tool-call deltas by index when the provider id arrives later', async () => {

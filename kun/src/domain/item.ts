@@ -1,4 +1,4 @@
-import type { TurnItem } from '../contracts/items.js'
+import type { TurnItem, UserMessageSource } from '../contracts/items.js'
 import type { ReviewOutput, ReviewTarget } from '../contracts/review.js'
 
 export type ItemEntity = TurnItem
@@ -9,7 +9,7 @@ export function makeUserItem(input: {
   threadId: string
   text: string
   displayText?: string
-  messageSource?: 'background_shell'
+  messageSource?: UserMessageSource
   attachmentIds?: string[]
   fileReferences?: Array<{ path: string; relativePath: string; name: string; kind?: 'file' | 'directory' }>
   workspaceCheckpointId?: string

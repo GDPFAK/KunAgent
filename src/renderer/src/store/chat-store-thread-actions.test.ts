@@ -35,6 +35,7 @@ function buildHarness(): {
     blocks: [],
     busy: true,
     clawChannels: [],
+    codeWorkspaceRoots: [],
     composerModel: '',
     composerProviderId: '',
     currentTurnId: null,
@@ -153,7 +154,7 @@ describe('chat-store-thread-actions queued messages', () => {
     })
   })
 
-  it('sends the selected composer provider as a turn override without changing global settings', async () => {
+  it('sends the selected composer provider with the turn without switching the global runtime provider', async () => {
     const provider = {
       connect: vi.fn(async () => undefined),
       sendUserMessage: vi.fn(async () => ({
@@ -231,7 +232,7 @@ describe('chat-store-thread-actions queued messages', () => {
     )
   })
 
-  it('sends an override provider from the write route without changing global settings', async () => {
+  it('sends an override provider from the write route without switching the global runtime provider', async () => {
     const provider = {
       connect: vi.fn(async () => undefined),
       sendUserMessage: vi.fn(async () => ({
@@ -274,6 +275,57 @@ describe('chat-store-thread-actions queued messages', () => {
     expect(provider.sendUserMessage).toHaveBeenCalledWith(
       'thr_existing',
       'make a prototype',
+      expect.objectContaining({ model: 'MiniMax-M3', providerId: 'minimax-token-plan' })
+    )
+  })
+
+  it('snapshots the selected composer provider when creating the first thread', async () => {
+    const provider = {
+      connect: vi.fn(async () => undefined),
+      createThread: vi.fn(async () => ({
+        id: 'thr_new',
+        title: 'hello',
+        updatedAt: '2026-06-09T00:00:00.000Z',
+        model: 'MiniMax-M3',
+        providerId: 'minimax-token-plan',
+        mode: 'agent',
+        workspace: '/workspace/deepseek-gui',
+        status: 'idle'
+      })),
+      sendUserMessage: vi.fn(async () => ({
+        threadId: 'thr_new',
+        turnId: 'turn_1',
+        userMessageItemId: 'user_1'
+      })),
+      subscribeThreadEvents: vi.fn(async () => undefined)
+    }
+    registryMock.getProvider.mockReturnValue(provider)
+    vi.stubGlobal('window', {
+      kunGui: {
+        getSettings: vi.fn(async () => ({
+          workspaceRoot: '/workspace/deepseek-gui',
+          agents: { kun: { providerId: 'deepseek', model: 'deepseek-v4-pro' } },
+          codePromptPrefix: ''
+        })),
+        logError: vi.fn(async () => undefined)
+      }
+    })
+    const { actions, state } = buildHarness()
+    state.activeThreadId = null
+    state.threads = []
+    state.busy = false
+    state.composerModel = 'MiniMax-M3'
+    state.composerProviderId = 'minimax-token-plan'
+
+    await expect(actions.sendMessage('hello', 'agent')).resolves.toBe(true)
+
+    expect(provider.createThread).toHaveBeenCalledWith(expect.objectContaining({
+      model: 'MiniMax-M3',
+      providerId: 'minimax-token-plan'
+    }))
+    expect(provider.sendUserMessage).toHaveBeenCalledWith(
+      'thr_new',
+      'hello',
       expect.objectContaining({ model: 'MiniMax-M3', providerId: 'minimax-token-plan' })
     )
   })

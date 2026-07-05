@@ -734,7 +734,8 @@ describe('KunRuntimeProvider', () => {
     )
   })
 
-  it('lists, disables, and deletes memory records through Kun endpoints', async () => {
+  it('lists, toggles, and deletes memory records through Kun endpoints', async () => {
+    const memoryPatches: string[] = []
     const runtimeRequest = vi.fn(async (path: string, method?: string, body?: string) => {
       if (path === '/v1/memory?workspace=%2Ftmp%2Fworkspace&include_deleted=false') {
         return {
@@ -755,7 +756,8 @@ describe('KunRuntimeProvider', () => {
         }
       }
       if (path === '/v1/memory/mem_1?workspace=%2Ftmp%2Fworkspace' && method === 'PATCH') {
-        expect(body).toBe(JSON.stringify({ disabled: true }))
+        memoryPatches.push(body ?? '')
+        const disabled = JSON.parse(body ?? '{}').disabled === true
         return {
           ok: true,
           status: 200,
@@ -764,9 +766,9 @@ describe('KunRuntimeProvider', () => {
               id: 'mem_1',
               content: 'Use pnpm',
               scope: 'workspace',
-              disabledAt: 't1',
+              ...(disabled ? { disabledAt: 't1' } : {}),
               createdAt: 't0',
-              updatedAt: 't1'
+              updatedAt: disabled ? 't1' : 't2'
             }
           })
         }
@@ -797,6 +799,14 @@ describe('KunRuntimeProvider', () => {
       id: 'mem_1',
       disabledAt: 't1'
     })
+    await expect(provider.updateMemory('mem_1', { disabled: false }, { workspace: '/tmp/workspace' })).resolves.toMatchObject({
+      id: 'mem_1',
+      updatedAt: 't2'
+    })
+    expect(memoryPatches).toEqual([
+      JSON.stringify({ disabled: true }),
+      JSON.stringify({ disabled: false })
+    ])
     await expect(provider.deleteMemory('mem_1', { workspace: '/tmp/workspace' })).resolves.toMatchObject({
       id: 'mem_1',
       deletedAt: 't2'

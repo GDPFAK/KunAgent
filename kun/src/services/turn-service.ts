@@ -8,7 +8,7 @@ import type {
   Turn,
   TurnStatus
 } from '../contracts/turns.js'
-import type { TurnItem } from '../contracts/items.js'
+import type { TurnItem, UserMessageSource } from '../contracts/items.js'
 import type { RuntimeErrorSeverity } from '../contracts/errors.js'
 import type { SessionStore } from '../ports/session-store.js'
 import type { ThreadStore } from '../ports/thread-store.js'
@@ -89,6 +89,7 @@ export class TurnService {
       guiDesignCanvas: input.request.guiDesignCanvas,
       mode: input.request.mode,
       disableUserInput: input.request.disableUserInput,
+      imContext: input.request.imContext,
       workspaceCheckpointId: input.request.workspaceCheckpointId
     })
     const userItem = makeUserItem({
@@ -171,7 +172,7 @@ export class TurnService {
     turnId: string
     text: string
     displayText?: string
-    messageSource?: 'background_shell'
+    messageSource?: UserMessageSource
   }): Promise<void> {
     this.deps.steering.enqueue(input.turnId, {
       text: input.text,

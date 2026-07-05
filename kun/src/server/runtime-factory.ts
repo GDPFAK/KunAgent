@@ -59,6 +59,7 @@ import {
   type QualityConfig,
   type RolesConfig,
   type RuntimeTuningConfig,
+  type ModelRequestRetryConfig,
   type ServeProviderConfig,
   type StorageConfig,
   type ToolOutputLimitsConfig
@@ -109,6 +110,7 @@ export type KunServeRuntimeOptions = {
   baseUrl: string
   modelProxyUrl?: string
   endpointFormat?: ModelEndpointFormat
+  retry?: ModelRequestRetryConfig
   /**
    * Extra HTTP headers merged into every default-client request (last, so
    * they win). For providers that need more than a Bearer key — e.g. Codex
@@ -191,7 +193,18 @@ export async function createKunServeRuntime(
       'system: keep the stable Kun prefix byte-stable for prompt-cache reuse'
     ]
   })
-  const threadService = new ThreadService({ threadStore, sessionStore, events, ids, nowIso })
+  const threadService = new ThreadService({
+    threadStore,
+    sessionStore,
+    events,
+    ids,
+    nowIso,
+    onDeleted: (threadId) => {
+      usageService.reset(threadId)
+      events.clearThread(threadId)
+      eventBus.clearThread(threadId)
+    }
+  })
   const artifactStore = new FileArtifactStore(join(activeOptions.dataDir, 'artifacts'), nowIso)
   let modelProfiles = modelContextProfilesFromConfig({
     contextCompaction: activeOptions.contextCompaction,
@@ -366,6 +379,8 @@ export async function createKunServeRuntime(
 	        config: mergeBuiltinSubagentProfiles(activeOptions.capabilities.subagents),
 	        store: new FileDelegationStore(join(activeOptions.dataDir, 'child-runs')),
 	        events,
+	        threadStore,
+	        turns: turnService,
 	        nowIso,
 	        executor: createChildAgentExecutor({
 	          model: modelClient,
@@ -579,6 +594,9 @@ export async function createKunServeRuntime(
 	  }
 	  const loop = new AgentLoop(loopOptions)
 	  backgroundShellRuntime.bindAgentLoop({
+	    runTurn: (threadId, turnId) => loop.runTurn(threadId, turnId)
+	  })
+	  delegationRuntime?.bindAgentLoop({
 	    runTurn: (threadId, turnId) => loop.runTurn(threadId, turnId)
 	  })
 	  const startedAt = activeOptions.startedAt ?? nowIso()
@@ -978,6 +996,7 @@ function buildModelClientRouterInput(
     apiKey: options.apiKey,
     modelProxyUrl: options.modelProxyUrl,
     endpointFormat: options.endpointFormat ?? DEFAULT_MODEL_ENDPOINT_FORMAT,
+    retry: options.retry,
     model: options.model,
     modelCapabilities,
     headers: options.headers,
@@ -995,6 +1014,7 @@ function buildModelClientRouterInput(
         apiKey: provider.apiKey,
         modelProxyUrl: provider.modelProxyUrl ?? options.modelProxyUrl,
         endpointFormat: provider.endpointFormat ?? options.endpointFormat ?? DEFAULT_MODEL_ENDPOINT_FORMAT,
+        retry: provider.retry ?? options.retry,
         model: options.model,
         modelCapabilities,
         headers: provider.headers,
@@ -1030,6 +1050,7 @@ function mergeRuntimeConfigApplyOptions(
     baseUrl: serve.baseUrl ?? current.baseUrl,
     modelProxyUrl: serve.modelProxyUrl ?? current.modelProxyUrl,
     endpointFormat: serve.endpointFormat ?? current.endpointFormat,
+    retry: serve.retry ?? current.retry,
     headers: serve.headers ?? current.headers,
     providers: serve.providers ?? current.providers,
     model: serve.model ?? current.model,

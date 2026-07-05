@@ -107,4 +107,24 @@ describe('FileSessionStore', () => {
     expect(items.map((entry) => entry.id)).toEqual(['a', 'c', 'b'])
     expect(items.find((entry) => entry.id === 'b')).toMatchObject({ text: 'B-updated' })
   })
+
+  it('forgets cached items for a deleted thread', async () => {
+    const sessionStore = new FileSessionStore({ dataDir })
+    await sessionStore.appendItem('thr_deleted', {
+      id: 'item_1',
+      kind: 'assistant_text',
+      turnId: 'turn_1',
+      threadId: 'thr_deleted',
+      role: 'assistant',
+      status: 'completed',
+      createdAt: '2026-01-01T00:00:00.000Z',
+      text: 'cached'
+    })
+    expect(await sessionStore.loadItems('thr_deleted')).toHaveLength(1)
+    await rm(join(dataDir, 'threads', 'thr_deleted'), { recursive: true, force: true })
+
+    sessionStore.clearThreadMemory('thr_deleted')
+
+    expect(await sessionStore.loadItems('thr_deleted')).toEqual([])
+  })
 })

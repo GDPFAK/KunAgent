@@ -291,6 +291,50 @@ describe('Image gen tool provider', () => {
     })
   })
 
+  it('posts Codex subscription image edits with input images and edit action', async () => {
+    const requests: Array<{ body: string }> = []
+    const resultBase64 = png(8, 8).toString('base64')
+    vi.stubGlobal('fetch', vi.fn(async (_url: string | URL, init?: RequestInit) => {
+      requests.push({ body: String(init?.body) })
+      return new Response([
+        `data: ${JSON.stringify({
+          type: 'response.output_item.done',
+          item: { type: 'image_generation_call', result: resultBase64 }
+        })}`,
+        'data: [DONE]'
+      ].join('\n\n'), {
+        status: 200,
+        headers: { 'content-type': 'text/event-stream' }
+      })
+    }))
+    const client = new CodexResponsesImageClient('https://chatgpt.com/backend-api/codex', 'codex-access')
+
+    const image = await client.edit({
+      prompt: 'put basketball shoes on the character',
+      model: 'gpt-image-2',
+      images: [{ name: 'annotated.png', mimeType: 'image/png', data: png(16, 16) }],
+      timeoutMs: 1_000,
+      signal: new AbortController().signal
+    })
+
+    expect(image).toMatchObject({ mimeType: 'image/png' })
+    expect(requests).toHaveLength(1)
+    const body = JSON.parse(requests[0].body)
+    expect(body.input[0].content).toEqual([
+      { type: 'input_text', text: 'put basketball shoes on the character' },
+      {
+        type: 'input_image',
+        image_url: expect.stringMatching(/^data:image\/png;base64,/),
+        detail: 'auto'
+      }
+    ])
+    expect(body.tools[0]).toMatchObject({
+      type: 'image_generation',
+      action: 'edit',
+      model: 'gpt-image-2'
+    })
+  })
+
   it('uses the latest Codex partial image when the final image item is absent', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response([
       `data: ${JSON.stringify({
@@ -607,9 +651,9 @@ describe('Image gen tool provider', () => {
 
   it('allowlists only real-edit protocols in protocolSupportsImageEdit', () => {
     expect(protocolSupportsImageEdit('openai-images')).toBe(true)
+    expect(protocolSupportsImageEdit('codex-responses-image')).toBe(true)
     expect(protocolSupportsImageEdit(undefined)).toBe(true)
     expect(protocolSupportsImageEdit('minimax-image')).toBe(false)
-    expect(protocolSupportsImageEdit('codex-responses-image')).toBe(false)
   })
 
   it('returns edits_unsupported BEFORE any network call when references are passed on a non-edit protocol (MiniMax)', async () => {
@@ -646,6 +690,15 @@ describe('Image gen tool provider', () => {
     const openaiTool = openaiTools.find((tool) => tool.name === 'generate_image')!
     expect(openaiTool.description).toContain('image-to-image')
     expect((openaiTool.inputSchema.properties as Record<string, unknown>)).toHaveProperty('reference_image_paths')
+
+    const codexTools = await new LocalToolHost({
+      registry: new CapabilityRegistry(
+        buildImageGenToolProviders(imageGenConfig({ protocol: 'codex-responses-image' })).providers
+      )
+    }).listTools(buildContext())
+    const codexTool = codexTools.find((tool) => tool.name === 'generate_image')!
+    expect(codexTool.description).toContain('image-to-image')
+    expect((codexTool.inputSchema.properties as Record<string, unknown>)).toHaveProperty('reference_image_paths')
   })
 
   it('rejects reference paths that escape the workspace or are not images', async () => {
@@ -704,7 +757,7 @@ describe('Image gen tool provider', () => {
       expect(result.item.output).toMatchObject({
         error: {
           code: 'edits_unsupported',
-          message: expect.stringContaining('retry generate_image without reference_image_paths')
+          message: expect.stringContaining('reference image edits; retry generate_image without reference_image_paths')
         }
       })
     }

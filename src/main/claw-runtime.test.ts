@@ -74,6 +74,14 @@ function buildSettings(): AppSettingsV1 {
   }
 }
 
+function expectImRuntimePrompt(prompt: string | undefined, userText: string): void {
+  expect(prompt).toContain('<kun_im_context>')
+  expect(prompt).toContain('<interactive_gui_input_available>false</interactive_gui_input_available>')
+  expect(prompt).toContain('<user_message><![CDATA[')
+  expect(prompt).toContain(userText)
+  expect(prompt).toContain(']]></user_message>')
+}
+
 function buildConversation(overrides: Partial<ClawImConversationV1> = {}): ClawImConversationV1 {
   return {
     id: 'conv_1',
@@ -161,6 +169,961 @@ function mutableSettingsStore(initialSettings: AppSettingsV1): {
 }
 
 describe('ClawRuntime', () => {
+  it('returns help and starts a new topic for IM commands', async () => {
+    const settings = buildSettings()
+    settings.claw.im.provider = 'weixin'
+    settings.claw.channels = [
+      buildChannel({
+        provider: 'weixin',
+        label: 'WeChat',
+        threadId: 'thr_old',
+        conversations: [
+          buildConversation({ localThreadId: 'thr_old' }),
+          buildConversation({ id: 'conv_2', chatId: 'oc_chat_b', localThreadId: 'thr_new' })
+        ]
+      })
+    ]
+    const { current, store } = mutableSettingsStore(settings)
+    const runtime = createClawRuntime({
+      store: store as never,
+      runtimeRequest: vi.fn() as never,
+      logError: () => undefined
+    })
+    const handle = (runtime as unknown as {
+      handleIncomingImCommand: (
+        settingsArg: AppSettingsV1,
+        input: {
+          text: string
+          channel: ClawImChannelV1
+          conversation: ClawImConversationV1
+        }
+      ) => Promise<string | null>
+    }).handleIncomingImCommand.bind(runtime)
+
+    const help = await handle(settings, {
+      text: '/help',
+      channel: settings.claw.channels[0],
+      conversation: settings.claw.channels[0].conversations[0]
+    })
+    expect(help).toContain('/list-skills')
+    expect(help).toContain('/list-mcp')
+    expect(help).toContain('/list-goal')
+    expect(help).toContain('/goal')
+    expect(help).toContain('/stop')
+    expect(help).toContain('/new')
+
+    const reply = await handle(settings, {
+      text: '/new',
+      channel: settings.claw.channels[0],
+      conversation: settings.claw.channels[0].conversations[0]
+    })
+    expect(reply).toContain('new topic')
+    expect(current().claw.channels[0].threadId).toBe('')
+    expect(current().claw.channels[0].conversations[0].localThreadId).toBe('')
+  })
+
+  it('lists available Kun skills for an incoming IM command', async () => {
+    const settings = buildSettings()
+    const { store } = mutableSettingsStore(settings)
+    const runtimeRequest = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      body: JSON.stringify({
+        enabled: true,
+        skills: [
+          {
+            id: 'documents',
+            name: 'Documents',
+            description: 'Create and edit documents',
+            source: 'global'
+          }
+        ]
+      })
+    }))
+    const runtime = createClawRuntime({
+      store: store as never,
+      runtimeRequest: runtimeRequest as never,
+      logError: () => undefined
+    })
+
+    const reply = await (runtime as unknown as {
+      handleIncomingImCommand: (
+        settingsArg: AppSettingsV1,
+        input: { text: string }
+      ) => Promise<string | null>
+    }).handleIncomingImCommand(settings, { text: '/list-skills' })
+
+    expect(runtimeRequest).toHaveBeenCalledWith(settings, '/v1/skills', { method: 'GET' })
+    expect(reply).toContain('documents')
+    expect(reply).toContain('Documents')
+  })
+
+  it('lists Kun MCP servers for an incoming IM command', async () => {
+    const settings = buildSettings()
+    const { store } = mutableSettingsStore(settings)
+    const runtimeRequest = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      body: JSON.stringify({
+        mcpServers: [
+          {
+            id: 'github',
+            enabled: true,
+            available: true,
+            status: 'connected',
+            transport: 'stdio',
+            toolCount: 12
+          },
+          {
+            id: 'docs',
+            enabled: true,
+            available: false,
+            status: 'error',
+            transport: 'http',
+            toolCount: 0,
+            lastError: 'connect failed'
+          }
+        ]
+      })
+    }))
+    const runtime = createClawRuntime({
+      store: store as never,
+      runtimeRequest: runtimeRequest as never,
+      logError: () => undefined
+    })
+
+    const reply = await (runtime as unknown as {
+      handleIncomingImCommand: (
+        settingsArg: AppSettingsV1,
+        input: { text: string }
+      ) => Promise<string | null>
+    }).handleIncomingImCommand(settings, { text: '/list-mcp' })
+
+    expect(runtimeRequest).toHaveBeenCalledWith(settings, '/v1/runtime/tools', { method: 'GET' })
+    expect(reply).toContain('github')
+    expect(reply).toContain('12 tools')
+    expect(reply).toContain('docs')
+    expect(reply).toContain('connect failed')
+  })
+
+  it('shows the current Kun thread workspace for an incoming IM command', async () => {
+    const settings = buildSettings()
+    settings.claw.channels = [
+      buildChannel({
+        threadId: 'thr_workspace',
+        conversations: [buildConversation({ localThreadId: 'thr_workspace' })]
+      })
+    ]
+    const { store } = mutableSettingsStore(settings)
+    const runtimeRequest = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      body: JSON.stringify({
+        id: 'thr_workspace',
+        workspace: '/tmp/workspace/conversations/oc_chat_a',
+        turns: []
+      })
+    }))
+    const runtime = createClawRuntime({
+      store: store as never,
+      runtimeRequest: runtimeRequest as never,
+      logError: () => undefined
+    })
+
+    const reply = await (runtime as unknown as {
+      handleIncomingImCommand: (
+        settingsArg: AppSettingsV1,
+        input: {
+          text: string
+          channel: ClawImChannelV1
+          conversation: ClawImConversationV1
+        }
+      ) => Promise<string | null>
+    }).handleIncomingImCommand(settings, {
+      text: '/pwd',
+      channel: settings.claw.channels[0],
+      conversation: settings.claw.channels[0].conversations[0]
+    })
+
+    expect(runtimeRequest).toHaveBeenCalledWith(settings, '/v1/threads/thr_workspace', { method: 'GET' })
+    expect(reply).toContain('/tmp/workspace/conversations/oc_chat_a')
+  })
+
+  it('does not reuse the channel thread for a different incoming IM conversation', async () => {
+    const settings = buildSettings()
+    settings.claw.channels = [
+      buildChannel({
+        threadId: 'thr_old_chat',
+        conversations: [buildConversation({ chatId: 'oc_chat_a', localThreadId: 'thr_old_chat' })]
+      })
+    ]
+    const { store } = mutableSettingsStore(settings)
+    const runtime = createClawRuntime({
+      store: store as never,
+      runtimeRequest: vi.fn() as never,
+      logError: () => undefined
+    })
+
+    const reply = await (runtime as unknown as {
+      handleIncomingImCommand: (
+        settingsArg: AppSettingsV1,
+        input: {
+          text: string
+          channel: ClawImChannelV1
+          remoteSession: Pick<ClawImConversationV1, 'chatId' | 'senderId' | 'senderName'> & {
+            messageId: string
+            threadId: string
+          }
+        }
+      ) => Promise<string | null>
+    }).handleIncomingImCommand(settings, {
+      text: '/current',
+      channel: settings.claw.channels[0],
+      remoteSession: {
+        chatId: 'oc_chat_b',
+        messageId: 'om_current',
+        threadId: '',
+        senderId: 'ou_2',
+        senderName: 'Bob'
+      }
+    })
+
+    expect(reply).toContain('[Kun]')
+    expect(reply).toContain('not connected')
+  })
+
+  it('shows current Kun thread token usage with provider and model for an incoming IM command', async () => {
+    const settings = buildSettings()
+    settings.provider.providers = [buildModelProvider()]
+    settings.claw.channels = [
+      buildChannel({
+        providerId: 'minimax',
+        model: 'MiniMax-M3',
+        threadId: 'thr_usage',
+        conversations: [buildConversation({ localThreadId: 'thr_usage' })]
+      })
+    ]
+    const { store } = mutableSettingsStore(settings)
+    const runtimeRequest = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      body: JSON.stringify({
+        group_by: 'thread',
+        buckets: [
+          {
+            thread_id: 'thr_usage',
+            input_tokens: 123,
+            output_tokens: 45,
+            reasoning_tokens: 0,
+            cached_tokens: 20,
+            cache_miss_tokens: 105,
+            total_tokens: 168,
+            cost_usd: 0.00123,
+            cost_cny: 0.0089,
+            turns: 3,
+            last_turn_cache_hit_rate: null,
+            last_turn_cacheable_hit_rate: null,
+            last_turn_total_input_hit_rate: null,
+            last_cache_miss_reasons: [],
+            last_cache_suggestions: []
+          }
+        ],
+        totals: {
+          input_tokens: 123,
+          output_tokens: 45,
+          reasoning_tokens: 0,
+          cached_tokens: 20,
+          cache_miss_tokens: 105,
+          total_tokens: 168,
+          cost_usd: 0.00123,
+          cost_cny: 0.0089,
+          cache_savings_usd: 0,
+          cache_savings_cny: 0,
+          token_economy_savings_tokens: 0,
+          token_economy_savings_usd: 0,
+          token_economy_savings_cny: 0,
+          turns: 3,
+          thread_count: 1,
+          cache_hit_rate: null
+        }
+      })
+    }))
+    const runtime = createClawRuntime({
+      store: store as never,
+      runtimeRequest: runtimeRequest as never,
+      logError: () => undefined
+    })
+
+    const reply = await (runtime as unknown as {
+      handleIncomingImCommand: (
+        settingsArg: AppSettingsV1,
+        input: {
+          text: string
+          channel: ClawImChannelV1
+          conversation: ClawImConversationV1
+        }
+      ) => Promise<string | null>
+    }).handleIncomingImCommand(settings, {
+      text: '/usage',
+      channel: settings.claw.channels[0],
+      conversation: settings.claw.channels[0].conversations[0]
+    })
+
+    expect(runtimeRequest).toHaveBeenCalledWith(
+      settings,
+      '/v1/usage?group_by=thread&thread_id=thr_usage',
+      { method: 'GET' }
+    )
+    expect(reply).toContain('minimax')
+    expect(reply).toContain('MiniMax-M3')
+    expect(reply).toContain('total 168')
+    expect(reply).toContain('input 123')
+    expect(reply).toContain('output 45')
+  })
+
+  it('returns a Kun-prefixed concrete error when an IM runtime command fails', async () => {
+    const settings = buildSettings()
+    const { store } = mutableSettingsStore(settings)
+    const runtimeRequest = vi.fn(async () => ({
+      ok: false,
+      status: 503,
+      body: JSON.stringify({ message: 'runtime is offline' })
+    }))
+    const runtime = createClawRuntime({
+      store: store as never,
+      runtimeRequest: runtimeRequest as never,
+      logError: () => undefined
+    })
+
+    const reply = await (runtime as unknown as {
+      handleIncomingImCommandSafely: (
+        settingsArg: AppSettingsV1,
+        input: { text: string }
+      ) => Promise<string | null>
+    }).handleIncomingImCommandSafely(settings, { text: '/list-threads' })
+
+    expect(reply).toBe('[Kun] runtime is offline')
+  })
+
+  it('prefixes successful IM slash command replies as Kun system messages', async () => {
+    const settings = buildSettings()
+    const { store } = mutableSettingsStore(settings)
+    const runtime = createClawRuntime({
+      store: store as never,
+      runtimeRequest: vi.fn() as never,
+      logError: () => undefined
+    })
+
+    const reply = await (runtime as unknown as {
+      handleIncomingImCommandSafely: (
+        settingsArg: AppSettingsV1,
+        input: { text: string }
+      ) => Promise<string | null>
+    }).handleIncomingImCommandSafely(settings, { text: '/help' })
+
+    expect(reply).toMatch(/^\[Kun\] /)
+    expect(reply).toContain('/list-threads')
+  })
+
+  it('shows the current Kun thread goal for an IM list-goal command', async () => {
+    const settings = buildSettings()
+    settings.claw.channels = [
+      buildChannel({
+        threadId: 'thr_goal',
+        conversations: [buildConversation({ localThreadId: 'thr_goal' })]
+      })
+    ]
+    const { store } = mutableSettingsStore(settings)
+    const runtimeRequest = vi.fn(async (_settingsArg: AppSettingsV1, path: string, init: { method?: string; body?: string }) => {
+      if (path === '/v1/threads/thr_goal/goal' && init.method === 'GET') {
+        return {
+          ok: true,
+          status: 200,
+          body: JSON.stringify({
+            goal: {
+              threadId: 'thr_goal',
+              objective: 'Read document A',
+              status: 'active',
+              tokensUsed: 12
+            }
+          })
+        }
+      }
+      if (path === '/v1/threads/thr_goal/goal' && init.method === 'POST') {
+        return {
+          ok: true,
+          status: 200,
+          body: JSON.stringify({
+            goal: {
+              threadId: 'thr_goal',
+              objective: JSON.parse(init.body ?? '{}').objective,
+              status: 'active',
+              tokensUsed: 0
+            }
+          })
+        }
+      }
+      return { ok: false, status: 404, body: '{}' }
+    })
+    const runtime = createClawRuntime({
+      store: store as never,
+      runtimeRequest: runtimeRequest as never,
+      logError: () => undefined
+    })
+    const handle = (runtime as unknown as {
+      handleIncomingImCommand: (
+        settingsArg: AppSettingsV1,
+        input: {
+          text: string
+          channel: ClawImChannelV1
+          conversation: ClawImConversationV1
+        }
+      ) => Promise<string | null>
+    }).handleIncomingImCommand.bind(runtime)
+
+    const shown = await handle(settings, {
+      text: '/list-goal',
+      channel: settings.claw.channels[0],
+      conversation: settings.claw.channels[0].conversations[0]
+    })
+    expect(shown).toContain('Read document A')
+  })
+
+  it('rejects empty and duplicate Kun thread goals for IM commands', async () => {
+    const settings = buildSettings()
+    settings.claw.channels = [
+      buildChannel({
+        threadId: 'thr_goal',
+        conversations: [buildConversation({ localThreadId: 'thr_goal' })]
+      })
+    ]
+    const { store } = mutableSettingsStore(settings)
+    const runtimeRequest = vi.fn(async (_settingsArg: AppSettingsV1, path: string, init: { method?: string; body?: string }) => {
+      if (path === '/v1/threads/thr_goal/goal' && init.method === 'GET') {
+        return {
+          ok: true,
+          status: 200,
+          body: JSON.stringify({
+            goal: {
+              threadId: 'thr_goal',
+              objective: 'Read document A',
+              status: 'active',
+              tokensUsed: 12
+            }
+          })
+        }
+      }
+      if (path === '/v1/threads/thr_goal/goal' && init.method === 'POST') {
+        return {
+          ok: true,
+          status: 200,
+          body: JSON.stringify({
+            goal: {
+              threadId: 'thr_goal',
+              objective: JSON.parse(init.body ?? '{}').objective,
+              status: 'active',
+              tokensUsed: 0
+            }
+          })
+        }
+      }
+      return { ok: false, status: 404, body: '{}' }
+    })
+    const runtime = createClawRuntime({
+      store: store as never,
+      runtimeRequest: runtimeRequest as never,
+      logError: () => undefined
+    })
+    const handle = (runtime as unknown as {
+      handleIncomingImCommand: (
+        settingsArg: AppSettingsV1,
+        input: {
+          text: string
+          channel: ClawImChannelV1
+          conversation: ClawImConversationV1
+        }
+      ) => Promise<string | null>
+    }).handleIncomingImCommand.bind(runtime)
+
+    const empty = await handle(settings, {
+      text: '/goal   ',
+      channel: settings.claw.channels[0],
+      conversation: settings.claw.channels[0].conversations[0]
+    })
+    expect(empty).toContain('[Kun]')
+    expect(empty).toContain('requires an objective')
+
+    const changed = await handle(settings, {
+      text: '/goal Finish document B',
+      channel: settings.claw.channels[0],
+      conversation: settings.claw.channels[0].conversations[0]
+    })
+    expect(changed).toContain('already has a goal')
+    expect(changed).toContain('[Kun]')
+    expect(changed).toContain('Read document A')
+    expect(runtimeRequest.mock.calls.some(([, path, init]) =>
+      path === '/v1/threads/thr_goal/goal' && init.method === 'POST'
+    )).toBe(false)
+  })
+
+  it('sets a Kun thread goal when the current IM thread has none', async () => {
+    const settings = buildSettings()
+    settings.claw.channels = [
+      buildChannel({
+        threadId: 'thr_goal',
+        conversations: [buildConversation({ localThreadId: 'thr_goal' })]
+      })
+    ]
+    const { store } = mutableSettingsStore(settings)
+    const runtimeRequest = vi.fn(async (_settingsArg: AppSettingsV1, path: string, init: { method?: string; body?: string }) => {
+      if (path === '/v1/threads/thr_goal/goal' && init.method === 'GET') {
+        return {
+          ok: true,
+          status: 200,
+          body: JSON.stringify({ goal: null })
+        }
+      }
+      if (path === '/v1/threads/thr_goal/goal' && init.method === 'POST') {
+        return {
+          ok: true,
+          status: 200,
+          body: JSON.stringify({
+            goal: {
+              threadId: 'thr_goal',
+              objective: JSON.parse(init.body ?? '{}').objective,
+              status: 'active',
+              tokensUsed: 0
+            }
+          })
+        }
+      }
+      return { ok: false, status: 404, body: '{}' }
+    })
+    const runtime = createClawRuntime({
+      store: store as never,
+      runtimeRequest: runtimeRequest as never,
+      logError: () => undefined
+    })
+
+    const changed = await (runtime as unknown as {
+      handleIncomingImCommand: (
+        settingsArg: AppSettingsV1,
+        input: {
+          text: string
+          channel: ClawImChannelV1
+          conversation: ClawImConversationV1
+        }
+      ) => Promise<string | null>
+    }).handleIncomingImCommand(settings, {
+      text: '/goal Finish document B',
+      channel: settings.claw.channels[0],
+      conversation: settings.claw.channels[0].conversations[0]
+    })
+
+    expect(changed).toContain('Finish document B')
+    expect(runtimeRequest).toHaveBeenCalledWith(
+      settings,
+      '/v1/threads/thr_goal/goal',
+      {
+        method: 'POST',
+        body: JSON.stringify({ objective: 'Finish document B' })
+      }
+    )
+  })
+
+  it('stops the running turn in the current IM thread', async () => {
+    const settings = buildSettings()
+    settings.claw.channels = [
+      buildChannel({
+        threadId: 'thr_stop',
+        conversations: [buildConversation({ localThreadId: 'thr_stop' })]
+      })
+    ]
+    const { store } = mutableSettingsStore(settings)
+    const runtimeRequest = vi.fn(async (_settingsArg: AppSettingsV1, path: string, init: { method?: string; body?: string }) => {
+      if (path === '/v1/threads/thr_stop' && init.method === 'GET') {
+        return {
+          ok: true,
+          status: 200,
+          body: JSON.stringify({
+            id: 'thr_stop',
+            turns: [
+              { id: 'turn_done', status: 'completed' },
+              { id: 'turn_running', status: 'running' }
+            ]
+          })
+        }
+      }
+      if (path === '/v1/threads/thr_stop/turns/turn_running/interrupt' && init.method === 'POST') {
+        return {
+          ok: true,
+          status: 200,
+          body: JSON.stringify({ threadId: 'thr_stop', turnId: 'turn_running', status: 'aborted' })
+        }
+      }
+      return { ok: false, status: 404, body: '{}' }
+    })
+    const runtime = createClawRuntime({
+      store: store as never,
+      runtimeRequest: runtimeRequest as never,
+      logError: () => undefined
+    })
+
+    const reply = await (runtime as unknown as {
+      handleIncomingImCommand: (
+        settingsArg: AppSettingsV1,
+        input: {
+          text: string
+          channel: ClawImChannelV1
+          conversation: ClawImConversationV1
+        }
+      ) => Promise<string | null>
+    }).handleIncomingImCommand(settings, {
+      text: '/stop',
+      channel: settings.claw.channels[0],
+      conversation: settings.claw.channels[0].conversations[0]
+    })
+
+    expect(reply).toContain('turn_running')
+    expect(runtimeRequest).toHaveBeenCalledWith(
+      settings,
+      '/v1/threads/thr_stop/turns/turn_running/interrupt',
+      {
+        method: 'POST',
+        body: JSON.stringify({ discard: false })
+      }
+    )
+  })
+
+  it('returns a Kun-prefixed error when there is no running IM turn to stop', async () => {
+    const settings = buildSettings()
+    settings.claw.channels = [
+      buildChannel({
+        threadId: 'thr_stop',
+        conversations: [buildConversation({ localThreadId: 'thr_stop' })]
+      })
+    ]
+    const { store } = mutableSettingsStore(settings)
+    const runtimeRequest = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      body: JSON.stringify({
+        id: 'thr_stop',
+        turns: [{ id: 'turn_done', status: 'completed' }]
+      })
+    }))
+    const runtime = createClawRuntime({
+      store: store as never,
+      runtimeRequest: runtimeRequest as never,
+      logError: () => undefined
+    })
+
+    const reply = await (runtime as unknown as {
+      handleIncomingImCommand: (
+        settingsArg: AppSettingsV1,
+        input: {
+          text: string
+          channel: ClawImChannelV1
+          conversation: ClawImConversationV1
+        }
+      ) => Promise<string | null>
+    }).handleIncomingImCommand(settings, {
+      text: '/stop',
+      channel: settings.claw.channels[0],
+      conversation: settings.claw.channels[0].conversations[0]
+    })
+
+    expect(reply).toContain('[Kun]')
+    expect(reply).toContain('no running task')
+  })
+
+  it('lists recent Kun threads for an incoming WeChat command', async () => {
+    const settings = buildSettings()
+    settings.claw.im.provider = 'weixin'
+    settings.claw.im.recentThreadListLimit = 3
+    settings.claw.channels = [
+      buildChannel({
+        provider: 'weixin',
+        label: 'WeChat',
+        threadId: 'thr_old',
+        conversations: [
+          buildConversation({ localThreadId: 'thr_old' }),
+          buildConversation({ id: 'conv_2', chatId: 'oc_chat_b', localThreadId: 'thr_new' })
+        ]
+      })
+    ]
+    const { store } = mutableSettingsStore(settings)
+    const runtimeRequest = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      body: JSON.stringify({
+        threads: [
+          {
+            id: 'thr_new',
+            title: '[Claw IM:WeChat] Document B',
+            status: 'idle',
+            updatedAt: '2026-06-03T00:00:00.000Z'
+          },
+          {
+            id: 'thr_old',
+            title: '[Claw IM:WeChat] Document A',
+            status: 'idle',
+            updatedAt: '2026-06-02T00:00:00.000Z'
+          },
+          {
+            id: 'thr_other',
+            title: 'Desktop chat',
+            status: 'idle',
+            updatedAt: '2026-06-04T00:00:00.000Z'
+          }
+        ]
+      })
+    }))
+    const runtime = createClawRuntime({
+      store: store as never,
+      runtimeRequest: runtimeRequest as never,
+      logError: () => undefined
+    })
+
+    const reply = await (runtime as unknown as {
+      handleIncomingImCommand: (
+        settingsArg: AppSettingsV1,
+        input: {
+          text: string
+          channel: ClawImChannelV1
+          conversation: ClawImConversationV1
+        }
+      ) => Promise<string | null>
+    }).handleIncomingImCommand(settings, {
+      text: '/list-threads',
+      channel: settings.claw.channels[0],
+      conversation: settings.claw.channels[0].conversations[0]
+    })
+
+    expect(runtimeRequest).toHaveBeenCalledWith(settings, '/v1/threads?limit=3', { method: 'GET' })
+    expect(reply).toContain('Desktop chat')
+    expect(reply).toContain('Document B')
+    expect(reply).toContain('Document A')
+  })
+
+  it('switches the current WeChat conversation to a selected Kun thread', async () => {
+    const settings = buildSettings()
+    settings.claw.im.provider = 'weixin'
+    settings.claw.channels = [
+      buildChannel({
+        provider: 'weixin',
+        label: 'WeChat',
+        threadId: 'thr_old',
+        conversations: [
+          buildConversation({ localThreadId: 'thr_old' }),
+          buildConversation({ id: 'conv_2', chatId: 'oc_chat_b', localThreadId: 'thr_new' })
+        ]
+      })
+    ]
+    const { current, store } = mutableSettingsStore(settings)
+    const runtimeRequest = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      body: JSON.stringify({
+        threads: [
+          {
+            id: 'thr_old',
+            title: '[Claw IM:WeChat] Document A',
+            status: 'idle',
+            updatedAt: '2026-06-02T00:00:00.000Z'
+          },
+          {
+            id: 'thr_new',
+            title: '[Claw IM:WeChat] Document B',
+            status: 'idle',
+            updatedAt: '2026-06-03T00:00:00.000Z'
+          }
+        ]
+      })
+    }))
+    const notifyChannelActivity = vi.fn()
+    const runtime = createClawRuntime({
+      store: store as never,
+      runtimeRequest: runtimeRequest as never,
+      logError: () => undefined,
+      notifyChannelActivity
+    })
+
+    const reply = await (runtime as unknown as {
+      handleIncomingImCommand: (
+        settingsArg: AppSettingsV1,
+        input: {
+          text: string
+          channel: ClawImChannelV1
+          conversation: ClawImConversationV1
+          remoteSession: Pick<ClawImConversationV1, 'chatId' | 'senderId' | 'senderName'> & {
+            messageId: string
+            threadId: string
+          }
+        }
+      ) => Promise<string | null>
+    }).handleIncomingImCommand(settings, {
+      text: '/switch 1',
+      channel: settings.claw.channels[0],
+      conversation: settings.claw.channels[0].conversations[0],
+      remoteSession: {
+        chatId: 'oc_chat_a',
+        messageId: 'om_switch',
+        threadId: '',
+        senderId: 'ou_1',
+        senderName: 'Alice'
+      }
+    })
+
+    expect(reply).toContain('thr_new')
+    expect(reply).toContain('also held by another IM chat')
+    expect(current().claw.channels[0].threadId).toBe('thr_new')
+    expect(current().claw.channels[0].conversations[0].localThreadId).toBe('thr_new')
+    expect(current().claw.channels[0].conversations[0].latestMessageId).toBe('om_switch')
+    expect(notifyChannelActivity).toHaveBeenCalledWith({ channelId: 'channel_1', threadId: 'thr_new' })
+  })
+
+  it('switches WeChat conversations by the number shown in the recent thread list', async () => {
+    const settings = buildSettings()
+    settings.claw.im.provider = 'weixin'
+    settings.claw.im.recentThreadListLimit = 5
+    settings.claw.channels = [
+      buildChannel({
+        provider: 'weixin',
+        label: 'WeChat',
+        threadId: 'thr_current',
+        conversations: [buildConversation({ localThreadId: 'thr_current' })]
+      })
+    ]
+    const { current, store } = mutableSettingsStore(settings)
+    const runtimeRequest = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      body: JSON.stringify({
+        threads: [
+          { id: 'thr_current', title: 'New chat', status: 'idle', updatedAt: '2026-06-05T00:00:00.000Z' },
+          { id: 'thr_two', title: '你好', status: 'idle', updatedAt: '2026-06-04T00:00:00.000Z' },
+          { id: 'thr_three', title: 'mock retry success', status: 'idle', updatedAt: '2026-06-03T00:00:00.000Z' },
+          { id: 'thr_four', title: '触发一次后台任务，睡眠 20s', status: 'idle', updatedAt: '2026-06-02T00:00:00.000Z' },
+          { id: 'thr_five', title: '创建后台休眠任务并输出字符串', status: 'idle', updatedAt: '2026-06-01T00:00:00.000Z' }
+        ]
+      })
+    }))
+    const runtime = createClawRuntime({
+      store: store as never,
+      runtimeRequest: runtimeRequest as never,
+      logError: () => undefined
+    })
+
+    const reply = await (runtime as unknown as {
+      handleIncomingImCommand: (
+        settingsArg: AppSettingsV1,
+        input: {
+          text: string
+          channel: ClawImChannelV1
+          conversation: ClawImConversationV1
+        }
+      ) => Promise<string | null>
+    }).handleIncomingImCommand(settings, {
+      text: '/switch 4',
+      channel: settings.claw.channels[0],
+      conversation: settings.claw.channels[0].conversations[0]
+    })
+
+    expect(runtimeRequest).toHaveBeenCalledWith(settings, '/v1/threads?limit=5', { method: 'GET' })
+    expect(reply).toContain('thr_four')
+    expect(current().claw.channels[0].threadId).toBe('thr_four')
+    expect(current().claw.channels[0].conversations[0].localThreadId).toBe('thr_four')
+  })
+
+  it('does not switch WeChat conversations by thread title', async () => {
+    const settings = buildSettings()
+    settings.claw.im.provider = 'weixin'
+    settings.claw.channels = [
+      buildChannel({
+        provider: 'weixin',
+        label: 'WeChat',
+        threadId: 'thr_old',
+        conversations: [buildConversation({ localThreadId: 'thr_old' })]
+      })
+    ]
+    const { current, store } = mutableSettingsStore(settings)
+    const runtimeRequest = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      body: JSON.stringify({
+        threads: [
+          {
+            id: 'thr_new',
+            title: '[Claw IM:WeChat] Document B',
+            status: 'idle',
+            updatedAt: '2026-06-03T00:00:00.000Z'
+          }
+        ]
+      })
+    }))
+    const runtime = createClawRuntime({
+      store: store as never,
+      runtimeRequest: runtimeRequest as never,
+      logError: () => undefined
+    })
+
+    const reply = await (runtime as unknown as {
+      handleIncomingImCommand: (
+        settingsArg: AppSettingsV1,
+        input: {
+          text: string
+          channel: ClawImChannelV1
+          conversation: ClawImConversationV1
+        }
+      ) => Promise<string | null>
+    }).handleIncomingImCommand(settings, {
+      text: '/switch Document B',
+      channel: settings.claw.channels[0],
+      conversation: settings.claw.channels[0].conversations[0]
+    })
+
+    expect(reply).toContain('[Kun]')
+    expect(reply).toContain('Could not find')
+    expect(current().claw.channels[0].threadId).toBe('thr_old')
+    expect(store.patch).not.toHaveBeenCalled()
+  })
+
+  it('does not report switch success when no IM channel can persist the selection', async () => {
+    const settings = buildSettings()
+    const { store } = mutableSettingsStore(settings)
+    const runtimeRequest = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      body: JSON.stringify({
+        threads: [
+          {
+            id: 'thr_new',
+            title: 'Document B',
+            status: 'idle',
+            updatedAt: '2026-06-03T00:00:00.000Z'
+          }
+        ]
+      })
+    }))
+    const runtime = createClawRuntime({
+      store: store as never,
+      runtimeRequest: runtimeRequest as never,
+      logError: () => undefined
+    })
+
+    const reply = await (runtime as unknown as {
+      handleIncomingImCommand: (
+        settingsArg: AppSettingsV1,
+        input: { text: string }
+      ) => Promise<string | null>
+    }).handleIncomingImCommand(settings, { text: '/switch 1' })
+
+    expect(reply).toContain('[Kun]')
+    expect(reply).not.toContain('Switched')
+    expect(store.patch).not.toHaveBeenCalled()
+  })
+
   it('bases Feishu conversation workspaces on the configured Claw workspace', () => {
     const settings = buildSettings()
     settings.claw.im.workspaceRoot = '/tmp/claw-default'
@@ -316,8 +1279,8 @@ describe('ClawRuntime', () => {
     expect(createScheduledTaskFromText).toHaveBeenCalledWith('Remind me tomorrow to ship the review.', {
       workspaceRoot: settings.workspaceRoot,
       clawChannelId: null,
-      providerId: null,
-      modelHint: settings.claw.im.model,
+      providerId: 'deepseek',
+      modelHint: 'deepseek-v4-flash',
       mode: settings.claw.im.mode
     })
     expect(store.patch).not.toHaveBeenCalled()
@@ -929,7 +1892,7 @@ describe('ClawRuntime', () => {
     expect(runtimeRequest).not.toHaveBeenCalled()
     expect(send).toHaveBeenCalledWith(
       'oc_chat_a',
-      { markdown: 'Started a new topic. The next message will create a fresh local conversation.' },
+      { markdown: '[Kun] Started a new topic. The next message will create a fresh local conversation.' },
       { replyTo: 'om_inbound', replyInThread: false }
     )
     expect(current().claw.channels[0].threadId).toBe('')
@@ -937,7 +1900,7 @@ describe('ClawRuntime', () => {
     expect(current().claw.channels[0].remoteSession?.messageId).toBe('om_inbound')
   })
 
-  it('handles Feishu model commands locally for the current IM channel', async () => {
+  it('handles Feishu model commands locally for the current IM conversation', async () => {
     const settings = buildSettings()
     settings.claw.im.enabled = true
     settings.claw.channels = [buildChannel()]
@@ -974,98 +1937,31 @@ describe('ClawRuntime', () => {
       chatType: 'p2p',
       mentionedBot: false,
       mentionAll: false,
-      content: '-model flash',
+      content: '-model 2',
       rawContentType: 'text',
       mentions: []
     })
 
     expect(runtimeRequest).not.toHaveBeenCalled()
-    expect(current().claw.channels[0].model).toBe('deepseek-v4-flash')
+    expect(current().claw.channels[0].model).toBe('auto')
+    expect(current().claw.channels[0].conversations[0]).toMatchObject({
+      chatId: 'oc_chat_a',
+      providerId: 'deepseek',
+      model: 'deepseek-v4-pro'
+    })
     expect(send).toHaveBeenCalledWith(
       'oc_chat_a',
-      { markdown: 'Claw IM model switched to `deepseek-v4-flash`.' },
+      { markdown: '[Kun] Claw IM model switched to `deepseek-v4-pro` with provider `deepseek`.' },
       { replyTo: 'om_inbound', replyInThread: false }
     )
   })
 
-  it('lists and switches IM model providers locally for the current channel', async () => {
+  it('lists models with numbers and switches by model number', async () => {
     const settings = buildSettings()
     settings.claw.im.enabled = true
     settings.provider.providers = [
-      ...settings.provider.providers,
-      buildModelProvider()
-    ]
-    settings.claw.channels = [buildChannel()]
-    const { current, store } = mutableSettingsStore(settings)
-    const runtimeRequest = vi.fn()
-    const send = vi.fn(async () => ({ messageId: 'om_sent' }))
-    const runtime = createClawRuntime({
-      store: store as never,
-      runtimeRequest: runtimeRequest as never,
-      logError: () => undefined
-    })
-    ;(runtime as unknown as { feishuChannels: Map<string, { send: typeof send }> })
-      .feishuChannels
-      .set('channel_1', { send })
-    const handleFeishuMessage = (content: string, messageId: string): Promise<void> =>
-      (runtime as unknown as {
-        handleFeishuMessage: (channelId: string, message: {
-          chatId: string
-          messageId: string
-          senderId: string
-          senderName?: string
-          chatType: 'p2p' | 'group'
-          mentionedBot: boolean
-          mentionAll: boolean
-          content: string
-          rawContentType: string
-          mentions: unknown[]
-        }) => Promise<void>
-      }).handleFeishuMessage('channel_1', {
-        chatId: 'oc_chat_a',
-        messageId,
-        senderId: 'ou_1',
-        senderName: 'Alice',
-        chatType: 'p2p',
-        mentionedBot: false,
-        mentionAll: false,
-        content,
-        rawContentType: 'text',
-        mentions: []
-      })
-
-    await handleFeishuMessage('/provider', 'om_provider_list')
-    expect(runtimeRequest).not.toHaveBeenCalled()
-    expect(send).toHaveBeenLastCalledWith(
-      'oc_chat_a',
-      { markdown: expect.stringContaining('Loaded providers:') },
-      { replyTo: 'om_provider_list', replyInThread: false }
-    )
-    const providerListCall = send.mock.calls[send.mock.calls.length - 1] as unknown as [
-      string,
-      { markdown?: string },
-      Record<string, unknown>
-    ]
-    expect(providerListCall[1]).toMatchObject({ markdown: expect.stringContaining('`minimax`') })
-
-    await handleFeishuMessage('/provider minimax', 'om_provider_switch')
-    expect(current().claw.channels[0]).toMatchObject({
-      providerId: 'minimax',
-      model: 'MiniMax-M2.7'
-    })
-    expect(send).toHaveBeenLastCalledWith(
-      'oc_chat_a',
-      { markdown: 'IM provider switched to `minimax`; model is `MiniMax-M2.7`. Send `/model` to list models for this provider.' },
-      { replyTo: 'om_provider_switch', replyInThread: false }
-    )
-  })
-
-  it('lists and switches models only within the current IM provider', async () => {
-    const settings = buildSettings()
-    settings.claw.im.enabled = true
-    settings.provider.providers = [
-      ...settings.provider.providers,
-      buildModelProvider()
+      buildModelProvider({ id: 'minimax-a', name: 'MiniMax A', models: ['MiniMax-M3'] }),
+      buildModelProvider({ id: 'minimax', name: 'MiniMax', models: ['MiniMax-M2.7', 'MiniMax-M3'] })
     ]
     settings.claw.channels = [buildChannel({ providerId: 'minimax', model: 'MiniMax-M2.7' })]
     const { current, store } = mutableSettingsStore(settings)
@@ -1106,7 +2002,7 @@ describe('ClawRuntime', () => {
         mentions: []
       })
 
-    await handleFeishuMessage('/model', 'om_model_list')
+    await handleFeishuMessage('/list-model', 'om_model_list')
     expect(send).toHaveBeenLastCalledWith(
       'oc_chat_a',
       { markdown: expect.stringContaining('Available models:') },
@@ -1117,14 +2013,34 @@ describe('ClawRuntime', () => {
       { markdown?: string },
       Record<string, unknown>
     ]
-    expect(modelListCall[1]).toMatchObject({ markdown: expect.stringContaining('`MiniMax-M3`') })
-    expect(modelListCall[1]).toMatchObject({ markdown: expect.not.stringContaining('deepseek-v4-flash') })
+    expect(modelListCall[1]).toMatchObject({ markdown: expect.stringContaining('3. `MiniMax-M3` · provider `minimax-a`') })
+    expect(modelListCall[1]).toMatchObject({ markdown: expect.stringContaining('5. `MiniMax-M3` · provider `minimax`') })
+    expect(modelListCall[1]).toMatchObject({ markdown: expect.stringContaining('provider `minimax`') })
 
-    await handleFeishuMessage('/model MiniMax-M3', 'om_model_switch')
-    expect(current().claw.channels[0].model).toBe('MiniMax-M3')
+    await handleFeishuMessage('/model MiniMax-M3', 'om_model_name_switch')
+    expect(current().claw.channels[0]).toMatchObject({
+      providerId: 'minimax',
+      model: 'MiniMax-M2.7'
+    })
     expect(send).toHaveBeenLastCalledWith(
       'oc_chat_a',
-      { markdown: 'Claw IM model switched to `MiniMax-M3`.' },
+      { markdown: expect.stringContaining('[Kun] Invalid model number `MiniMax-M3`.') },
+      { replyTo: 'om_model_name_switch', replyInThread: false }
+    )
+
+    await handleFeishuMessage('/model 5', 'om_model_switch')
+    expect(current().claw.channels[0]).toMatchObject({
+      providerId: 'minimax',
+      model: 'MiniMax-M2.7'
+    })
+    expect(current().claw.channels[0].conversations[0]).toMatchObject({
+      chatId: 'oc_chat_a',
+      providerId: 'minimax',
+      model: 'MiniMax-M3'
+    })
+    expect(send).toHaveBeenLastCalledWith(
+      'oc_chat_a',
+      { markdown: '[Kun] Claw IM model switched to `MiniMax-M3` with provider `minimax`.' },
       { replyTo: 'om_model_switch', replyInThread: false }
     )
   })
@@ -1210,6 +2126,182 @@ describe('ClawRuntime', () => {
     expect(send).toHaveBeenCalledWith(
       'oc_chat_a',
       { markdown: 'hello from minimax' },
+      { replyTo: 'om_inbound', replyInThread: false }
+    )
+  })
+
+  it('falls back to the first provider model when the stored IM model was removed', async () => {
+    const settings = buildSettings()
+    settings.claw.im.enabled = true
+    settings.claw.im.responseTimeoutMs = 2_000
+    settings.provider.providers = [
+      ...settings.provider.providers,
+      buildModelProvider({ models: ['MiniMax-M2.7'] })
+    ]
+    settings.claw.channels = [buildChannel({
+      providerId: 'minimax',
+      model: 'MiniMax-M3',
+      threadId: 'thr_minimax',
+      conversations: [buildConversation({ localThreadId: 'thr_minimax' })]
+    })]
+    const { store } = mutableSettingsStore(settings)
+    const runtimeRequest = vi.fn(async (requestSettings: AppSettingsV1, path, init) => {
+      expect(requestSettings.agents.kun.providerId).toBe('minimax')
+      expect(requestSettings.agents.kun.model).toBe('MiniMax-M2.7')
+      if (path === '/v1/threads/thr_minimax/turns' && init?.method === 'POST') {
+        const body = JSON.parse(init?.body ?? '{}') as { model?: string }
+        expect(body.model).toBe('MiniMax-M2.7')
+        return { ok: true, status: 202, body: JSON.stringify({ threadId: 'thr_minimax', turnId: 'turn_minimax' }) }
+      }
+      if (path === '/v1/threads/thr_minimax' && init?.method === 'GET') {
+        return {
+          ok: true,
+          status: 200,
+          body: JSON.stringify({
+            id: 'thr_minimax',
+            status: 'idle',
+            turns: [
+              {
+                id: 'turn_minimax',
+                status: 'completed',
+                items: [{ kind: 'assistant_text', text: 'hello from fallback model' }]
+              }
+            ]
+          })
+        }
+      }
+      throw new Error(`unexpected path ${path}`)
+    })
+    const send = vi.fn(async () => ({ messageId: 'om_sent' }))
+    const runtime = createClawRuntime({
+      store: store as never,
+      runtimeRequest: runtimeRequest as never,
+      logError: () => undefined
+    })
+    ;(runtime as unknown as { feishuChannels: Map<string, { send: typeof send }> })
+      .feishuChannels
+      .set('channel_1', { send })
+
+    await (runtime as unknown as {
+      handleFeishuMessage: (channelId: string, message: {
+        chatId: string
+        messageId: string
+        senderId: string
+        senderName?: string
+        chatType: 'p2p' | 'group'
+        mentionedBot: boolean
+        mentionAll: boolean
+        content: string
+        rawContentType: string
+        mentions: unknown[]
+      }) => Promise<void>
+    }).handleFeishuMessage('channel_1', {
+      chatId: 'oc_chat_a',
+      messageId: 'om_inbound',
+      senderId: 'ou_1',
+      senderName: 'Alice',
+      chatType: 'p2p',
+      mentionedBot: false,
+      mentionAll: false,
+      content: 'hello',
+      rawContentType: 'text',
+      mentions: []
+    })
+
+    expect(send).toHaveBeenCalledWith(
+      'oc_chat_a',
+      { markdown: 'hello from fallback model' },
+      { replyTo: 'om_inbound', replyInThread: false }
+    )
+  })
+
+  it('uses the current IM conversation provider when starting an agent turn', async () => {
+    const settings = buildSettings()
+    settings.claw.im.enabled = true
+    settings.claw.im.responseTimeoutMs = 2_000
+    settings.provider.providers = [
+      ...settings.provider.providers,
+      buildModelProvider()
+    ]
+    settings.claw.channels = [buildChannel({
+      providerId: 'minimax',
+      model: 'MiniMax-M3',
+      threadId: 'thr_channel',
+      conversations: [
+        buildConversation({
+          localThreadId: 'thr_deepseek',
+          providerId: 'deepseek',
+          model: 'deepseek-v4-flash'
+        })
+      ]
+    })]
+    const { store } = mutableSettingsStore(settings)
+    const runtimeRequest = vi.fn(async (requestSettings: AppSettingsV1, path, init) => {
+      expect(requestSettings.agents.kun.providerId).toBe('deepseek')
+      expect(requestSettings.agents.kun.model).toBe('deepseek-v4-flash')
+      if (path === '/v1/threads/thr_deepseek/turns' && init?.method === 'POST') {
+        const body = JSON.parse(init?.body ?? '{}') as { model?: string }
+        expect(body.model).toBe('deepseek-v4-flash')
+        return { ok: true, status: 202, body: JSON.stringify({ threadId: 'thr_deepseek', turnId: 'turn_deepseek' }) }
+      }
+      if (path === '/v1/threads/thr_deepseek' && init?.method === 'GET') {
+        return {
+          ok: true,
+          status: 200,
+          body: JSON.stringify({
+            id: 'thr_deepseek',
+            status: 'idle',
+            turns: [
+              {
+                id: 'turn_deepseek',
+                status: 'completed',
+                items: [{ kind: 'assistant_text', text: 'hello from deepseek' }]
+              }
+            ]
+          })
+        }
+      }
+      throw new Error(`unexpected path ${path}`)
+    })
+    const send = vi.fn(async () => ({ messageId: 'om_sent' }))
+    const runtime = createClawRuntime({
+      store: store as never,
+      runtimeRequest: runtimeRequest as never,
+      logError: () => undefined
+    })
+    ;(runtime as unknown as { feishuChannels: Map<string, { send: typeof send }> })
+      .feishuChannels
+      .set('channel_1', { send })
+
+    await (runtime as unknown as {
+      handleFeishuMessage: (channelId: string, message: {
+        chatId: string
+        messageId: string
+        senderId: string
+        senderName?: string
+        chatType: 'p2p' | 'group'
+        mentionedBot: boolean
+        mentionAll: boolean
+        content: string
+        rawContentType: string
+        mentions: unknown[]
+      }) => Promise<void>
+    }).handleFeishuMessage('channel_1', {
+      chatId: 'oc_chat_a',
+      messageId: 'om_inbound',
+      senderId: 'ou_1',
+      senderName: 'Alice',
+      chatType: 'p2p',
+      mentionedBot: false,
+      mentionAll: false,
+      content: 'hello',
+      rawContentType: 'text',
+      mentions: []
+    })
+
+    expect(send).toHaveBeenCalledWith(
+      'oc_chat_a',
+      { markdown: 'hello from deepseek' },
       { replyTo: 'om_inbound', replyInThread: false }
     )
   })
@@ -1762,7 +2854,8 @@ describe('ClawRuntime', () => {
     expect(welcomeCall[0]).toBe('oc_chat_a')
     expect(welcomeCall[1].markdown).toContain('Kun')
     expect(welcomeCall[1].markdown).toContain('`/new`')
-    expect(welcomeCall[1].markdown).toContain('`/model`')
+    expect(welcomeCall[1].markdown).toContain('`/list-model`')
+    expect(welcomeCall[1].markdown).toContain('`/model <number>`')
     expect(welcomeCall[2]).toEqual({})
     expect(current().claw.channels[0].welcomeSentAt).toBeTruthy()
 
@@ -2823,7 +3916,8 @@ describe('ClawRuntime', () => {
       const runtimeRequest = vi.fn(async (_settings, path, init) => {
         if (path === '/v1/threads/thr_1/turns') {
           const body = JSON.parse(init?.body ?? '{}') as { prompt?: string }
-          expect(body.prompt).toContain('generate_image')
+          expectImRuntimePrompt(body.prompt, '帮我生成一张图片')
+          expect(body.prompt).not.toContain('generate_image')
           return { ok: true, status: 202, body: JSON.stringify({ threadId: 'thr_1', turnId: 'turn_img' }) }
         }
         if (path === '/v1/threads/thr_1' && init?.method === 'GET') {
@@ -2920,6 +4014,232 @@ describe('ClawRuntime', () => {
     }
   })
 
+  it('sends send_im_attachment tool output to Feishu as an attachment', async () => {
+    const workspaceRoot = await mkdtemp(join(tmpdir(), 'deepseek-gui-feishu-im-attachment-'))
+    const filePath = join(workspaceRoot, 'out.txt')
+    await writeFile(filePath, 'hello from im tool')
+    const realFilePath = await realpath(filePath)
+    try {
+      const settings = buildSettings()
+      settings.claw.im.enabled = true
+      settings.claw.im.responseTimeoutMs = 2_000
+      settings.claw.channels = [
+        buildChannel({
+          threadId: 'thr_1',
+          workspaceRoot,
+          conversations: [buildConversation({ localThreadId: 'thr_1', workspaceRoot })]
+        })
+      ]
+      const store = {
+        load: vi.fn(async () => settings),
+        patch: vi.fn(async () => settings)
+      }
+      const runtimeRequest = vi.fn(async (_settings, path, init) => {
+        if (path === '/v1/threads/thr_1/turns') {
+          const body = JSON.parse(init?.body ?? '{}') as { imContext?: boolean }
+          expect(body.imContext).toBe(true)
+          return { ok: true, status: 202, body: JSON.stringify({ threadId: 'thr_1', turnId: 'turn_attachment' }) }
+        }
+        if (path === '/v1/threads/thr_1' && init?.method === 'GET') {
+          return {
+            ok: true,
+            status: 200,
+            body: JSON.stringify({
+              id: 'thr_1',
+              status: 'idle',
+              turns: [
+                {
+                  id: 'turn_attachment',
+                  status: 'completed',
+                  items: [
+                    {
+                      kind: 'tool_result',
+                      toolName: 'send_im_attachment',
+                      toolKind: 'tool_call',
+                      output: {
+                        files: [{
+                          absolutePath: filePath,
+                          relativePath: 'out.txt',
+                          fileName: 'out.txt'
+                        }],
+                        status: 'queued_for_im_attachment_delivery'
+                      },
+                      isError: false
+                    },
+                    { kind: 'assistant_text', text: '已经准备好。' }
+                  ]
+                }
+              ]
+            })
+          }
+        }
+        throw new Error(`unexpected path ${path}`)
+      })
+      const send = vi.fn(async () => ({ messageId: 'om_sent' }))
+      const addReaction = vi.fn(async () => 'rc_attachment_1')
+      const runtime = createClawRuntime({
+        store: store as never,
+        runtimeRequest,
+        logError: () => undefined
+      })
+      ;(runtime as unknown as { feishuChannels: Map<string, { send: typeof send, addReaction: typeof addReaction }> })
+        .feishuChannels
+        .set('channel_1', { send, addReaction })
+
+      await (runtime as unknown as {
+        handleFeishuMessage: (channelId: string, message: {
+          chatId: string
+          messageId: string
+          threadId?: string
+          senderId: string
+          senderName?: string
+          chatType: 'p2p' | 'group'
+          mentionedBot: boolean
+          mentionAll: boolean
+          content: string
+          rawContentType: string
+          mentions: unknown[]
+        }) => Promise<void>
+      }).handleFeishuMessage('channel_1', {
+        chatId: 'oc_chat_a',
+        messageId: 'om_inbound_attachment',
+        senderId: 'ou_1',
+        senderName: 'Alice',
+        chatType: 'p2p',
+        mentionedBot: false,
+        mentionAll: false,
+        content: '请继续',
+        rawContentType: 'text',
+        mentions: []
+      })
+
+      expect(send).toHaveBeenNthCalledWith(
+        1,
+        'oc_chat_a',
+        { markdown: '已经准备好。' },
+        { replyTo: 'om_inbound_attachment', replyInThread: false }
+      )
+      expect(send).toHaveBeenNthCalledWith(
+        2,
+        'oc_chat_a',
+        { file: { source: realFilePath, fileName: 'out.txt' } },
+        { replyTo: 'om_inbound_attachment', replyInThread: false }
+      )
+    } finally {
+      await rm(workspaceRoot, { recursive: true, force: true })
+    }
+  })
+
+  it('pushes delayed send_im_attachment tool output to Feishu', async () => {
+    const workspaceRoot = await mkdtemp(join(tmpdir(), 'deepseek-gui-feishu-delayed-attachment-'))
+    const filePath = join(workspaceRoot, 'delayed.txt')
+    await writeFile(filePath, 'hello from delayed im tool')
+    const realFilePath = await realpath(filePath)
+    try {
+      const settings = buildSettings()
+      settings.claw.im.enabled = true
+      settings.claw.channels = [
+        buildChannel({
+          threadId: 'thr_1',
+          workspaceRoot,
+          conversations: [buildConversation({ localThreadId: 'thr_1', workspaceRoot })]
+        })
+      ]
+      const store = {
+        load: vi.fn(async () => settings),
+        patch: vi.fn(async () => settings)
+      }
+      const runtimeRequest = vi.fn(async (_settings, path, init) => {
+        if (path === '/v1/threads/thr_1' && init?.method === 'GET') {
+          return {
+            ok: true,
+            status: 200,
+            body: JSON.stringify({
+              id: 'thr_1',
+              status: 'idle',
+              turns: [
+                {
+                  id: 'turn_delayed_attachment',
+                  status: 'completed',
+                  items: [
+                    {
+                      kind: 'tool_result',
+                      toolName: 'send_im_attachment',
+                      toolKind: 'tool_call',
+                      output: {
+                        files: [{
+                          absolutePath: filePath,
+                          relativePath: 'delayed.txt',
+                          fileName: 'delayed.txt'
+                        }],
+                        status: 'queued_for_im_attachment_delivery'
+                      },
+                      isError: false
+                    },
+                    { kind: 'assistant_text', text: '已经准备好。' }
+                  ]
+                }
+              ]
+            })
+          }
+        }
+        throw new Error(`unexpected path ${path}`)
+      })
+      const send = vi.fn(async () => ({ messageId: 'om_sent' }))
+      const addReaction = vi.fn(async () => 'rc_attachment_1')
+      const runtime = createClawRuntime({
+        store: store as never,
+        runtimeRequest,
+        logError: () => undefined
+      })
+      ;(runtime as unknown as { feishuChannels: Map<string, { send: typeof send, addReaction: typeof addReaction }> })
+        .feishuChannels
+        .set('channel_1', { send, addReaction })
+
+      ;(runtime as unknown as {
+        scheduleImResultPush: (
+          settings: AppSettingsV1,
+          input: {
+            channel: AppSettingsV1['claw']['channels'][number]
+            remoteSession: {
+              chatId: string
+              messageId: string
+              threadId: string
+              senderId: string
+              senderName: string
+            }
+            threadId: string
+            turnId: string
+            workspaceRoot: string
+          }
+        ) => void
+      }).scheduleImResultPush(settings, {
+        channel: settings.claw.channels[0],
+        remoteSession: {
+          chatId: 'oc_chat_a',
+          messageId: 'om_inbound_delayed_attachment',
+          threadId: '',
+          senderId: 'ou_1',
+          senderName: 'Alice'
+        },
+        threadId: 'thr_1',
+        turnId: 'turn_delayed_attachment',
+        workspaceRoot
+      })
+
+      await vi.waitFor(
+        () => expect(send).toHaveBeenCalledWith(
+          'oc_chat_a',
+          { file: { source: realFilePath, fileName: 'delayed.txt' } },
+          {}
+        ),
+        { timeout: 8_000, interval: 100 }
+      )
+    } finally {
+      await rm(workspaceRoot, { recursive: true, force: true })
+    }
+  })
+
   it('returns generated files in the WeChat webhook reply for image requests', async () => {
     const workspaceRoot = await mkdtemp(join(tmpdir(), 'deepseek-gui-weixin-image-'))
     const imageDir = join(workspaceRoot, '.deepseekgui-images')
@@ -2962,7 +4282,7 @@ describe('ClawRuntime', () => {
       const runtimeRequest = vi.fn(async (_settings, path, init) => {
         if (path === '/v1/threads/thr_wx/turns' && init?.method === 'POST') {
           const body = JSON.parse(init?.body ?? '{}') as { prompt?: string }
-          expect(body.prompt).toContain('generate_image')
+          expectImRuntimePrompt(body.prompt, '帮我画一张猫的图片')
           return { ok: true, status: 202, body: JSON.stringify({ turnId: 'turn_wx_img' }) }
         }
         if (path === '/v1/threads/thr_wx' && init?.method === 'GET') {
@@ -3053,6 +4373,127 @@ describe('ClawRuntime', () => {
     }
   })
 
+  it('returns send_im_attachment tool output in the WeChat webhook reply', async () => {
+    const workspaceRoot = await mkdtemp(join(tmpdir(), 'deepseek-gui-weixin-im-attachment-'))
+    const filePath = join(workspaceRoot, 'report.md')
+    await writeFile(filePath, '# Report\n')
+    const realFilePath = await realpath(filePath)
+    try {
+      const settings = buildSettings()
+      settings.claw.im.enabled = true
+      settings.claw.im.responseTimeoutMs = 2_000
+      settings.claw.channels = [
+        buildChannel({
+          provider: 'weixin' as const,
+          id: 'channel_weixin',
+          label: 'WeChat',
+          threadId: 'thr_wx',
+          workspaceRoot,
+          conversations: [
+            buildConversation({
+              chatId: 'wx_user_1',
+              senderId: 'wx_user_1',
+              localThreadId: 'thr_wx',
+              workspaceRoot
+            })
+          ]
+        })
+      ]
+      const { store } = mutableSettingsStore(settings)
+      const runtimeRequest = vi.fn(async (_settings, path, init) => {
+        if (path === '/v1/threads/thr_wx/turns' && init?.method === 'POST') {
+          const body = JSON.parse(init?.body ?? '{}') as { imContext?: boolean }
+          expect(body.imContext).toBe(true)
+          return { ok: true, status: 202, body: JSON.stringify({ turnId: 'turn_wx_attachment' }) }
+        }
+        if (path === '/v1/threads/thr_wx' && init?.method === 'GET') {
+          return {
+            ok: true,
+            status: 200,
+            body: JSON.stringify({
+              id: 'thr_wx',
+              status: 'idle',
+              turns: [
+                {
+                  id: 'turn_wx_attachment',
+                  status: 'completed',
+                  items: [
+                    {
+                      kind: 'tool_result',
+                      toolName: 'send_im_attachment',
+                      toolKind: 'tool_call',
+                      output: {
+                        files: [{
+                          absolutePath: filePath,
+                          relativePath: 'report.md',
+                          fileName: 'report.md'
+                        }],
+                        status: 'queued_for_im_attachment_delivery'
+                      },
+                      isError: false
+                    },
+                    { kind: 'assistant_text', text: '报告准备好了。' }
+                  ]
+                }
+              ]
+            })
+          }
+        }
+        throw new Error(`unexpected path ${path}`)
+      })
+      const runtime = createClawRuntime({
+        store: store as never,
+        runtimeRequest: runtimeRequest as never,
+        logError: () => undefined,
+        createScheduledTaskFromText: vi.fn(async () => ({ kind: 'noop' as const }))
+      })
+      const body = JSON.stringify({
+        text: '请继续',
+        provider: 'weixin',
+        channelId: 'channel_weixin',
+        chatId: 'wx_user_1',
+        messageId: 'wx_msg_attachment',
+        senderId: 'wx_user_1',
+        senderName: 'Alice'
+      })
+      const req = {
+        method: 'POST',
+        url: settings.claw.im.path,
+        headers: {},
+        async *[Symbol.asyncIterator]() {
+          yield Buffer.from(body)
+        }
+      }
+      let status = 0
+      let responseBody = ''
+      const res = {
+        writeHead: vi.fn((nextStatus: number) => {
+          status = nextStatus
+        }),
+        end: vi.fn((payload: string) => {
+          responseBody = payload
+        })
+      }
+
+      await (runtime as unknown as {
+        handleWebhook: (request: typeof req, response: typeof res) => Promise<void>
+      }).handleWebhook(req, res)
+
+      expect(status).toBe(200)
+      const parsed = JSON.parse(responseBody)
+      expect(parsed).toMatchObject({ ok: true, reply: '报告准备好了。' })
+      expect(parsed.files).toEqual([
+        {
+          path: realFilePath,
+          relativePath: 'report.md',
+          fileName: 'report.md'
+        }
+      ])
+    } finally {
+      await rm(workspaceRoot, { recursive: true, force: true })
+    }
+  })
+
   it('returns current-turn generated music files in the WeChat webhook reply for follow-up prompts', async () => {
     const workspaceRoot = await mkdtemp(join(tmpdir(), 'deepseek-gui-weixin-music-'))
     const mediaDir = join(workspaceRoot, '.deepseekgui-media')
@@ -3094,8 +4535,7 @@ describe('ClawRuntime', () => {
       const runtimeRequest = vi.fn(async (_settings, path, init) => {
         if (path === '/v1/threads/thr_wx_music/turns' && init?.method === 'POST') {
           const body = JSON.parse(init?.body ?? '{}') as { prompt?: string }
-          expect(body.prompt).toContain('欢快的人声')
-          expect(body.prompt).toContain('generate_music')
+          expectImRuntimePrompt(body.prompt, '欢快的人声')
           return { ok: true, status: 202, body: JSON.stringify({ turnId: 'turn_wx_music' }) }
         }
         if (path === '/v1/threads/thr_wx_music' && init?.method === 'GET') {
@@ -3226,7 +4666,7 @@ describe('ClawRuntime', () => {
       const runtimeRequest = vi.fn(async (_settings, path, init) => {
         if (path === '/v1/threads/thr_wx_stale/turns' && init?.method === 'POST') {
           const body = JSON.parse(init?.body ?? '{}') as { prompt?: string }
-          expect(body.prompt).toContain('generate_image')
+          expectImRuntimePrompt(body.prompt, '帮我生成一张图片')
           return { ok: true, status: 202, body: JSON.stringify({ turnId: 'turn_current' }) }
         }
         if (path === '/v1/threads/thr_wx_stale' && init?.method === 'GET') {
@@ -3359,7 +4799,7 @@ describe('ClawRuntime', () => {
       const runtimeRequest = vi.fn(async (_settings, path, init) => {
         if (path === '/v1/threads/thr_wx_speech/turns' && init?.method === 'POST') {
           const body = JSON.parse(init?.body ?? '{}') as { prompt?: string }
-          expect(body.prompt).toContain('generate_speech')
+          expectImRuntimePrompt(body.prompt, '帮我生成一段语音旁白')
           return { ok: true, status: 202, body: JSON.stringify({ turnId: 'turn_wx_speech' }) }
         }
         if (path === '/v1/threads/thr_wx_speech' && init?.method === 'GET') {
@@ -3492,8 +4932,7 @@ describe('ClawRuntime', () => {
       const runtimeRequest = vi.fn(async (_settings, path, init) => {
         if (path === '/v1/threads/thr_wx_video/turns' && init?.method === 'POST') {
           const body = JSON.parse(init?.body ?? '{}') as { prompt?: string }
-          expect(body.prompt).toContain('16:9')
-          expect(body.prompt).toContain('generate_video')
+          expectImRuntimePrompt(body.prompt, '16:9')
           return { ok: true, status: 202, body: JSON.stringify({ turnId: 'turn_wx_video' }) }
         }
         if (path === '/v1/threads/thr_wx_video' && init?.method === 'GET') {
@@ -4299,87 +5738,137 @@ describe('ClawRuntime handleFeishuMessage streaming', () => {
   })
 
   it('still routes through the streaming bridge for prompts that mention sending files', async () => {
-    // NOTE: The streaming branch does not currently surface `result.files`
-    // (the streaming reply path uses `streamResult.finalText`, not the
-    // turn result from `waitForAssistantResult`), so the
-    // `sendFeishuGeneratedFiles` follow-up does not actually fire in
-    // the streaming path today. This test pins that behavior: a prompt
-    // that matches `shouldSendGeneratedFilesForPrompt` (e.g. contains
-    // "发给我") must still complete the streaming reply without
-    // crashing. The follow-up file delivery is exercised in the
-    // feishuStream=false path; see the image/markdown tests above.
     const { fetchMock, latestHandle } = stubFetchForThreadEvents()
+    const workspaceRoot = await mkdtemp(join(tmpdir(), 'deepseek-gui-feishu-stream-attachment-'))
+    const filePath = join(workspaceRoot, 'stream-result.txt')
+    await writeFile(filePath, 'hello from stream attachment')
+    const realFilePath = await realpath(filePath)
     const settings = buildSettings()
-    settings.claw.im.enabled = true
-    settings.claw.im.responseTimeoutMs = 5_000
-    // feishuStream is per-channel (default off). Enable it on this
-    // channel so the streaming path is exercised.
-    settings.claw.channels = [
-      buildChannel({ threadId: 'thr_1', feishuStream: true, conversations: [buildConversation({ localThreadId: 'thr_1' })] })
-    ]
-    const store = {
-      load: vi.fn(async () => settings),
-      patch: vi.fn(async () => settings)
-    }
-    const runtimeRequest = makeTurnRequest()
-    const bridge = buildStreamingBridge()
-    let streamedMessageId = ''
-    bridge.stream.mockImplementation(
-      async (
-        _to: string,
-        input: { markdown: (controller: { append: (c: string) => Promise<void>; setContent: (s: string) => Promise<void>; messageId: string }) => Promise<void> }
-      ) => {
-        const ctrl = {
-          messageId: 'om_stream_files',
-          append: vi.fn(async (_chunk: string) => undefined),
-          setContent: vi.fn(async (_full: string) => undefined)
-        }
-        setTimeout(() => {
-          const h = latestHandle()
-          if (!h) return
-          h.emit({ seq: 1, kind: 'assistant_text_delta', turnId: 'turn_1', item: { text: '好的' } })
-          h.emit({ seq: 2, kind: 'turn_completed', turnId: 'turn_1' })
-        }, 0)
-        await input.markdown(ctrl)
-        streamedMessageId = ctrl.messageId
-        return { messageId: ctrl.messageId }
+    try {
+      settings.claw.im.enabled = true
+      settings.claw.im.responseTimeoutMs = 5_000
+      // feishuStream is per-channel (default off). Enable it on this
+      // channel so the streaming path is exercised.
+      settings.claw.channels = [
+        buildChannel({
+          threadId: 'thr_1',
+          workspaceRoot,
+          feishuStream: true,
+          conversations: [buildConversation({ localThreadId: 'thr_1', workspaceRoot })]
+        })
+      ]
+      const store = {
+        load: vi.fn(async () => settings),
+        patch: vi.fn(async () => settings)
       }
-    )
-    const runtime = createClawRuntime({
-      store: store as never,
-      runtimeRequest,
-      logError: () => undefined
-    })
-    patchBridge(runtime, 'channel_1', bridge)
+      const runtimeRequest: RuntimeRequestFn = vi.fn(async (_settings, path, init) => {
+        if (path === '/v1/threads/thr_1/turns') {
+          return {
+            ok: true,
+            status: 202,
+            body: JSON.stringify({ threadId: 'thr_1', turnId: 'turn_1' })
+          }
+        }
+        if (path === '/v1/threads/thr_1' && init?.method === 'GET') {
+          return {
+            ok: true,
+            status: 200,
+            body: JSON.stringify({
+              id: 'thr_1',
+              status: 'idle',
+              turns: [
+                {
+                  id: 'turn_1',
+                  status: 'completed',
+                  items: [
+                    {
+                      kind: 'tool_result',
+                      toolName: 'send_im_attachment',
+                      toolKind: 'tool_call',
+                      output: {
+                        files: [{
+                          absolutePath: filePath,
+                          relativePath: 'stream-result.txt',
+                          fileName: 'stream-result.txt'
+                        }],
+                        status: 'queued_for_im_attachment_delivery'
+                      },
+                      isError: false
+                    },
+                    { kind: 'assistant_text', text: '好的' }
+                  ]
+                }
+              ]
+            })
+          }
+        }
+        throw new Error(`unexpected path ${path}`)
+      }) as unknown as RuntimeRequestFn
+      const bridge = buildStreamingBridge()
+      let streamedMessageId = ''
+      bridge.stream.mockImplementation(
+        async (
+          _to: string,
+          input: { markdown: (controller: { append: (c: string) => Promise<void>; setContent: (s: string) => Promise<void>; messageId: string }) => Promise<void> }
+        ) => {
+          const ctrl = {
+            messageId: 'om_stream_files',
+            append: vi.fn(async (_chunk: string) => undefined),
+            setContent: vi.fn(async (_full: string) => undefined)
+          }
+          setTimeout(() => {
+            const h = latestHandle()
+            if (!h) return
+            h.emit({ seq: 1, kind: 'assistant_text_delta', turnId: 'turn_1', item: { text: '好的' } })
+            h.emit({ seq: 2, kind: 'turn_completed', turnId: 'turn_1' })
+          }, 0)
+          await input.markdown(ctrl)
+          streamedMessageId = ctrl.messageId
+          return { messageId: ctrl.messageId }
+        }
+      )
+      const runtime = createClawRuntime({
+        store: store as never,
+        runtimeRequest,
+        logError: () => undefined
+      })
+      patchBridge(runtime, 'channel_1', bridge)
 
-    // "把今天的笔记发给我" — shouldSendGeneratedFilesForPrompt returns true.
-    await (runtime as unknown as {
-      handleFeishuMessage: (channelId: string, message: FeishuMessage) => Promise<void>
-    }).handleFeishuMessage('channel_1', {
-      chatId: 'oc_chat_a',
-      messageId: 'om_inbound_files',
-      senderId: 'ou_1',
-      senderName: 'Alice',
-      chatType: 'p2p',
-      mentionedBot: false,
-      mentionAll: false,
-      content: '把今天的笔记发给我',
-      rawContentType: 'text',
-      mentions: []
-    })
+      // "生成一张图片" — shouldSendGeneratedFilesForPrompt returns true
+      // without taking the direct existing-file shortcut.
+      await (runtime as unknown as {
+        handleFeishuMessage: (channelId: string, message: FeishuMessage) => Promise<void>
+      }).handleFeishuMessage('channel_1', {
+        chatId: 'oc_chat_a',
+        messageId: 'om_inbound_files',
+        senderId: 'ou_1',
+        senderName: 'Alice',
+        chatType: 'p2p',
+        mentionedBot: false,
+        mentionAll: false,
+        content: '生成一张图片',
+        rawContentType: 'text',
+        mentions: []
+      })
 
-    // The streaming card was finalized (the messageId is recorded by
-    // the bridge mock).
-    expect(streamedMessageId).toBe('om_stream_files')
-    expect(bridge.stream).toHaveBeenCalledTimes(1)
-    // The SSE event stream was opened (proves the streaming branch ran
-    // end-to-end without falling back to the polling path).
-    expect(fetchMock).toHaveBeenCalledTimes(1)
-    // The streaming card is the single user-visible reply. No
-    // follow-up one-shot text message is sent. The streaming result
-    // also does not currently carry a `files` payload, so no file
-    // attachment is dispatched (see the comment above).
-    expect(bridge.send).not.toHaveBeenCalled()
+      // The streaming card was finalized (the messageId is recorded by
+      // the bridge mock).
+      expect(streamedMessageId).toBe('om_stream_files')
+      expect(bridge.stream).toHaveBeenCalledTimes(1)
+      // The SSE event stream was opened (proves the streaming branch ran
+      // end-to-end without falling back to the polling path).
+      expect(fetchMock).toHaveBeenCalledTimes(1)
+      // Text stays in the streaming card; attachment delivery is sent as
+      // a follow-up file message.
+      expect(bridge.send).toHaveBeenCalledTimes(1)
+      expect(bridge.send).toHaveBeenCalledWith(
+        'oc_chat_a',
+        { file: { source: realFilePath, fileName: 'stream-result.txt' } },
+        { replyTo: 'om_inbound_files', replyInThread: false }
+      )
+    } finally {
+      await rm(workspaceRoot, { recursive: true, force: true })
+    }
   })
 
   it('does not touch FeishuStreamer for non-feishu providers (weixin unchanged)', async () => {

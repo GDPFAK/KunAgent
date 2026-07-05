@@ -298,7 +298,7 @@ describe('kun defaults', () => {
         defaultHardThreshold: 108800,
         summaryMode: 'model',
         summaryTimeoutMs: 15000,
-        summaryMaxTokens: 1200,
+        summaryMaxTokens: 2048,
         summaryInputMaxBytes: 98304
       },
       runtimeTuning: {
@@ -432,6 +432,24 @@ describe('claw settings', () => {
     })
 
     expect(normalized.claw.im.weixinBridgeUrl).toBe('http://127.0.0.1:18787/rpc')
+  })
+
+  it('normalizes the IM recent thread list limit', () => {
+    const defaults = defaultClawSettings()
+    expect(defaults.im.recentThreadListLimit).toBe(5)
+
+    const normalized = normalizeAppSettings({
+      ...settings(),
+      claw: {
+        ...defaults,
+        im: {
+          ...defaults.im,
+          recentThreadListLimit: 500
+        }
+      }
+    })
+
+    expect(normalized.claw.im.recentThreadListLimit).toBe(50)
   })
 
   it('migrates the legacy OpenClaw Gateway URL into the WeChat bridge URL', () => {
@@ -960,6 +978,15 @@ describe('legacy Kun defaults migration', () => {
       approvalPolicy: 'on-request',
       sandboxMode: 'workspace-write'
     }))
+  })
+
+  it('drops legacy top-level instructions during normalization', () => {
+    const normalized = normalizeAppSettings({
+      ...settings(),
+      instructions: { enabled: true }
+    } as unknown as AppSettingsV1)
+
+    expect('instructions' in normalized).toBe(false)
   })
 
   it('moves the legacy local HTTP default port to the Kun default port', () => {

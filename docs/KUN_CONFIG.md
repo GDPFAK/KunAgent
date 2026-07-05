@@ -75,9 +75,9 @@ GUI 启动 Kun 时会按下面的顺序合并配置。
   "contextCompaction": {
     "defaultSoftThreshold": 96000,
     "defaultHardThreshold": 108800,
-    "summaryMode": "heuristic",
+    "summaryMode": "model",
     "summaryTimeoutMs": 15000,
-    "summaryMaxTokens": 1200,
+    "summaryMaxTokens": 2048,
     "summaryInputMaxBytes": 98304
   },
   "runtime": {
@@ -179,9 +179,9 @@ Kun 内置 DeepSeek V4 默认模型画像：
   "contextCompaction": {
     "defaultSoftThreshold": 96000,
     "defaultHardThreshold": 108800,
-    "summaryMode": "heuristic",
+    "summaryMode": "model",
     "summaryTimeoutMs": 15000,
-    "summaryMaxTokens": 1200,
+    "summaryMaxTokens": 2048,
     "summaryInputMaxBytes": 98304
   }
 }
@@ -191,7 +191,9 @@ Kun 内置 DeepSeek V4 默认模型画像：
 
 - `defaultSoftThreshold`: 未匹配到模型 profile 时，达到多少 input tokens 开始压缩。
 - `defaultHardThreshold`: 未匹配到模型 profile 时，达到多少 input tokens 强制压缩。
-- `summaryMode`: `heuristic` 使用本地摘要骨架，`model` 会尝试调用模型生成摘要。
+- `summaryMode`: GUI 管理的配置默认并归一为 `model`。手工维护 `config.json`
+  时仍可显式写 `heuristic` 使用本地摘要骨架；`model` 模式下模型摘要失败、
+  超时或返回空文本时会自动降级为本地摘要骨架。
 - `summaryTimeoutMs`: 模型摘要调用超时时间。
 - `summaryMaxTokens`: 模型摘要输出 token 上限。
 - `summaryInputMaxBytes`: 摘要输入文本最大字节数。

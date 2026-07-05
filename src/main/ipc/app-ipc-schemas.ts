@@ -131,6 +131,12 @@ export const providerProbePayloadSchema = z
   })
   .strict()
 
+export const promptOptimizationPayloadSchema = z
+  .object({
+    text: trimmedString(100_000)
+  })
+  .strict()
+
 interface EndpointTemplate {
   /** Compiled path matcher. */
   match(path: string): boolean
@@ -302,6 +308,11 @@ const modelProviderPatchSchema = z.object({
     apiKey: z.string().max(MAX_BODY_BYTES).optional(),
     baseUrl: z.string().trim().max(MAX_URL_LENGTH).optional(),
     endpointFormat: modelEndpointFormatSchema.optional(),
+    retry: z.object({
+      maxAttempts: z.number().int().min(0).max(10).optional(),
+      initialDelayMs: z.number().int().min(0).max(600_000).optional(),
+      httpStatusCodes: z.array(z.number().int().min(400).max(599)).max(64).optional()
+    }).strict().optional(),
     kind: z.enum(['http', 'agent-sdk']).optional(),
     // Some third-party aggregators (litellm, oneapi, …) advertise 500+ chat
     // models in a single /v1/models response. The previous 200/50 caps caused
@@ -386,6 +397,11 @@ const kunRuntimePatchSchema = z.object({
   baseUrl: z.string().trim().max(MAX_URL_LENGTH).optional(),
   providerId: z.string().trim().max(64).optional(),
   endpointFormat: modelEndpointFormatSchema.optional(),
+  retry: z.object({
+    maxAttempts: z.number().int().min(0).max(10).optional(),
+    initialDelayMs: z.number().int().min(0).max(600_000).optional(),
+    httpStatusCodes: z.array(z.number().int().min(400).max(599)).max(64).optional()
+  }).strict().optional(),
   runtimeToken: z.string().max(MAX_BODY_BYTES).optional(),
   dataDir: defaultPathSchema,
   model: modelIdSchema.optional(),
@@ -483,6 +499,13 @@ const kunRuntimePatchSchema = z.object({
     voice: z.string().trim().max(128).optional(),
     format: z.string().trim().max(16).optional(),
     timeoutMs: z.number().int().positive().max(900_000).optional()
+  }).strict().optional(),
+  promptOptimization: z.object({
+    enabled: z.boolean().optional(),
+    providerId: z.string().trim().max(64).optional(),
+    model: optionalModelIdSchema,
+    prompt: z.string().trim().max(MAX_BODY_BYTES).optional(),
+    timeoutMs: z.number().int().positive().max(600_000).optional()
   }).strict().optional(),
   musicGeneration: z.object({
     enabled: z.boolean().optional(),
@@ -685,7 +708,8 @@ const clawImPatchSchema = z.object({
   providerId: z.string().trim().max(64).optional(),
   model: modelIdSchema.optional(),
   mode: clawRunModeSchema.optional(),
-  responseTimeoutMs: z.number().int().min(5_000).max(600_000).optional()
+  responseTimeoutMs: z.number().int().min(5_000).max(600_000).optional(),
+  recentThreadListLimit: z.number().int().min(1).max(50).optional()
 }).strict()
 
 const clawImAgentProfilePatchSchema = z.object({
@@ -738,6 +762,8 @@ const clawImConversationPatchSchema = z.object({
   senderName: z.string().max(512).optional(),
   localThreadId: z.string().max(MAX_ID_LENGTH).optional(),
   workspaceRoot: defaultPathSchema,
+  providerId: z.string().trim().max(64).optional(),
+  model: z.string().trim().max(128).optional(),
   createdAt: z.string().max(128).optional(),
   updatedAt: z.string().max(128).optional()
 }).strict()

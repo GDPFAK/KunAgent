@@ -100,6 +100,7 @@ export type BuiltinToolName =
   | 'lsp'
   | 'repo_map'
   | 'verify_changes'
+  | 'send_im_attachment'
 export const allBuiltinToolNames: Set<BuiltinToolName> = new Set([
   'read',
   'bash',
@@ -110,7 +111,8 @@ export const allBuiltinToolNames: Set<BuiltinToolName> = new Set([
   'ls',
   'lsp',
   'repo_map',
-  'verify_changes'
+  'verify_changes',
+  'send_im_attachment'
 ])
 export type ToolName = BuiltinToolName
 export const allToolNames: Set<ToolName> = allBuiltinToolNames

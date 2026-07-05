@@ -16,6 +16,7 @@ export function createTurnRecord(input: {
   guiDesignCanvas?: boolean
   mode?: ThreadMode
   disableUserInput?: boolean
+  imContext?: boolean
   workspaceCheckpointId?: string
   createdAt?: string
   status?: TurnStatus
@@ -42,6 +43,7 @@ export function createTurnRecord(input: {
     ...(input.guiDesignCanvas ? { guiDesignCanvas: true } : {}),
     ...(input.mode ? { mode: input.mode } : {}),
     ...(input.disableUserInput ? { disableUserInput: true } : {}),
+    ...(input.imContext ? { imContext: true } : {}),
     ...(input.workspaceCheckpointId ? { workspaceCheckpointId: input.workspaceCheckpointId } : {}),
     createdAt: input.createdAt ?? new Date().toISOString()
   }

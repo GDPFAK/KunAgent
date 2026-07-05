@@ -39,6 +39,7 @@ import { CanvasLayersPanel } from './canvas/CanvasLayersPanel'
 
 type Props = {
   onCodeOpen: () => void
+  onWorkflowOpen: () => void
   onWriteOpen: () => void
   onDesignOpen: () => void
   onOpenSettings: (section?: SettingsRouteSection) => void
@@ -64,6 +65,7 @@ export function getDesignSidebarDocumentLabel(doc: Pick<DesignDocument, 'id'>): 
  */
 export function DesignSidebar({
   onCodeOpen,
+  onWorkflowOpen,
   onWriteOpen,
   onDesignOpen,
   onOpenSettings,
@@ -525,6 +527,7 @@ export function DesignSidebar({
           <WorkspaceModeTabs
             activeView="design"
             onCodeOpen={onCodeOpen}
+            onWorkflowOpen={onWorkflowOpen}
             onWriteOpen={onWriteOpen}
             onDesignOpen={onDesignOpen}
           />

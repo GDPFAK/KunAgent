@@ -25,7 +25,7 @@ type UseWorkbenchChatComposerPropsInput = {
   composerReasoningEffort: ComposerProps['composerReasoningEffort']
   setComposerReasoningEffort: ComposerProps['onComposerReasoningEffortChange']
   lockVisionToTextModelSwitch: boolean
-  setClawChannelModel: (channelId: string, modelId: string) => void | Promise<unknown>
+  setClawChannelModel: (channelId: string, modelId: string, providerId?: string) => void | Promise<unknown>
   setComposerModel: (modelId: string, providerId?: string) => void
   openProvidersSettings: () => void
   handleSend: ComposerProps['onSend']
@@ -153,7 +153,7 @@ export function useWorkbenchChatComposerProps({
     lockVisionToTextModelSwitch,
     onComposerModelChange: (modelId, providerId) => {
       if (route === 'claw' && activeClawChannelId) {
-        void setClawChannelModel(activeClawChannelId, modelId)
+        void setClawChannelModel(activeClawChannelId, modelId, providerId)
         return
       }
       setComposerModel(modelId, providerId)

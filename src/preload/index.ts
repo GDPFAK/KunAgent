@@ -34,6 +34,7 @@ const api = {
   restartRuntime: () => ipcRenderer.invoke('runtime:restart'),
   fetchUpstreamModels: () => ipcRenderer.invoke('upstream:models'),
   probeModelProvider: (payload) => ipcRenderer.invoke('provider:probe', payload),
+  optimizePrompt: (payload) => ipcRenderer.invoke('prompt:optimize', payload),
   getClawStatus: () => ipcRenderer.invoke('claw:status'),
   runClawTask: (taskId) =>
     ipcRenderer.invoke('claw:task:run', taskId),

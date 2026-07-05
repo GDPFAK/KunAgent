@@ -108,6 +108,12 @@ export const TurnSchema = z.object({
    * rejects calls to them instead of blocking on a GUI answer.
    */
   disableUserInput: z.boolean().optional(),
+  /**
+   * True when this turn originated from an IM bridge. Kun exposes
+   * IM-only tools such as outbound attachment delivery only for these
+   * turns.
+   */
+  imContext: z.boolean().optional(),
   error: z.string().optional()
 })
 export type Turn = z.infer<typeof TurnSchema>
@@ -154,7 +160,12 @@ export const StartTurnRequest = z.object({
    * user (IM bridges such as WeChat/Feishu, headless runs). The turn
    * runs without the `user_input`/`request_user_input` tools.
    */
-  disableUserInput: z.boolean().optional()
+  disableUserInput: z.boolean().optional(),
+  /**
+   * True when the turn is handled through an IM bridge. This gates
+   * IM-only tool exposure separately from generic headless turns.
+   */
+  imContext: z.boolean().optional()
 })
 export type StartTurnRequest = z.input<typeof StartTurnRequest>
 

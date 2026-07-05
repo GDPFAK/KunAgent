@@ -11,6 +11,7 @@ export type ModelStreamChunk =
   | { kind: 'assistant_reasoning_delta'; text: string }
   | { kind: 'tool_call_delta'; callId: string; toolName?: string; argumentsDelta?: string }
   | { kind: 'tool_call_complete'; callId: string; toolName: string; arguments: Record<string, unknown> }
+  | { kind: 'retrying'; status: number; attempt: number; maxAttempts: number; delayMs: number }
   | { kind: 'image_generation_complete'; imageBase64: string; mimeType: string }
   | { kind: 'usage'; usage: UsageSnapshot }
   | { kind: 'completed'; stopReason: 'stop' | 'tool_calls' | 'length' | 'error' }

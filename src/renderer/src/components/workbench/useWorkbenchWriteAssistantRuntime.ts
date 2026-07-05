@@ -22,10 +22,9 @@ export function useWorkbenchWriteAssistantRuntime({
   const setWriteAssistantModel = useWriteWorkspaceStore((s) => s.setAssistantModel)
   const writeAssistantPickList = useMemo(() => {
     return buildComposerAssistantPickList({
-      composerPickList,
-      currentModel: writeAssistantModel
+      composerPickList
     })
-  }, [composerPickList, writeAssistantModel])
+  }, [composerPickList])
   const resolvedWriteAssistantProviderId = useMemo(() => {
     return resolveComposerAssistantProviderId({
       composerModelGroups,

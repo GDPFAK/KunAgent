@@ -1,5 +1,7 @@
 import type { ChatBlock } from '../../agent/types'
 import { isBackgroundShellNoticeUserMessage } from '@shared/background-shell-notice'
+import { isBackgroundSubagentNoticeUserMessage } from '@shared/background-subagent-notice'
+import { hasPendingRuntimeWork } from '../../store/chat-store-runtime-helpers'
 
 export type Turn = {
   user?: Extract<ChatBlock, { kind: 'user' }>
@@ -10,13 +12,21 @@ export function isBackgroundShellNoticeBlock(block: ChatBlock): boolean {
   return block.kind === 'user' && isBackgroundShellNoticeUserMessage(block)
 }
 
+export function isBackgroundSubagentNoticeBlock(block: ChatBlock): boolean {
+  return block.kind === 'user' && isBackgroundSubagentNoticeUserMessage(block)
+}
+
+export function isBackgroundNoticeBlock(block: ChatBlock): boolean {
+  return isBackgroundShellNoticeBlock(block) || isBackgroundSubagentNoticeBlock(block)
+}
+
 export function groupTurns(blocks: ChatBlock[]): Turn[] {
   const turns: Turn[] = []
   let current: Turn | null = null
 
   for (const block of blocks) {
     if (block.kind === 'user') {
-      if (isBackgroundShellNoticeBlock(block)) {
+      if (isBackgroundNoticeBlock(block)) {
         if (!current) current = { blocks: [] }
         current.blocks.push(block)
         continue
@@ -56,17 +66,12 @@ export function splitThink(text: string): { think: string; content: string } {
 }
 
 export function blockHasPendingRuntimeWork(block: ChatBlock): boolean {
-  if (block.kind === 'tool') return block.status === 'running'
-  if (block.kind === 'compaction') return block.status === 'running'
-  if (block.kind === 'review') return block.status === 'running'
-  if (block.kind === 'approval') return block.status === 'pending'
-  if (block.kind === 'user_input') return block.status === 'pending'
-  return false
+  return hasPendingRuntimeWork(block)
 }
 
 export function isProcessBlock(block: ChatBlock): boolean {
   return (
-    isBackgroundShellNoticeBlock(block) ||
+    isBackgroundNoticeBlock(block) ||
     block.kind === 'reasoning' ||
     block.kind === 'tool' ||
     block.kind === 'compaction' ||

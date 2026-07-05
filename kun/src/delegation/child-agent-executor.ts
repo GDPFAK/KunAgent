@@ -213,7 +213,20 @@ export function createChildAgentExecutor(options: ChildAgentExecutorOptions): Ch
         disableUserInput: true
       }
     })
-    const status = await loop.runTurn(thread.id, started.turnId)
+    const abortChild = (): void => {
+      void turns.interruptTurn({
+        threadId: thread.id,
+        turnId: started.turnId
+      }).catch(() => undefined)
+    }
+    if (input.signal.aborted) abortChild()
+    else input.signal.addEventListener('abort', abortChild, { once: true })
+    let status: 'completed' | 'failed' | 'aborted'
+    try {
+      status = await loop.runTurn(thread.id, started.turnId)
+    } finally {
+      input.signal.removeEventListener('abort', abortChild)
+    }
     // Only a FATAL error fails the child. Recoverable tool errors — a tool
     // rejected by the child's read-only policy, or a tool that crashed — are
     // recorded as `severity: 'warning'` error events but the loop hands the

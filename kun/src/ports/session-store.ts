@@ -50,4 +50,6 @@ export interface SessionStore {
   loadLatestUsageSnapshots?(options?: { threadIds?: string[] }): Promise<SessionLatestUsageSnapshot[]>
   /** Forget the per-thread in-memory state without touching disk. */
   resetMemory(): Promise<void>
+  /** Forget cached state for a deleted thread without recreating its files. */
+  clearThreadMemory(threadId: string): void
 }

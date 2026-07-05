@@ -37,6 +37,7 @@ const REDUCED_MOTION_QUERY = '(prefers-reduced-motion: reduce)'
 type DelegateDetail = {
   /** The child thread id — always present in the tool result, unlike `meta.child`. */
   childId?: string
+  status?: 'queued' | 'running' | 'completed' | 'failed' | 'aborted'
   summary?: string
   error?: string
   profile?: string
@@ -45,6 +46,7 @@ type DelegateDetail = {
   durationMs?: number
   queuedMs?: number
   totalTokens?: number
+  detached?: boolean
 }
 
 function parseDelegateDetail(detail: string | undefined): DelegateDetail {
@@ -60,10 +62,15 @@ function parseDelegateDetail(detail: string | undefined): DelegateDetail {
   const usage = obj.usage && typeof obj.usage === 'object' ? (obj.usage as Record<string, unknown>) : undefined
   const str = (v: unknown): string | undefined =>
     typeof v === 'string' && v.trim() ? v.trim() : undefined
+  const status = (v: unknown): DelegateDetail['status'] =>
+    v === 'queued' || v === 'running' || v === 'completed' || v === 'failed' || v === 'aborted'
+      ? v
+      : undefined
   const num = (v: unknown): number | undefined =>
     typeof v === 'number' && Number.isFinite(v) ? v : undefined
   return {
     childId: str(obj.childId),
+    status: status(obj.status),
     summary: str(obj.summary),
     error: str(obj.error),
     profile: str(obj.profile),
@@ -71,7 +78,8 @@ function parseDelegateDetail(detail: string | undefined): DelegateDetail {
     toolInvocations: num(obj.toolInvocations),
     durationMs: num(obj.durationMs),
     queuedMs: num(obj.queuedMs),
-    totalTokens: usage ? num(usage.totalTokens) : undefined
+    totalTokens: usage ? num(usage.totalTokens) : undefined,
+    detached: obj.detached === true
   }
 }
 
@@ -82,6 +90,11 @@ type ChildMeta = {
   childStatus?: string
   childSeq?: number
   parentTurnId?: string
+  toolInvocations?: number
+  durationMs?: number
+  queuedMs?: number
+  totalTokens?: number
+  detached?: boolean
 }
 
 function readChildMeta(block: ChatBlock): ChildMeta {
@@ -99,7 +112,12 @@ function readChildMeta(block: ChatBlock): ChildMeta {
     childProfile: str(child.childProfile),
     childStatus: str(child.childStatus),
     childSeq: typeof child.childSeq === 'number' ? child.childSeq : undefined,
-    parentTurnId: str(child.parentTurnId)
+    parentTurnId: str(child.parentTurnId),
+    toolInvocations: typeof child.toolInvocations === 'number' ? child.toolInvocations : undefined,
+    durationMs: typeof child.durationMs === 'number' ? child.durationMs : undefined,
+    queuedMs: typeof child.queuedMs === 'number' ? child.queuedMs : undefined,
+    totalTokens: typeof child.totalTokens === 'number' ? child.totalTokens : undefined,
+    detached: child.detached === true
   }
 }
 
@@ -107,8 +125,17 @@ function readChildMeta(block: ChatBlock): ChildMeta {
  * Map the child run + block status to one of five card states. `childStatus`
  * (when present) wins; otherwise fall back to `block.status`.
  */
-function resolveStatus(block: ChatBlock, child: ChildMeta): CardStatus {
+function resolveStatus(block: ChatBlock, child: ChildMeta, detail?: DelegateDetail): CardStatus {
+  const detached = child.detached === true || detail?.detached === true
   const cs = child.childStatus
+  if (detached) {
+    if (cs === 'completed') return 'done'
+    if (cs === 'failed' || cs === 'aborted') return 'failed'
+    if (cs === 'queued' || cs === 'running') return 'running'
+    if (detail?.status === 'completed') return 'done'
+    if (detail?.status === 'failed' || detail?.status === 'aborted') return 'failed'
+    if (detail?.status === 'queued' || detail?.status === 'running') return 'running'
+  }
   if (cs === 'queued') return 'queued'
   if (cs === 'running') return 'running'
   if (cs === 'completed') return 'done'
@@ -179,7 +206,8 @@ function mmss(ms: number): string {
 function useElapsed(
   status: CardStatus,
   createdAt: string | undefined,
-  durationMs: number | undefined
+  durationMs: number | undefined,
+  tickNow?: number
 ): string {
   const start = useMemo(() => {
     const parsed = createdAt ? Date.parse(createdAt) : NaN
@@ -194,7 +222,7 @@ function useElapsed(
   }, [running])
   if (status === 'queued') return '—'
   if (isTerminal(status) && typeof durationMs === 'number') return mmss(durationMs)
-  return mmss(now - start)
+  return mmss((tickNow ?? now) - start)
 }
 
 const DISC_BG: Record<CardStatus, string> = {
@@ -262,6 +290,14 @@ function StatusPill({ status, t }: { status: CardStatus; t: (k: string) => strin
     default:
       return null
   }
+}
+
+function BackgroundPill({ t }: { t: (k: string) => string }): ReactElement {
+  return (
+    <span className="whitespace-nowrap rounded-full bg-sky-500/10 px-2 py-[2px] text-[10.5px] font-semibold text-sky-600 dark:text-sky-300">
+      {t('subagentDetachedBadge')}
+    </span>
+  )
 }
 
 /** 2.5px liveness lane directly under the trigger row. */
@@ -359,6 +395,7 @@ export function SubagentCallCard({
   block,
   compact = false,
   inGroup = false,
+  tickNow,
   onOpenChildThread
 }: {
   block: ChatBlock
@@ -366,6 +403,8 @@ export function SubagentCallCard({
   compact?: boolean
   /** Inside a SwarmHeader group: suppress own shell, inline-toggle only. */
   inGroup?: boolean
+  /** Parent group clock used to keep all child timers moving in lockstep. */
+  tickNow?: number
   onOpenChildThread?: OpenChildThreadHandler
 }): ReactElement | null {
   const { t } = useTranslation('common')
@@ -379,7 +418,8 @@ export function SubagentCallCard({
     () => parseDelegateDetail(block.kind === 'tool' ? (block as ToolBlock).detail : undefined),
     [block]
   )
-  const status = resolveStatus(block, child)
+  const status = resolveStatus(block, child, detail)
+  const detached = child.detached === true || detail.detached === true
   const animate = !reducedMotion && onScreen && status === 'running'
 
   // Profile id: prefer the live `childProfile` from the runtime metadata (set on
@@ -406,8 +446,8 @@ export function SubagentCallCard({
     .filter((p): p is string => Boolean(p && p.trim()))
   const taskLine = taskParts.join(' · ')
 
-  const elapsed = useElapsed(status, block.createdAt, detail.durationMs)
-  const steps = detail.toolInvocations
+  const elapsed = useElapsed(status, block.createdAt, child.durationMs ?? detail.durationMs, tickNow)
+  const steps = child.toolInvocations ?? detail.toolInvocations
 
   // Always start collapsed — both while running and after it finishes. The card
   // only opens when the user clicks it (no auto-expand on terminal transition).
@@ -465,6 +505,7 @@ export function SubagentCallCard({
         <span className="min-w-0 flex-1">
           <span className="flex items-center gap-2">
             <span className="truncate text-[14px] font-semibold text-ds-ink">{roleName}</span>
+            {detached ? <BackgroundPill t={t} /> : null}
             {!compact || !inGroup ? <StatusPill status={status} t={t} /> : null}
           </span>
           {taskLine ? (
@@ -476,9 +517,9 @@ export function SubagentCallCard({
           <span className="mt-px block text-[10.5px] text-ds-faint">
             {typeof steps === 'number'
               ? t('subagentSteps', { count: steps })
-              : status === 'queued' && typeof detail.queuedMs === 'number'
-                ? t('subagentQueuedHint')
-                : ''}
+                : status === 'queued' && typeof (child.queuedMs ?? detail.queuedMs) === 'number'
+                  ? t('subagentQueuedHint')
+                  : ''}
           </span>
         </span>
         {childId ? (
@@ -520,8 +561,8 @@ export function SubagentCallCard({
 
           <div className="mt-3 flex flex-wrap items-center gap-1.5">
             {detail.profile ? <MetaChip title={detail.profile}>{detail.profile}</MetaChip> : null}
-            {typeof detail.totalTokens === 'number' && detail.totalTokens > 0 ? (
-              <MetaChip>{t('subagentTokensChip', { count: detail.totalTokens })}</MetaChip>
+            {typeof (child.totalTokens ?? detail.totalTokens) === 'number' && (child.totalTokens ?? detail.totalTokens ?? 0) > 0 ? (
+              <MetaChip>{t('subagentTokensChip', { count: child.totalTokens ?? detail.totalTokens })}</MetaChip>
             ) : null}
             {detail.toolPolicy ? (
               <MetaChip>
@@ -578,12 +619,7 @@ export function SubagentGroup({
   const { t } = useTranslation('common')
   const [collapsed, setCollapsed] = useState(false)
   const reducedMotion = useReducedMotion()
-
-  if (blocks.length === 0) return null
-  // N=1: single full card, no swarm header.
-  if (blocks.length === 1) {
-    return <SubagentCallCard block={blocks[0]} onOpenChildThread={onOpenChildThread} />
-  }
+  const [tickNow, setTickNow] = useState(() => Date.now())
 
   const sorted = [...blocks].sort((a, b) => {
     const sa = readChildMeta(a).childSeq ?? 0
@@ -595,12 +631,26 @@ export function SubagentGroup({
   let queued = 0
   let done = 0
   for (const b of sorted) {
-    const s = resolveStatus(b, readChildMeta(b))
+    const detail = parseDelegateDetail(b.kind === 'tool' ? (b as ToolBlock).detail : undefined)
+    const s = resolveStatus(b, readChildMeta(b), detail)
     if (s === 'running' || s === 'awaiting-permission') running += 1
     else if (s === 'queued') queued += 1
     else if (s === 'done') done += 1
   }
   const anyRunning = running > 0 || queued > 0
+  useEffect(() => {
+    if (!anyRunning) return
+    setTickNow(Date.now())
+    const id = window.setInterval(() => setTickNow(Date.now()), 1000)
+    return () => window.clearInterval(id)
+  }, [anyRunning])
+
+  if (sorted.length === 0) return null
+
+  // N=1: single full card, no swarm header.
+  if (sorted.length === 1) {
+    return <SubagentCallCard block={sorted[0]} tickNow={tickNow} onOpenChildThread={onOpenChildThread} />
+  }
 
   const clusterPoses = sorted.slice(0, 5).map((b) => {
     const c = readChildMeta(b)
@@ -671,6 +721,7 @@ export function SubagentGroup({
               block={b}
               compact
               inGroup
+              tickNow={tickNow}
               onOpenChildThread={onOpenChildThread}
             />
           ))}

@@ -393,6 +393,7 @@ export type CoreChildRuntimeMetadataJson = {
   childLabel?: string
   childStatus: 'queued' | 'running' | 'completed' | 'failed' | 'aborted'
   childSeq: number
+  detached?: boolean
   childModel?: string
   childProfile?: string
   childToolPolicy?: 'readOnly' | 'inherit'
@@ -447,6 +448,7 @@ export type CoreTurnItemJson = {
   kind: string
   text?: string
   displayText?: string
+  messageSource?: 'background_shell' | 'background_subagent'
   toolName?: string
   callId?: string
   toolKind?: 'tool_call' | 'command_execution' | 'file_change'
@@ -612,11 +614,14 @@ export type CoreRuntimeEventJson = {
   callId?: string
   readyCount?: number
   toolResultCount?: number
-	  fingerprint?: string
-	  toolCount?: number
-	  changeKind?: 'additive' | 'breaking'
-	  toolNames?: string[]
-  status?: string
+  attempt?: number
+  maxAttempts?: number
+  delayMs?: number
+  fingerprint?: string
+  toolCount?: number
+  changeKind?: 'additive' | 'breaking'
+  toolNames?: string[]
+  status?: string | number
   /** thread_created / thread_updated: the thread's (possibly upgraded) title. */
   title?: string
   /** thread_created / thread_updated: whether that title is auto/provisional. */

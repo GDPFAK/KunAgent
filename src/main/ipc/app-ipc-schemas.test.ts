@@ -341,6 +341,39 @@ describe('app-ipc-schemas', () => {
     expect(payload.agents?.kun?.videoGeneration?.defaultResolution).toBe('1080P')
   })
 
+  it('accepts provider and resolved runtime retry settings', () => {
+    const payload = settingsPatchSchema.parse({
+      provider: {
+        providers: [{
+          id: 'deepseek',
+          name: 'DeepSeek',
+          apiKey: 'sk-test',
+          baseUrl: 'https://api.deepseek.com',
+          endpointFormat: 'chat_completions',
+          retry: {
+            maxAttempts: 3,
+            initialDelayMs: 3000,
+            httpStatusCodes: [429, 503]
+          },
+          models: ['deepseek-chat'],
+          modelProfiles: {}
+        }]
+      },
+      agents: {
+        kun: {
+          retry: {
+            maxAttempts: 3,
+            initialDelayMs: 3000,
+            httpStatusCodes: [429, 503]
+          }
+        }
+      }
+    })
+
+    expect(payload.provider?.providers?.[0]?.retry?.maxAttempts).toBe(3)
+    expect(payload.agents?.kun?.retry?.httpStatusCodes).toEqual([429, 503])
+  })
+
   it('accepts long provider model ids imported from upstream catalogs', () => {
     const longModelId = `openrouter/${'provider-routed-model-id-'.repeat(6)}preview`
 

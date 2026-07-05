@@ -42,10 +42,9 @@ export function useWorkbenchDesignRuntime({
   })
   const designAssistantPickList = useMemo(() => {
     return buildComposerAssistantPickList({
-      composerPickList,
-      currentModel: designAssistantModel
+      composerPickList
     })
-  }, [composerPickList, designAssistantModel])
+  }, [composerPickList])
   const resolvedDesignAssistantProviderId = useMemo(() => {
     return resolveComposerAssistantProviderId({
       composerModelGroups,

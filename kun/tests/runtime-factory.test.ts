@@ -146,4 +146,45 @@ describe('runtime factory usage carryover', () => {
       await runtime.shutdown?.()
     }
   })
+
+  it('clears per-thread runtime memory when a thread is deleted', async () => {
+    const dataDir = await mkdtemp(join(tmpdir(), 'kun-runtime-delete-'))
+    tempDirs.push(dataDir)
+    const runtime = await createKunServeRuntime({
+      host: '127.0.0.1',
+      port: 0,
+      dataDir,
+      runtimeToken: 'tok',
+      apiKey: 'sk-default',
+      baseUrl: 'https://api.example.test/v1',
+      model: 'model-before',
+      approvalPolicy: 'auto',
+      sandboxMode: 'danger-full-access',
+      tokenEconomyMode: false,
+      insecure: false,
+      storage: { backend: 'file' },
+      capabilities: KunCapabilitiesConfig.parse({})
+    })
+
+    try {
+      const threadId = 'thr_deleted'
+      await runtime.threadService.create(
+        { workspace: '/tmp/workspace', model: 'model-before', mode: 'agent' },
+        { id: threadId }
+      )
+      runtime.usageService.record(threadId, usage({ promptTokens: 10, completionTokens: 5 }))
+
+      expect(await runtime.threadService.delete(threadId)).toBe(true)
+      expect(runtime.eventBus.snapshotSince(threadId, 0)).toEqual([])
+      expect(runtime.usageService.forThread(threadId).totalTokens).toBe(0)
+
+      await runtime.threadService.create(
+        { workspace: '/tmp/workspace', model: 'model-before', mode: 'agent' },
+        { id: threadId }
+      )
+      expect(runtime.eventBus.snapshotSince(threadId, 0).map((event) => event.seq)).toEqual([1])
+    } finally {
+      await runtime.shutdown?.()
+    }
+  })
 })

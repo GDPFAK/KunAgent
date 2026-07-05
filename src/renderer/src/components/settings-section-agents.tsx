@@ -6,6 +6,7 @@ import type {
 } from '@shared/app-settings'
 import {
   DEFAULT_MODEL_PROVIDER_ID,
+  DEFAULT_PROMPT_OPTIMIZATION_PROMPT,
   DEFAULT_WRITE_INLINE_COMPLETION_BASE_URL,
   DEFAULT_WRITE_INLINE_COMPLETION_MAX_TOKENS,
   DEFAULT_WRITE_INLINE_COMPLETION_MODEL,
@@ -569,6 +570,35 @@ export function AgentsSettingsSection({ ctx }: { ctx: Record<string, any> }): Re
   const activeProviderId = kun.providerId?.trim() || DEFAULT_MODEL_PROVIDER_ID
   const activeProvider = modelProviders.find((item) => item.id === activeProviderId) ?? modelProviders[0]
   const activeProviderModels = activeProvider?.models ?? []
+  const promptOptimization = {
+    enabled: false,
+    providerId: '',
+    model: '',
+    prompt: '',
+    timeoutMs: 60000,
+    ...(kun.promptOptimization ?? {})
+  }
+  const promptOptimizationProviderId = promptOptimization.providerId?.trim() || activeProviderId
+  const promptOptimizationProvider =
+    modelProviders.find((item) => item.id === promptOptimizationProviderId) ?? activeProvider
+  const promptOptimizationModels = promptOptimizationProvider?.models ?? []
+  const promptOptimizationDefaultModel = (() => {
+    const providerId = promptOptimizationProvider?.id ?? promptOptimizationProviderId
+    const smallModel = kun.smallModel?.trim() ?? ''
+    const smallProviderId = kun.smallModelProviderId?.trim() || activeProviderId
+    if (smallModel && smallProviderId === providerId) return smallModel
+    const mainModel = kun.model?.trim() ?? ''
+    if (mainModel && activeProviderId === providerId) return mainModel
+    return promptOptimizationModels[0] ?? mainModel
+  })()
+  const updatePromptOptimization = (patch: Record<string, unknown>): void => {
+    updateKun({
+      promptOptimization: {
+        ...promptOptimization,
+        ...patch
+      }
+    })
+  }
   const selectKunProvider = (providerId: string): void => {
     const nextProvider = modelProviders.find((item) => item.id === providerId) ?? activeProvider
     const nextModel = nextProvider?.models.includes(kun.model)
@@ -652,6 +682,87 @@ export function AgentsSettingsSection({ ctx }: { ctx: Record<string, any> }): Re
                       />
                     }
                   />
+                  <SettingRow
+                    title={t('kunPromptOptimization')}
+                    description={t('kunPromptOptimizationDesc')}
+                    control={
+                      <Toggle
+                        checked={promptOptimization.enabled}
+                        onChange={(enabled) => updatePromptOptimization({ enabled })}
+                      />
+                    }
+                  />
+                  {promptOptimization.enabled ? (
+                    <SettingRow
+                      title={t('kunPromptOptimizationConfig')}
+                      description={t('kunPromptOptimizationConfigDesc')}
+                      wideControl
+                      control={
+                        <div className="grid gap-3 lg:grid-cols-[minmax(0,220px)_minmax(0,1fr)_minmax(120px,160px)]">
+                          <label className="flex min-w-0 flex-col gap-1.5 text-[12px] font-medium text-ds-muted">
+                            {t('kunPromptOptimizationProvider')}
+                            <select
+                              className={selectControlClass}
+                              value={promptOptimization.providerId?.trim() || ''}
+                              onChange={(e) => {
+                                const providerId = e.target.value
+                                const nextProvider = modelProviders.find((item) => item.id === providerId) ?? activeProvider
+                                const keepModel = nextProvider?.models.includes(promptOptimization.model) === true
+                                updatePromptOptimization({
+                                  providerId,
+                                  model: keepModel ? promptOptimization.model : ''
+                                })
+                              }}
+                            >
+                              <option value="">{t('modelSelectDefaultSuffix', {
+                                model: activeProvider?.name ?? DEFAULT_MODEL_PROVIDER_ID
+                              })}</option>
+                              {modelProviders.map((item) => (
+                                <option key={item.id} value={item.id}>{item.name}</option>
+                              ))}
+                            </select>
+                          </label>
+                          <label className="flex min-w-0 flex-col gap-1.5 text-[12px] font-medium text-ds-muted">
+                            {t('kunPromptOptimizationModel')}
+                            <ModelSelect
+                              value={promptOptimization.model}
+                              options={promptOptimizationModels}
+                              defaultLabel={t('kunPromptOptimizationModelDefault', {
+                                model: promptOptimizationDefaultModel
+                              })}
+                              optionLabel={(model) => model}
+                              allowCustom
+                              customLabel={t('modelSelectCustomOption')}
+                              customPlaceholder={t('modelSelectCustomPlaceholder')}
+                              selectClassName={selectControlClass}
+                              onChange={(model) => updatePromptOptimization({ model: model.trim() })}
+                            />
+                          </label>
+                          <label className="flex min-w-0 flex-col gap-1.5 text-[12px] font-medium text-ds-muted">
+                            {t('kunPromptOptimizationTimeout')}
+                            <input
+                              type="number"
+                              min={1000}
+                              max={600000}
+                              step={1000}
+                              className="rounded-xl border border-ds-border bg-ds-card px-3 py-2 text-[14px] text-ds-ink shadow-sm focus:border-accent/40 focus:outline-none focus:ring-1 focus:ring-accent/30"
+                              value={promptOptimization.timeoutMs}
+                              onChange={(e) => updatePromptOptimization({ timeoutMs: Number(e.target.value) })}
+                            />
+                          </label>
+                          <label className="flex min-w-0 flex-col gap-1.5 text-[12px] font-medium text-ds-muted lg:col-span-3">
+                            {t('kunPromptOptimizationPrompt')}
+                            <textarea
+                              value={promptOptimization.prompt}
+                              onChange={(e) => updatePromptOptimization({ prompt: e.target.value })}
+                              placeholder={DEFAULT_PROMPT_OPTIMIZATION_PROMPT}
+                              className="min-h-[140px] w-full resize-y rounded-xl border border-ds-border bg-ds-main/60 px-3 py-3 text-[13px] leading-6 text-ds-ink outline-none focus:border-accent/40 focus:ring-1 focus:ring-accent/25"
+                            />
+                          </label>
+                        </div>
+                      }
+                    />
+                  ) : null}
                   <div className="px-3 py-4">
                     <AdvancedSettingsDisclosure
                       title={t('kunAssistantAdvanced')}

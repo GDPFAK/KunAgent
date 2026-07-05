@@ -26,12 +26,27 @@ export function threadBelongsToWorkspace(
 }
 
 export function hasPendingRuntimeWork(block: ChatBlock): boolean {
-  if (block.kind === 'tool') return block.status === 'running'
+  if (block.kind === 'tool') return block.status === 'running' && !isDetachedSubagentToolBlock(block)
   if (block.kind === 'compaction') return block.status === 'running'
   if (block.kind === 'review') return block.status === 'running'
   if (block.kind === 'approval') return block.status === 'pending'
   if (block.kind === 'user_input') return block.status === 'pending'
   return false
+}
+
+export function isDetachedSubagentToolBlock(block: ChatBlock): boolean {
+  if (block.kind !== 'tool') return false
+  const child = block.meta?.child
+  if (child && typeof child === 'object' && (child as Record<string, unknown>).detached === true) {
+    return true
+  }
+  if (!block.detail?.trim()) return false
+  try {
+    const parsed = JSON.parse(block.detail) as unknown
+    return Boolean(parsed && typeof parsed === 'object' && (parsed as Record<string, unknown>).detached === true)
+  } catch {
+    return false
+  }
 }
 
 function assistantBlockHasVisibleContent(block: Extract<ChatBlock, { kind: 'assistant' }>): boolean {
@@ -63,7 +78,7 @@ export function threadHasPendingRuntimeWork(blocks: ChatBlock[]): boolean {
 export function settlePendingRuntimeWorkAfterInterrupt(blocks: ChatBlock[]): ChatBlock[] {
   let changed = false
   const next = blocks.map((block): ChatBlock => {
-    if (block.kind === 'tool' && block.status === 'running') {
+    if (block.kind === 'tool' && block.status === 'running' && !isDetachedSubagentToolBlock(block)) {
       changed = true
       return { ...block, status: 'error' as const }
     }

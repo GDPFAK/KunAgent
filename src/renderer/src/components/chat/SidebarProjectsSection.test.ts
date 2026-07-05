@@ -509,6 +509,7 @@ describe('ThreadRow', () => {
 
     expect(html).toContain('sidebarThreadPinned')
     expect(html).toContain('sidebarThreadUnpin')
+    expect(html).toContain('bg-[color-mix(in_srgb,var(--ds-sidebar-row-active)_72%,var(--ds-accent)_28%)]')
   })
 })
 

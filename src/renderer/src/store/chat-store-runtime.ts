@@ -62,6 +62,7 @@ export const MAX_PENDING_CLAW_FEISHU_MIRRORS = 50
 const completionNotificationKeys: string[] = []
 const completionNotificationKeySet = new Set<string>()
 const watchCompletionNotificationKeys = new Map<string, string>()
+const pendingChildToolUpdates = new Map<string, ToolEventPayload>()
 
 export type PendingClawFeishuMirror = {
   threadId: string
@@ -479,19 +480,27 @@ function runtimeStatusText(event: RuntimeStatusEventPayload): string {
   if (event.kind === 'tool_result_upload_wait') {
     return i18n.t('common:toolUploadWaitStatus', { count: event.toolResultCount ?? 0 })
   }
-	  if (event.kind === 'tool_catalog_changed') {
-	    return event.message?.trim() || i18n.t('common:toolCatalogChangedStatus')
-	  }
-	  if (event.kind === 'tool_storm_suppressed') {
-	    return event.message?.trim() || i18n.t('common:toolStormSuppressedStatus', {
-	      tool: event.toolName ?? 'tool'
-	    })
-	  }
+  if (event.kind === 'model_request_retry') {
+    return i18n.t('common:modelRequestRetryStatus', {
+      status: event.status ?? '',
+      attempt: event.attempt ?? 0,
+      max: event.maxAttempts ?? 0,
+      seconds: Math.ceil((event.delayMs ?? 0) / 1000)
+    })
+  }
+  if (event.kind === 'tool_catalog_changed') {
+    return event.message?.trim() || i18n.t('common:toolCatalogChangedStatus')
+  }
+  if (event.kind === 'tool_storm_suppressed') {
+    return event.message?.trim() || i18n.t('common:toolStormSuppressedStatus', {
+      tool: event.toolName ?? 'tool'
+    })
+  }
   if (event.kind === 'compaction_summary_fallback') {
     return event.message?.trim() || i18n.t('common:compactionSummaryFallbackStatus')
   }
-	  return event.message?.trim() || ''
-	}
+  return event.message?.trim() || ''
+}
 
 function runtimeErrorPayloadToError(event: {
   message: string
@@ -551,6 +560,77 @@ function upsertRuntimeErrorBlock(blocks: ChatBlock[], block: Extract<ChatBlock, 
   const next = [...blocks]
   next[index] = block
   return next
+}
+
+function childIdFromToolBlock(block: ToolBlock): string | undefined {
+  const child = block.meta?.child
+  if (child && typeof child === 'object') {
+    const id = (child as Record<string, unknown>).childId
+    if (typeof id === 'string' && id.trim()) return id.trim()
+  }
+  if (!block.detail?.trim()) return undefined
+  try {
+    const parsed = JSON.parse(block.detail) as unknown
+    if (!parsed || typeof parsed !== 'object') return undefined
+    const id = (parsed as Record<string, unknown>).childId
+    return typeof id === 'string' && id.trim() ? id.trim() : undefined
+  } catch {
+    return undefined
+  }
+}
+
+function childIdFromToolEvent(event: ToolEventPayload): string | undefined {
+  const child = event.meta?.child
+  if (child && typeof child === 'object') {
+    const id = (child as Record<string, unknown>).childId
+    if (typeof id === 'string' && id.trim()) return id.trim()
+  }
+  if (!event.detail?.trim()) return undefined
+  try {
+    const parsed = JSON.parse(event.detail) as unknown
+    if (!parsed || typeof parsed !== 'object') return undefined
+    const id = (parsed as Record<string, unknown>).childId
+    return typeof id === 'string' && id.trim() ? id.trim() : undefined
+  } catch {
+    return undefined
+  }
+}
+
+function eventDetailRecord(event: ToolEventPayload): Record<string, unknown> | undefined {
+  if (!event.detail?.trim()) return undefined
+  try {
+    const parsed = JSON.parse(event.detail) as unknown
+    return parsed && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : undefined
+  } catch {
+    return undefined
+  }
+}
+
+function isDetachedSubagentToolEvent(event: ToolEventPayload): boolean {
+  const child = event.meta?.child
+  if (child && typeof child === 'object' && (child as Record<string, unknown>).detached === true) {
+    return true
+  }
+  return eventDetailRecord(event)?.detached === true
+}
+
+function mergeToolMeta(current: ToolBlock['meta'], incoming: ToolEventPayload['meta']): ToolBlock['meta'] {
+  if (!incoming) return current
+  if (!current) return incoming
+  const currentChild = current.child
+  const incomingChild = incoming.child
+  return {
+    ...current,
+    ...incoming,
+    ...(currentChild || incomingChild
+      ? {
+          child: {
+            ...(currentChild && typeof currentChild === 'object' ? currentChild : {}),
+            ...(incomingChild && typeof incomingChild === 'object' ? incomingChild : {})
+          }
+        }
+      : {})
+  }
 }
 
 export function armBusyWatchdog(
@@ -865,11 +945,16 @@ export function buildThreadEventSink(
         resetBusyRecoveryAttempts()
         // Restore busy state on tool events (same reasoning as onDelta).
         const base: Partial<ChatState> = {}
-        if (!s.busy) {
+        if (!s.busy && !ev.updateOnly && !isDetachedSubagentToolEvent(ev)) {
           base.busy = true
           armBusyWatchdog(set, get)
         }
-        const idx = s.blocks.findIndex((b) => b.kind === 'tool' && b.id === ev.itemId)
+        const eventChildId = childIdFromToolEvent(ev)
+        const idx = s.blocks.findIndex((b) => {
+          if (b.kind !== 'tool') return false
+          if (b.id === ev.itemId) return true
+          return Boolean(eventChildId && childIdFromToolBlock(b) === eventChildId)
+        })
         if (idx >= 0) {
           const cur = s.blocks[idx]
           if (cur.kind !== 'tool') return { ...base }
@@ -880,7 +965,7 @@ export function buildThreadEventSink(
             toolKind: ev.toolKind ?? cur.toolKind,
             detail: ev.detail ?? cur.detail,
             filePath: ev.filePath ?? cur.filePath,
-            meta: ev.meta ?? cur.meta
+            meta: mergeToolMeta(cur.meta, ev.meta)
           }
           const blocks = [...s.blocks]
           blocks[idx] = next
@@ -890,6 +975,10 @@ export function buildThreadEventSink(
             error: clearRuntimeStreamRecoveringError(s.error)
           }
         }
+        if (ev.updateOnly) {
+          if (eventChildId) pendingChildToolUpdates.set(eventChildId, ev)
+          return { ...base }
+        }
         // New tool — flush pending live reasoning/assistant first so each
         // reasoning segment becomes its own timeline block in chronological
         // order, rather than collapsing into one giant trailing block.
@@ -898,7 +987,7 @@ export function buildThreadEventSink(
         const block: ToolBlock = {
           kind: 'tool',
           id: ev.itemId,
-          createdAt: new Date().toISOString(),
+          createdAt: ev.createdAt ?? new Date().toISOString(),
           summary: ev.summary,
           status: ev.status,
           toolKind: ev.toolKind,
@@ -906,10 +995,24 @@ export function buildThreadEventSink(
           filePath: ev.filePath,
           meta: ev.meta
         }
+        const blockChildId = childIdFromToolBlock(block)
+        const pendingChildUpdate = blockChildId ? pendingChildToolUpdates.get(blockChildId) : undefined
+        if (blockChildId && pendingChildUpdate) pendingChildToolUpdates.delete(blockChildId)
+        const mergedBlock: ToolBlock = pendingChildUpdate
+          ? {
+              ...block,
+              summary: pendingChildUpdate.summary || block.summary,
+              status: pendingChildUpdate.status,
+              toolKind: pendingChildUpdate.toolKind ?? block.toolKind,
+              detail: pendingChildUpdate.detail ?? block.detail,
+              filePath: pendingChildUpdate.filePath ?? block.filePath,
+              meta: mergeToolMeta(block.meta, pendingChildUpdate.meta)
+            }
+          : block
         return {
           ...base,
           ...flushed,
-          blocks: [...baseBlocks, block],
+          blocks: [...baseBlocks, mergedBlock],
           error: clearRuntimeStreamRecoveringError(s.error)
         }
       })

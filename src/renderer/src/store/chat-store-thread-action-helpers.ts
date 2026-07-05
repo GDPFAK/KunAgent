@@ -11,6 +11,15 @@ export function fallbackComposerProviderIdForSend(state: ChatState): string {
   return state.route === 'claw' ? '' : state.composerProviderId.trim()
 }
 
+export async function ensureRuntimeProviderForSend(input: {
+  providerId?: string
+  model?: string
+}): Promise<void> {
+  const providerId = input.providerId?.trim()
+  const model = input.model?.trim()
+  if (!providerId || !model || model.toLowerCase() === 'auto') return
+}
+
 export function composerSelectionForThread(
   state: ChatState,
   thread: Pick<NormalizedThread, 'id' | 'model'> | null | undefined

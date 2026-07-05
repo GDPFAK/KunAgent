@@ -347,10 +347,21 @@ function buildCompactionSummary(input: {
   lines.push(
     `Summarized ${input.history.length} item(s); ${input.tail.length} recent item(s) are also kept verbatim for the current request.`
   )
+  const durableOutlineLines = fitLinesToBudget(
+    extractDurableOutlineLines(input.history),
+    Math.floor(contentBudget * 0.75)
+  )
+  if (durableOutlineLines.length > 0) {
+    lines.push('Durable outline and open items:')
+    lines.push(...durableOutlineLines)
+    lines.push('')
+  }
   lines.push('Conversation and work summary:')
+  const usedBudget = lines.join('\n').length
+  const remainingBudget = Math.max(1_200, contentBudget - usedBudget)
   const summaryLines = fitLinesToBudget(
     selectSummaryLines(input.history.map(summarizeItem).filter((line) => line.length > 0)),
-    contentBudget
+    remainingBudget
   )
   if (summaryLines.length === 0) {
     lines.push('- No user-visible content before compaction.')
@@ -376,8 +387,102 @@ function extractSkillPins(history: TurnItem[]): string[] {
 }
 
 function summaryCharBudget(budgetTokens: number | undefined): number {
-  if (budgetTokens === undefined) return 4_000
-  return Math.max(1_200, Math.min(12_000, budgetTokens * 4))
+  if (budgetTokens === undefined) return 12_000
+  return Math.max(1_200, Math.min(24_000, budgetTokens * 4))
+}
+
+function extractDurableOutlineLines(history: TurnItem[]): string[] {
+  const lines: string[] = []
+  for (const item of history) {
+    switch (item.kind) {
+      case 'user_message':
+        lines.push(...durableTextLines('User request', item.text, { fallback: true }))
+        break
+      case 'assistant_text':
+        lines.push(...durableTextLines('Assistant finding', item.text))
+        break
+      case 'compaction':
+        if (item.replacedTokens > 0) {
+          lines.push(...durableTextLines('Earlier compaction', item.summary))
+        }
+        break
+      case 'tool_call': {
+        const text = item.summary || stringifyCompact(item.arguments)
+        if (isDurableTextLine(text)) {
+          lines.push(`- Tool call ${item.toolName}: ${clipText(text, 520)}`)
+        }
+        break
+      }
+      case 'tool_result': {
+        const text = stringifyCompact(item.output)
+        if (item.isError || isDurableTextLine(text)) {
+          lines.push(`- Tool result ${item.toolName}${item.isError ? ' error' : ''}: ${clipText(text, 520)}`)
+        }
+        break
+      }
+      case 'approval':
+        if (item.status !== 'allowed') {
+          lines.push(`- Approval ${item.status} for ${item.toolName}: ${clipText(item.summary, 520)}`)
+        }
+        break
+      case 'user_input':
+        lines.push(`- User input ${item.status}: ${clipText(item.prompt, 520)}`)
+        break
+      case 'review':
+        lines.push(...durableTextLines('Review', item.reviewText || stringifyCompact(item.output)))
+        break
+      case 'error':
+        lines.push(`- Error${item.code ? ` ${item.code}` : ''}: ${clipText(item.message, 520)}`)
+        break
+      case 'assistant_reasoning':
+        break
+    }
+  }
+  return dedupeLines(lines)
+}
+
+function durableTextLines(
+  label: string,
+  text: string,
+  options?: { fallback?: boolean }
+): string[] {
+  const rawLines = text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0)
+  const selected = rawLines.filter(isDurableTextLine)
+  if (selected.length === 0 && options?.fallback) {
+    const clipped = clipText(text, 520)
+    return clipped ? [`- ${label}: ${clipped}`] : []
+  }
+  return selected.map((line) => `- ${label}: ${clipText(line, 520)}`)
+}
+
+const DURABLE_OUTLINE_LINE =
+  /^(?:#{1,6}\s+|[-*+]\s+(?:\[[ xX-]\]\s*)?|\d{1,4}[.)]\s+|[A-Za-z][.)]\s+|(?:problems?|issues?|tasks?|todos?|bugs?|fixes?|steps?)\s*#?\d{0,4}\b)/i
+const DURABLE_KEYWORD_LINE =
+  /\b(?:issue|bug|problem|task|todo|open|done|next|remaining|scope|constraint|requirement|decision|root cause|fix|blocked|error|exception|failed|failing|command|test|file|path|must|need|expected|actual)\b/i
+const DURABLE_IDENTIFIER_LINE =
+  /(?:https?:\/\/|#[0-9]+\b|`[^`]+`|(?:^|[ ./])[\w.-]+\.(?:ts|tsx|js|jsx|mjs|cjs|json|md|py|go|rs|java|c|cpp|h|hpp|css|scss|html|yml|yaml)\b|\/[\w./-]+)/
+
+function isDurableTextLine(text: string): boolean {
+  const line = text.trim()
+  if (!line) return false
+  if (DURABLE_OUTLINE_LINE.test(line)) return true
+  if (DURABLE_KEYWORD_LINE.test(line)) return true
+  return DURABLE_IDENTIFIER_LINE.test(line)
+}
+
+function dedupeLines(lines: string[]): string[] {
+  const seen = new Set<string>()
+  const out: string[] = []
+  for (const line of lines) {
+    const key = line.replace(/\s+/g, ' ').trim().toLowerCase()
+    if (!key || seen.has(key)) continue
+    seen.add(key)
+    out.push(line)
+  }
+  return out
 }
 
 function summarizeItem(item: TurnItem): string {
@@ -408,14 +513,28 @@ function summarizeItem(item: TurnItem): string {
 }
 
 function selectSummaryLines(lines: string[]): string[] {
-  if (lines.length <= 20) return lines
-  const start = lines.slice(0, 4)
-  const end = lines.slice(-14)
-  return [
-    ...start,
-    `- ${lines.length - start.length - end.length} middle item(s) omitted from this compact summary.`,
-    ...end
-  ]
+  if (lines.length <= 40) return lines
+  const start = lines.slice(0, 6)
+  const end = lines.slice(-18)
+  const middle = lines.slice(start.length, lines.length - end.length)
+  const criticalMiddle = middle.filter(isCriticalSummaryLine)
+  const selected = dedupeLines([...start, ...criticalMiddle, ...end])
+  const omitted = lines.length - selected.length
+  if (omitted > 0) {
+    selected.splice(
+      Math.min(start.length + criticalMiddle.length, selected.length),
+      0,
+      `- ${omitted} lower-priority transcript line(s) omitted after preserving detected user requests, task lists, errors, paths, and decisions.`
+    )
+  }
+  return selected
+}
+
+function isCriticalSummaryLine(line: string): boolean {
+  if (/^- User:/.test(line)) return true
+  if (/\b(?:error|failed|failing|exception|denied|cancelled)\b/i.test(line)) return true
+  const content = line.replace(/^- [^:]+:\s*/, '')
+  return isDurableTextLine(content)
 }
 
 function fitLinesToBudget(lines: string[], budget: number): string[] {

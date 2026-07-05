@@ -78,4 +78,8 @@ export class RuntimeEventRecorder {
     const current = this.lastIssuedSeq.get(threadId) ?? 0
     if (seq > current) this.lastIssuedSeq.set(threadId, seq)
   }
+
+  clearThread(threadId: string): void {
+    this.lastIssuedSeq.delete(threadId)
+  }
 }

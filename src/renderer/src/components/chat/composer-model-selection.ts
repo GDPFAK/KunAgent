@@ -13,7 +13,6 @@ function addSelectableModel(ids: Set<string>, modelId: string): void {
 
 export function buildComposerAssistantPickList(input: {
   composerPickList: readonly string[]
-  currentModel: string
   defaultModelIds?: readonly string[]
 }): string[] {
   const ordered = new Set<string>()
@@ -23,7 +22,6 @@ export function buildComposerAssistantPickList(input: {
   for (const id of input.composerPickList) {
     addSelectableModel(ordered, id)
   }
-  addSelectableModel(ordered, input.currentModel)
   return [...ordered]
 }
 
