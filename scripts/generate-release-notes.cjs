@@ -99,7 +99,7 @@ function main() {
 
   const out = ['## 更新摘要', '']
   if (sinceTag) {
-    out.push(`自 [\`${sinceTag}\`](https://github.com/KunAgent/Kun/compare/${sinceTag}...HEAD) 以来的变更：`, '')
+    out.push(`自 [\`${sinceTag}\`](https://github.com/GDPFAK/KunAgent/compare/${sinceTag}...HEAD) 以来的变更：`, '')
   }
 
   let wroteSection = false

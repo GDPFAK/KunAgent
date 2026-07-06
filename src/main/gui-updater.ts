@@ -16,15 +16,11 @@ import type {
 import { nextGuiUpdateCheckDelay } from '../shared/gui-update-schedule'
 import { DEFAULT_GUI_UPDATE_CHANNEL, normalizeGuiUpdateChannel } from '../shared/gui-update'
 
-// R2 prefix 保持旧值:线上还在运行的 DeepSeek GUI 老版本轮询的
-// 就是 `deepseek-gui/channels/<channel>/latest/`,prefix 一改老客户端
-// 就再也收不到 Kun 的升级包。域名优先使用 kun-agent,旧域名仅作兜底。
-const PRIMARY_R2_PUBLIC_BASE_URL = 'https://www.kun-agent.com/api/r2'
-const SECONDARY_R2_PUBLIC_BASE_URL = 'https://kun-agent.com/api/r2'
-const LEGACY_R2_PUBLIC_BASE_URL = 'https://deepseek-gui.com/api/r2'
-const DEFAULT_R2_RELEASE_PREFIX = 'deepseek-gui'
-const UPDATE_FEED_PROBE_TIMEOUT_MS = 5_000
 const { autoUpdater } = electronUpdater
+
+/** GitHub repository for update checks via the github provider. */
+const GITHUB_OWNER = 'GDPFAK'
+const GITHUB_REPO = 'KunAgent'
 
 function envWithLegacyFallback(kunName: string, legacyName: string): string {
   return process.env[kunName]?.trim() || process.env[legacyName]?.trim() || ''
@@ -39,7 +35,6 @@ let downloadPromise: Promise<string[]> | null = null
 let configuredChannel: GuiUpdateChannel = normalizeGuiUpdateChannel(
   envWithLegacyFallback('KUN_UPDATE_CHANNEL', 'DEEPSEEK_GUI_UPDATE_CHANNEL') || undefined
 )
-let configuredFeedUrl = ''
 let getSelectedChannel: (() => GuiUpdateChannel | Promise<GuiUpdateChannel>) | null = null
 let getSelectedLocale: (() => 'en' | 'zh' | Promise<'en' | 'zh'>) | null = null
 let beforeInstallUpdate: (() => void | Promise<void>) | null = null
@@ -58,87 +53,6 @@ type GuiVersionState = {
     version: string
     releaseNotes?: string
   }
-}
-
-function trimSlashes(value: string): string {
-  return value.replace(/^\/+|\/+$/g, '')
-}
-
-function normalizeBaseUrl(raw: string): string {
-  return raw.trim().replace(/\/+$/, '')
-}
-
-function joinUrl(base: string, ...parts: string[]): string {
-  const cleanBase = normalizeBaseUrl(base)
-  const cleanParts = parts.map((p) => trimSlashes(p)).filter(Boolean)
-  return [cleanBase, ...cleanParts].join('/')
-}
-
-function envUpdateUrl(channel: GuiUpdateChannel): string {
-  const channelSpecific = envWithLegacyFallback(
-    `KUN_UPDATE_URL_${channel.toUpperCase()}`,
-    `DEEPSEEK_GUI_UPDATE_URL_${channel.toUpperCase()}`
-  )
-  const direct = channelSpecific || envWithLegacyFallback('KUN_UPDATE_URL', 'DEEPSEEK_GUI_UPDATE_URL')
-  return direct ? direct.replace(/\{channel\}/g, channel).replace(/\/?$/, '/') : ''
-}
-
-function uniqueStrings(values: string[]): string[] {
-  return Array.from(new Set(values.filter(Boolean)))
-}
-
-function defaultR2BaseUrls(): string[] {
-  const configured = process.env.R2_PUBLIC_BASE_URL?.trim()
-  if (configured) return [configured]
-  return [PRIMARY_R2_PUBLIC_BASE_URL, SECONDARY_R2_PUBLIC_BASE_URL, LEGACY_R2_PUBLIC_BASE_URL]
-}
-
-function updateFeedUrlCandidates(channel: GuiUpdateChannel): string[] {
-  const direct = envUpdateUrl(channel)
-  if (direct) return [direct]
-
-  const prefix = process.env.R2_RELEASE_PREFIX?.trim() || DEFAULT_R2_RELEASE_PREFIX
-  return uniqueStrings(
-    defaultR2BaseUrls().map((base) => `${joinUrl(base, prefix, 'channels', channel, 'latest')}/`)
-  )
-}
-
-function updateFeedUrl(channel: GuiUpdateChannel): string {
-  return updateFeedUrlCandidates(channel)[0]
-}
-
-function updateFeedManifestUrl(feedUrl: string): string {
-  return `${feedUrl}${platformManifestName()}`
-}
-
-async function isUpdateFeedAccessible(feedUrl: string): Promise<boolean> {
-  const controller = new AbortController()
-  const timeout = setTimeout(() => controller.abort(), UPDATE_FEED_PROBE_TIMEOUT_MS)
-  try {
-    const res = await fetch(updateFeedManifestUrl(feedUrl), {
-      method: 'HEAD',
-      headers: {
-        Accept: 'application/x-yaml,text/yaml,text/plain,*/*',
-        'User-Agent': `kun/${app.getVersion()}`
-      },
-      signal: controller.signal
-    })
-    return res.ok
-  } catch {
-    return false
-  } finally {
-    clearTimeout(timeout)
-  }
-}
-
-async function resolveUpdateFeedUrl(channel: GuiUpdateChannel): Promise<string> {
-  const candidates = updateFeedUrlCandidates(channel)
-  if (candidates.length <= 1) return candidates[0]
-
-  for (const candidate of candidates) {
-    if (await isUpdateFeedAccessible(candidate)) return candidate
-  }
-  return candidates[candidates.length - 1]
 }
 
 function guiUpdateSchedulePath(): string {
@@ -271,7 +185,7 @@ function downloadPageUrl(): string {
   const homepage = typeof pkg?.homepage === 'string' ? pkg.homepage.trim() : ''
   if (homepage) return homepage
 
-  return resolveGithubReleaseUrl() ?? updateFeedUrl(configuredChannel)
+  return resolveGithubReleaseUrl() ?? `https://github.com/${GITHUB_OWNER}/${GITHUB_REPO}/releases`
 }
 
 function releaseUrlForVersion(version: string): string {
@@ -300,18 +214,6 @@ function isVersionGreater(latest: string, current: string): boolean {
   return false
 }
 
-function platformManifestName(): string {
-  if (process.platform === 'darwin') return 'latest-mac.yml'
-  if (process.platform === 'linux') return 'latest-linux.yml'
-  return 'latest.yml'
-}
-
-function parseYamlScalar(source: string, key: string): string {
-  const escaped = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-  const match = source.match(new RegExp(`^${escaped}:\\s*['"]?([^'"\\n]+)['"]?\\s*$`, 'm'))
-  return match?.[1]?.trim() ?? ''
-}
-
 function macAutoUpdateAllowed(): boolean {
   if (process.platform !== 'darwin') return true
   if (process.env.DEEPSEEK_GUI_ALLOW_UNSIGNED_UPDATES === '1') return true
@@ -330,41 +232,11 @@ function unsupportedMessage(): string {
   return 'Automatic updates are not supported for this build. Use the download page instead.'
 }
 
-function extractHttpStatus(raw: string): number | null {
-  const match = raw.match(/\b(\d{3})\b/)
-  if (!match) return null
-  const status = Number.parseInt(match[1], 10)
-  return Number.isFinite(status) ? status : null
-}
-
 function sanitizeUpdaterError(raw: string, channel: GuiUpdateChannel): string {
   const message = raw.trim()
   if (!message) {
-    return `Could not read GUI update metadata for the ${channel} channel. Open the download page instead.`
+    return `Could not check for updates on the ${channel} channel. Open the download page instead.`
   }
-
-  if (/Invalid release object path\./i.test(message)) {
-    return `The ${channel} update feed is not published correctly yet. Open the download page instead.`
-  }
-
-  if (/Object not found\./i.test(message)) {
-    return `The ${channel} update feed is missing release metadata right now. Open the download page instead.`
-  }
-
-  const status = extractHttpStatus(message)
-  if (status === 400 || status === 404) {
-    return `The ${channel} update feed is not available right now. Open the download page instead.`
-  }
-  if (status === 403) {
-    return `The ${channel} update feed denied this request. Open the download page instead.`
-  }
-  if (status === 429) {
-    return `The ${channel} update feed is rate limited right now. Please try again later.`
-  }
-  if (status && status >= 500) {
-    return `The ${channel} update feed is temporarily unavailable. Please try again later.`
-  }
-
   return message.split(/\n(?:Headers:|Data:)/, 1)[0].trim() || message
 }
 
@@ -454,13 +326,16 @@ async function resolveUpdateChannel(requested?: GuiUpdateChannel): Promise<GuiUp
   return DEFAULT_GUI_UPDATE_CHANNEL
 }
 
-function configureUpdaterChannel(channel: GuiUpdateChannel, feedUrl = updateFeedUrl(channel)): void {
+function configureUpdaterChannel(channel: GuiUpdateChannel): void {
   const normalized = normalizeGuiUpdateChannel(channel)
-  const changed = normalized !== configuredChannel || feedUrl !== configuredFeedUrl
+  const changed = normalized !== configuredChannel
   configuredChannel = normalized
-  configuredFeedUrl = feedUrl
   autoUpdater.allowPrerelease = normalized === 'frontier'
-  autoUpdater.setFeedURL({ provider: 'generic', url: feedUrl })
+  autoUpdater.setFeedURL({
+    provider: 'github',
+    owner: GITHUB_OWNER,
+    repo: GITHUB_REPO
+  })
   if (!changed) return
   downloaded = false
   downloadPromise = null
@@ -469,7 +344,7 @@ function configureUpdaterChannel(channel: GuiUpdateChannel, feedUrl = updateFeed
 }
 
 async function configureReachableUpdaterChannel(channel: GuiUpdateChannel): Promise<void> {
-  configureUpdaterChannel(channel, await resolveUpdateFeedUrl(channel))
+  configureUpdaterChannel(channel)
 }
 
 export function setGuiUpdateChannel(channel: GuiUpdateChannel): void {
@@ -482,13 +357,13 @@ async function checkManualUpdate(
 ): Promise<GuiUpdateInfo> {
   const currentVersion = app.getVersion()
   try {
-    const feedUrl = configuredChannel === channel && configuredFeedUrl
-      ? configuredFeedUrl
-      : await resolveUpdateFeedUrl(channel)
-    const url = updateFeedManifestUrl(feedUrl)
-    const res = await fetch(url, {
+    const apiUrl =
+      channel === 'stable'
+        ? `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/releases/latest`
+        : `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/releases?per_page=1`
+    const res = await fetch(apiUrl, {
       headers: {
-        Accept: 'application/x-yaml,text/yaml,text/plain,*/*',
+        Accept: 'application/vnd.github.v3+json',
         'User-Agent': `kun/${currentVersion}`
       }
     })
@@ -497,19 +372,21 @@ async function checkManualUpdate(
         ok: false,
         currentVersion,
         code,
-        message: `${unsupportedMessage()} Update metadata returned ${res.status}.`,
+        message: `${unsupportedMessage()} GitHub API returned ${res.status}.`,
         releaseUrl: downloadPageUrl(),
         channel
       }
     }
-    const text = await res.text()
-    const latestVersion = parseYamlScalar(text, 'version')
+    const data = await res.json()
+    const release = Array.isArray(data) ? data[0] : data
+    const tagName = (release && typeof release.tag_name === 'string') ? release.tag_name : ''
+    const latestVersion = tagName.replace(/^v/, '')
     if (!latestVersion) {
       return {
         ok: false,
         currentVersion,
         code,
-        message: `${unsupportedMessage()} Update metadata is missing a version.`,
+        message: `${unsupportedMessage()} Could not determine latest version from GitHub.`,
         releaseUrl: downloadPageUrl(),
         channel
       }
@@ -520,7 +397,7 @@ async function checkManualUpdate(
       latestVersion,
       hasUpdate: isVersionGreater(latestVersion, currentVersion),
       releaseUrl: releaseUrlForVersion(latestVersion),
-      releaseDate: parseYamlScalar(text, 'releaseDate'),
+      releaseDate: (release && typeof release.published_at === 'string') ? release.published_at : undefined,
       channel,
       manualOnly: true,
       downloaded: false

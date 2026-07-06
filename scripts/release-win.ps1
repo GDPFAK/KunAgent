@@ -4,14 +4,13 @@
 # Usage (PowerShell):
 #   .\scripts\release-win.ps1 -Tag v0.1.1
 #   .\scripts\release-win.ps1 -Tag v0.1.1 -Publish
-#   .\scripts\release-win.ps1 -Tag v0.1.1 -R2 -PromoteR2 -Publish
-#   .\scripts\release-win.ps1 -Tag v0.1.1 -Channel stable -R2 -PromoteR2
+#   .\scripts\release-win.ps1 -Tag v0.1.1 -Channel stable
 #
 # Or copy dist\.release-meta.env from the Mac build machine:
 #   .\scripts\release-win.ps1 -Publish
 #
 # npm:
-#   npm run release:win -- -Tag v0.1.1 -R2 -PromoteR2 -Publish
+#   npm run release:win -- -Tag v0.1.1 -Publish
 
 param(
   [string]$Tag = '',
@@ -19,9 +18,7 @@ param(
   [string]$Channel = '',
   [switch]$Stable,
   [switch]$Frontier,
-  [switch]$Publish,
-  [switch]$R2,
-  [switch]$PromoteR2
+  [switch]$Publish
 )
 
 $ErrorActionPreference = 'Stop'
@@ -203,24 +200,6 @@ foreach ($asset in $Assets) {
   & gh release upload $TagName $asset --clobber
   if ($LASTEXITCODE -ne 0) {
     Write-Err "Upload failed for $asset"
-    exit 1
-  }
-}
-
-if ($R2 -or $PromoteR2) {
-  Write-Info "Uploading Windows asset metadata to R2 ($TagName)..."
-  & node (Join-Path $Root 'scripts\publish-r2.mjs') upload --platform win --tag $TagName --channel $ReleaseChannel
-  if ($LASTEXITCODE -ne 0) {
-    Write-Err 'R2 upload failed for Windows assets.'
-    exit 1
-  }
-}
-
-if ($PromoteR2) {
-  Write-Info "Promoting $TagName as R2 latest..."
-  & node (Join-Path $Root 'scripts\publish-r2.mjs') promote --tag $TagName --channel $ReleaseChannel
-  if ($LASTEXITCODE -ne 0) {
-    Write-Err 'R2 promote failed.'
     exit 1
   }
 }
