@@ -1358,6 +1358,7 @@ function stripLegacySettingsPatchKeys(payload: unknown): unknown {
   delete next.deepseek
   delete next.reasonix
   delete next.quickChat
+  delete next.resilience
 
   if (typeof next.agents === 'object' && next.agents !== null && !Array.isArray(next.agents)) {
     const agents = { ...(next.agents as Record<string, unknown>) }
@@ -1365,6 +1366,16 @@ function stripLegacySettingsPatchKeys(payload: unknown): unknown {
     delete agents.reasonix
     delete agents.quickChat
     next.agents = agents
+  }
+
+  // Strip legacy/unknown keys from the workflow settings object that would
+  // be rejected by workflowSettingsPatchSchema .strict().
+  if (typeof next.workflow === 'object' && next.workflow !== null && !Array.isArray(next.workflow)) {
+    const workflow = { ...(next.workflow as Record<string, unknown>) }
+    delete workflow.resilience
+    // Remove a duplicate nested "workflow" key if present (legacy shape).
+    delete workflow.workflow
+    next.workflow = workflow
   }
 
   return next
