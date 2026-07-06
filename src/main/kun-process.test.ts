@@ -1319,4 +1319,14 @@ describe('subagentProfilesForRuntime', () => {
     })
     expect(config.profiles.custom.name).toBe('我的代理')
   })
+
+  it('handles missing profiles field without crashing', async () => {
+    const module = await import('./kun-process')
+    // Caller may pass an incomplete object (e.g. { enabled: true }) when
+    // the stored settings lack the optional profiles array entirely.
+    // This must not throw "subagents.profiles is not iterable".
+    const config = module.subagentProfilesForRuntime({ enabled: true } as any)
+    expect(config.enabled).toBe(true)
+    expect(config.profiles).toEqual({})
+  })
 })
