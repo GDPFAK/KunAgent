@@ -572,7 +572,11 @@ export async function syncGuiManagedKunConfig(
         ...memory,
         enabled: runtime.memoryEnabled
       },
-      subagents: subagentProfilesForRuntime(runtime.subagents ?? { enabled: true, profiles: [] }),
+      subagents: subagentProfilesForRuntime(
+        runtime.subagents?.profiles
+          ? runtime.subagents
+          : { enabled: true, profiles: [] }
+      ),
       mcp: {
         ...mcp,
         ...(options?.scheduleMcp || mcpSearch.enabled || hasImportedEnabledMcpServer
@@ -1212,7 +1216,7 @@ function stripBlankProfileFields(profile: Record<string, unknown>): Record<strin
 
 export function subagentProfilesForRuntime(subagents: KunSubagentsSettingsV1): SubagentsCapabilityConfig {
   const profiles: Record<string, unknown> = {}
-  for (const profile of subagents.profiles) {
+  for (const profile of subagents.profiles ?? []) {
     if (!profile.enabled) continue
     const { id: _id, enabled: _enabled, name, reasoningEffort, ...rest } = profile
     // Coerce the per-profile reasoning enum so a hand-edited invalid value can't
