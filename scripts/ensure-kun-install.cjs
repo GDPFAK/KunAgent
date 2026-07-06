@@ -23,7 +23,7 @@ function run(command, args) {
 
 function ensureKunInstall() {
   if (!REQUIRED_PATHS.every((path) => existsSync(path))) {
-    const installKun = run('npm', ['--prefix', 'kun', 'ci'])
+    const installKun = run('npm', ['--prefix', 'kun', 'install'])
     if (installKun.status !== 0) {
       process.exit(installKun.status || 1)
     }

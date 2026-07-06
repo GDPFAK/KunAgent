@@ -2,7 +2,8 @@
 node_modules/
 out/
 dist/
-.cache/
+.cache/*
+!.cache/electron/.gitkeep
 .deepseek/
 *.log
 .DS_Store
