@@ -22,7 +22,7 @@
 
 ## Validation / 验证
 
-- [ ] I agree that this contribution is submitted under the [Contributor License Agreement](https://github.com/KunAgent/Kun/blob/develop/CLA.md). / 我同意本贡献遵循 [Contributor License Agreement](https://github.com/KunAgent/Kun/blob/develop/CLA.md) 提交。
+- [ ] I agree that this contribution is submitted under the [Contributor License Agreement](https://github.com/GDPFAK/KunAgent/blob/develop/CLA.md). / 我同意本贡献遵循 [Contributor License Agreement](https://github.com/GDPFAK/KunAgent/blob/develop/CLA.md) 提交。
 - [ ] `npm run test`
 - [ ] `npm run typecheck`
 - [ ] `npm run build`
