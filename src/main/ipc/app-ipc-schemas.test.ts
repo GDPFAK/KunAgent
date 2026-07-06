@@ -239,6 +239,37 @@ describe('app-ipc-schemas', () => {
     })).toThrow()
   })
 
+  it('strips legacy keys from settings patch', () => {
+    // Top-level legacy keys should be silently stripped instead of rejected.
+    const result1 = settingsPatchSchema.parse({
+      theme: 'dark',
+      agentProvider: 'claude',
+      deepseek: { apiKey: 'sk-old' },
+      reasonix: true,
+      quickChat: { enabled: true },
+      resilience: { retryCount: 3 }
+    })
+    expect(result1.theme).toBe('dark')
+    expect((result1 as Record<string, unknown>).agentProvider).toBeUndefined()
+    expect((result1 as Record<string, unknown>).deepseek).toBeUndefined()
+    expect((result1 as Record<string, unknown>).reasonix).toBeUndefined()
+    expect((result1 as Record<string, unknown>).quickChat).toBeUndefined()
+    expect((result1 as Record<string, unknown>).resilience).toBeUndefined()
+
+    // Legacy keys inside workflow should be stripped.
+    const result2 = settingsPatchSchema.parse({
+      workflow: {
+        enabled: true,
+        defaultWorkspaceRoot: '/tmp/test',
+        resilience: { retryCount: 3 },
+        workflow: { extra: true }
+      }
+    })
+    expect(result2.workflow?.enabled).toBe(true)
+    expect((result2.workflow as Record<string, unknown>).resilience).toBeUndefined()
+    expect((result2.workflow as Record<string, unknown>).workflow).toBeUndefined()
+  })
+
   it('accepts the cursor spotlight preference', () => {
     expect(settingsPatchSchema.parse({ cursorSpotlight: false }).cursorSpotlight).toBe(false)
     expect(settingsPatchSchema.parse({ cursorSpotlightColor: ' #FF8800 ' }).cursorSpotlightColor).toBe('#FF8800')
