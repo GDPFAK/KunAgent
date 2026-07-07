@@ -95,7 +95,7 @@ describe('registerAppIpcHandlers', () => {
     handlers.clear()
   })
 
-  it('rejects invalid settings patches at the handler boundary', async () => {
+  it('strips unrecognized keys from settings patches instead of rejecting', async () => {
     const { registerAppIpcHandlers } = await import('./register-app-ipc-handlers')
     const applySettingsPatch = vi.fn(async () => settings())
 
@@ -103,10 +103,11 @@ describe('registerAppIpcHandlers', () => {
 
     const handler = handlers.get('settings:set')
     expect(handler).toBeTypeOf('function')
+    // Unknown keys like `mysteryFlag` inside `kun` are stripped silently.
     await expect(
       handler?.({}, { agents: { kun: { mysteryFlag: true } } })
-    ).rejects.toThrow(/Invalid payload for settings:set/)
-    expect(applySettingsPatch).not.toHaveBeenCalled()
+    ).resolves.toEqual(settings())
+    expect(applySettingsPatch).toHaveBeenCalledWith({ agents: { kun: {} } })
   })
 
   it('passes valid settings patches through to applySettingsPatch', async () => {

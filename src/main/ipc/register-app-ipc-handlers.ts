@@ -244,8 +244,52 @@ type RegisterAppIpcHandlersOptions = {
 function parseIpcPayload<T>(channel: string, schema: z.ZodType<T>, payload: unknown): T {
   const parsed = schema.safeParse(payload)
   if (parsed.success) return parsed.data
+
+  // Settings channels: when strict validation fails due to unrecognized/legacy keys,
+  // remove those keys at the reported paths and retry with the original schema.
+  if (
+    (channel === 'settings:set' || channel === 'settings:save-silent') &&
+    typeof payload === 'object' && payload !== null &&
+    !Array.isArray(payload)
+  ) {
+    for (const issue of parsed.error.issues) {
+      if (issue.code === 'unrecognized_keys' && issue.keys && issue.keys.length > 0) {
+        const cleaned = removeKeysAt(payload, issue.path, new Set(issue.keys))
+        const retried = schema.safeParse(cleaned)
+        if (retried.success) return retried.data
+        break // only attempt one round of stripping
+      }
+    }
+  }
+
   const issue = parsed.error.issues[0]
   throw new Error(`Invalid payload for ${channel}: ${issue?.message ?? 'Bad request.'}`)
+}
+
+/** Deep-clone an object/value and delete specific keys at a given path. */
+function removeKeysAt(value: unknown, path: readonly (string | number)[], keys: Set<string>): unknown {
+  if (path.length === 0) {
+    if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
+      const obj = { ...(value as Record<string, unknown>) }
+      for (const k of keys) delete obj[k]
+      return obj
+    }
+    return value
+  }
+  // Navigate into the path
+  if (typeof value === 'object' && value !== null) {
+    const clone = Array.isArray(value) ? [...value] : { ...(value as Record<string, unknown>) }
+    const segment = path[0]
+    if (segment in clone) {
+      ;(clone as Record<string | number, unknown>)[segment] = removeKeysAt(
+        (clone as Record<string | number, unknown>)[segment],
+        path.slice(1),
+        keys
+      )
+    }
+    return clone
+  }
+  return value
 }
 
 // node:fs/promises 没有内置 pathExists;用 access 实现。

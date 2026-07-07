@@ -1349,6 +1349,12 @@ const designSettingsPatchSchema = z.object({
   deviceFrame: z.boolean().optional()
 }).strict()
 
+/**
+ * Strip legacy and unknown keys from a settings patch before Zod .strict()
+ * validation. The GUI saves the full AppSettingsV1 as a patch; any key not
+ * declared in a .strict() sub-schema causes an "Invalid payload" IPC error.
+ * Each section below uses the exact field set from its Zod patch schema.
+ */
 function stripLegacySettingsPatchKeys(payload: unknown): unknown {
   if (typeof payload !== 'object' || payload === null || Array.isArray(payload)) return payload
   const source = payload as Record<string, unknown>
@@ -1359,31 +1365,67 @@ function stripLegacySettingsPatchKeys(payload: unknown): unknown {
   delete next.reasonix
   delete next.quickChat
   delete next.resilience
+  delete next.toolOutputLimits
+  delete next.instructions
+  delete next.retry
+  delete next.promptOptimization
+  delete next.failover
 
   if (typeof next.agents === 'object' && next.agents !== null && !Array.isArray(next.agents)) {
     const agents = { ...(next.agents as Record<string, unknown>) }
     delete agents.codewhale
     delete agents.reasonix
     delete agents.quickChat
+    delete agents.resilience
+    delete agents.workflow
+    delete agents.toolOutputLimits
+    delete agents.instructions
+    delete agents.retry
+    delete agents.promptOptimization
+    delete agents.failover
     next.agents = agents
   }
 
-  // Strip legacy/unknown keys from the workflow settings object that would
-  // be rejected by workflowSettingsPatchSchema .strict(). 保留已知字段,
-  // 删除所有其他键以免 GUI 全量保存设置时被 strict() 拒绝。
-  if (typeof next.workflow === 'object' && next.workflow !== null && !Array.isArray(next.workflow)) {
-    const allowed = new Set([
+  // Whitelists for every .strict() nested object in settingsPatchObjectSchema.
+  // Keys not in the set are dropped to prevent Zod strict-mode rejection.
+  const strictObjectAllowLists: Record<string, Set<string>> = {
+    workflow: new Set([
       'enabled', 'defaultWorkspaceRoot', 'providerId', 'model', 'mode',
       'keepAwake', 'webhookPort', 'webhookSecret', 'workflows', 'presets',
       'modules', 'hookTriggers'
-    ])
-    const workflow: Record<string, unknown> = {}
-    for (const key of Object.keys(next.workflow as Record<string, unknown>)) {
-      if (allowed.has(key)) {
-        workflow[key] = (next.workflow as Record<string, unknown>)[key]
+    ]),
+    write: new Set([
+      'defaultWorkspaceRoot', 'activeWorkspaceRoot', 'workspaces',
+      'inlineCompletion', 'selectionAssist', 'typography', 'agentPresets'
+    ]),
+    claw: new Set([
+      'enabled', 'skills', 'im', 'channels', 'tasks'
+    ]),
+    schedule: new Set([
+      'enabled', 'defaultWorkspaceRoot', 'providerId', 'model', 'mode',
+      'promptPrefix', 'skills', 'keepAwake', 'internal', 'tasks'
+    ]),
+    design: new Set([
+      'defaultWorkspaceRoot', 'brandColor', 'tone', 'designSystemPreset',
+      'designType', 'designGuidelines', 'radius', 'density', 'fontStyle',
+      'model', 'providerId', 'reasoningEffort', 'generationPrompt',
+      'implementStackHint', 'injectIntoCode', 'publishDesignSystem',
+      'defaultViewport', 'defaultCanvasView', 'canvasBackground',
+      'liveRefresh', 'deviceFrame'
+    ]),
+    terminal: new Set(['colors'])
+  }
+
+  for (const [sectionKey, allowed] of Object.entries(strictObjectAllowLists)) {
+    if (typeof next[sectionKey] === 'object' && next[sectionKey] !== null && !Array.isArray(next[sectionKey])) {
+      const filtered: Record<string, unknown> = {}
+      for (const key of Object.keys(next[sectionKey] as Record<string, unknown>)) {
+        if (allowed.has(key)) {
+          filtered[key] = (next[sectionKey] as Record<string, unknown>)[key]
+        }
       }
+      next[sectionKey] = filtered
     }
-    next.workflow = workflow
   }
 
   return next
@@ -1421,6 +1463,13 @@ const settingsPatchObjectSchema = z.object({
 }).strict()
 
 export const settingsPatchSchema = z.preprocess(stripLegacySettingsPatchKeys, settingsPatchObjectSchema)
+
+/** Same as settingsPatchSchema but strips unknown keys instead of rejecting them.
+ *  Used by settings IPC handlers to tolerate legacy/frontend-only keys. */
+export const settingsPatchStripSchema = z.preprocess(
+  stripLegacySettingsPatchKeys,
+  settingsPatchObjectSchema.strip()
+)
 
 export const skillSaveFilePayloadSchema = z
   .object({
