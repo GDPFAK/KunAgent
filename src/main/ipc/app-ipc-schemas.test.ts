@@ -262,12 +262,23 @@ describe('app-ipc-schemas', () => {
         enabled: true,
         defaultWorkspaceRoot: '/tmp/test',
         resilience: { retryCount: 3 },
-        workflow: { extra: true }
+        workflow: { extra: true },
+        toolOutputLimits: { maxTokens: 4096 },
+        instructions: 'do stuff',
+        retry: { maxAttempts: 3 },
+        promptOptimization: { enabled: true },
+        failover: { enabled: true }
       }
     })
     expect(result2.workflow?.enabled).toBe(true)
+    expect(result2.workflow?.defaultWorkspaceRoot).toBe('/tmp/test')
     expect((result2.workflow as Record<string, unknown>).resilience).toBeUndefined()
     expect((result2.workflow as Record<string, unknown>).workflow).toBeUndefined()
+    expect((result2.workflow as Record<string, unknown>).toolOutputLimits).toBeUndefined()
+    expect((result2.workflow as Record<string, unknown>).instructions).toBeUndefined()
+    expect((result2.workflow as Record<string, unknown>).retry).toBeUndefined()
+    expect((result2.workflow as Record<string, unknown>).promptOptimization).toBeUndefined()
+    expect((result2.workflow as Record<string, unknown>).failover).toBeUndefined()
   })
 
   it('accepts the cursor spotlight preference', () => {
