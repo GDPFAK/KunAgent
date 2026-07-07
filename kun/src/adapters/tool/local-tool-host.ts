@@ -66,6 +66,14 @@ export type LocalToolHostOptions = {
   hooks?: readonly ResolvedHook[]
   /** Runtime read-before-edit guard. Disabled by default for direct unit use. */
   readTracker?: boolean | ReadTrackerOptions
+  /**
+   * Workspace root directories the user has explicitly trusted. When a
+   * `bash` tool call targets a trusted workspace and the approval policy
+   * would otherwise prompt, the call is auto-approved so common build/test
+   * commands don't stop to ask. The list is populated from the runtime
+   * config; empty by default (no behavioral change).
+   */
+  trustedWorkspaceRoots?: string[]
 }
 
 /**
@@ -88,12 +96,16 @@ export class LocalToolHost implements ToolHost {
   private readonly allowList: Set<string>
   private readonly hooks: readonly ResolvedHook[]
   private readonly readTracker: ReadTracker
+  private readonly trustedWorkspaceRoots: string[]
 
   constructor(options: LocalToolHostOptions) {
     this.registry = options.registry ?? CapabilityRegistry.fromLocalTools(options.tools ?? [])
     this.allowList = new Set(options.allowList ?? [])
     this.hooks = options.hooks ?? []
     this.readTracker = new ReadTracker(normalizeReadTrackerOptions(options.readTracker))
+    this.trustedWorkspaceRoots = (options.trustedWorkspaceRoots ?? [])
+      .map((p) => p.replaceAll('\\', '/').replace(/\/+$/, '').toLowerCase())
+      .filter(Boolean)
   }
 
   listTools(context?: ToolHostContext) {
@@ -277,6 +289,17 @@ export class LocalToolHost implements ToolHost {
   private requiresApproval(tool: LocalTool, call: ToolCallLike, context: ToolHostContext): boolean {
     if (this.isInteractiveGuiGateTool(call.toolName)) return false
     if (tool.policy === 'never' || context.approvalPolicy === 'never') return false
+    // Bash calls on a trusted workspace bypass the approval gate so that
+    // common build/test/run commands don't stop to ask. The user explicitly
+    // trusts the workspace via the runtime config or first-use prompt.
+    if (
+      call.toolName === 'bash' &&
+      context.workspace &&
+      this.trustedWorkspaceRoots.length > 0 &&
+      this.isTrustedWorkspace(context.workspace)
+    ) {
+      return false
+    }
     switch (context.approvalPolicy) {
       case 'always':
         return true
@@ -289,6 +312,12 @@ export class LocalToolHost implements ToolHost {
         if (tool.policy === 'auto') return !this.allowList.has(call.toolName)
         return true
     }
+  }
+
+  /** Normalise and check whether a workspace path lives under a trusted root. */
+  private isTrustedWorkspace(workspace: string): boolean {
+    const normalized = workspace.replaceAll('\\', '/').replace(/\/+$/, '').toLowerCase()
+    return this.trustedWorkspaceRoots.some((root) => normalized === root || normalized.startsWith(root + '/'))
   }
 
   private isInteractiveGuiGateTool(toolName: string): boolean {

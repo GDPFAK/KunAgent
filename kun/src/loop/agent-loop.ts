@@ -73,6 +73,8 @@ import {
 } from '../hooks/hook-engine.js'
 import {
   applyTokenEconomyToRequest,
+  compactHistoryItem,
+  compactToolSpec,
   normalizeTokenEconomyConfig,
   type TokenEconomyConfig
 } from './token-economy.js'
@@ -111,6 +113,15 @@ const MAX_PARALLEL_TOOL_CALLS = 3
 // N images"), bounding context growth for long computer-use sessions.
 const MAX_FORWARDED_TOOL_IMAGES = 3
 const MAX_TURN_MODEL_STEPS = 64
+
+/**
+ * Maximum prompt tokens an auto-resume chain may accumulate across consecutive
+ * failed turns before the goal is moved to `blocked`. Prevents a permanently
+ * failing goal from burning unbounded tokens through repeated restart cycles
+ * (one turn can fail for many reasons — model timeout, tool crash, provider
+ * overload — but the resume budget bounds the total cost of retrying).
+ */
+const GOAL_RESUME_TOKEN_BUDGET = 100_000
 
 /**
  * Tools that, on their own, do not count as "progress" toward a goal when
@@ -719,6 +730,14 @@ export class AgentLoop {
   private readonly turnFailures = new Map<string, TurnFailure>()
   /** Turns that executed at least one real (non-goal-status) tool call. */
   private readonly turnMadeProgress = new Set<string>()
+  /** Cumulative prompt tokens consumed by goal auto-resume attempts per thread. */
+  private readonly goalResumeTokens = new Map<string, number>()
+  /** Cached tool specs per turn, refreshed every 5 model steps + on drift. */
+  private readonly cachedTurnTools = new Map<string, { tools: ModelToolSpec[]; step: number }>()
+  /** Last-injected goal continuation instruction, tracked to avoid re-injecting unchanged content. */
+  private lastInjectedGoalInstruction: string | null = null
+  /** Last-injected todo continuation instruction, tracked to avoid re-injecting unchanged content. */
+  private lastInjectedTodoInstruction: string | null = null
   private readonly goalResume: GoalResumeCoordinator
 
   constructor(opts: AgentLoopOptions) {
@@ -871,6 +890,7 @@ export class AgentLoop {
       this.turnMadeProgress.delete(turnId)
       this.emptyPostToolRecoveryStepsByTurn.delete(turnId)
       this.turnFailures.delete(turnId)
+      this.cachedTurnTools.delete(turnId)
       await this.runTurnEndHooks(threadId, turnId, finalStatus ?? 'failed', finalError)
     }
   }
@@ -1123,7 +1143,15 @@ export class AgentLoop {
     const wasPlanTurn = turn?.mode === 'plan' || Boolean(turn?.guiPlan)
     if (finalStatus !== 'failed' || wasPlanTurn) {
       this.goalResume.clear(threadId)
+      this.goalResumeTokens.delete(threadId) // reset budget on any non-failure outcome
       return
+    }
+    // Track cumulative prompt tokens consumed by this resume chain so the
+    // launch gate can stop an unbounded sequence before it burns more budget.
+    const threadUsage = this.opts.usage.forThread(threadId)
+    if (threadUsage.promptTokens > 0) {
+      const previous = this.goalResumeTokens.get(threadId) ?? 0
+      this.goalResumeTokens.set(threadId, previous + threadUsage.promptTokens)
     }
     const outcome = this.goalResume.noteGoalTurnFailed({
       threadId,
@@ -1145,6 +1173,17 @@ export class AgentLoop {
     const thread = await this.opts.threadStore.get(threadId)
     const goal = thread?.goal
     if (!thread || !goal || goal.status !== 'active') return
+    // Skip launch when the cumulative resume token budget is exhausted so a
+    // permanently failing goal doesn't burn tokens through repeated cycles.
+    const budgetUsed = this.goalResumeTokens.get(threadId) ?? 0
+    if (budgetUsed >= GOAL_RESUME_TOKEN_BUDGET) {
+      await this.transitionGoalStatus(
+        threadId, '', 'blocked',
+        `Goal auto-resume stopped: accumulated ${budgetUsed} prompt tokens without completion. Increase GOAL_RESUME_TOKEN_BUDGET or set the goal active again to retry.`
+      )
+      this.goalResumeTokens.delete(threadId)
+      return
+    }
     // Inherit headless/IM gating from the most recent turn so a resumed turn
     // doesn't deadlock awaiting user input that will never arrive.
     const lastTurn = thread.turns[thread.turns.length - 1]
@@ -1395,7 +1434,14 @@ export class AgentLoop {
         ? {}
         : { awaitUserInput: (input) => this.awaitUserInput(threadId, turnId, input, signal) })
     }
-    const tools = await this.opts.toolHost.listTools(toolContext)
+    let tools: ModelToolSpec[]
+    const cached = this.cachedTurnTools.get(turnId)
+    if (cached && stepIndex > 0 && stepIndex % 5 !== 0) {
+      tools = cached.tools
+    } else {
+      tools = await this.opts.toolHost.listTools(toolContext)
+      this.cachedTurnTools.set(turnId, { tools, step: stepIndex })
+    }
     const toolSpecs: ModelToolSpec[] = tools
     const toolProviderMetadata = new Map(
       tools.map((tool) => [tool.name, { providerId: tool.providerId, providerKind: tool.providerKind }])
@@ -1463,6 +1509,13 @@ export class AgentLoop {
     await this.recordPipelineStage(threadId, turnId, 'input_compressed', {
       historyItems: history.length
     })
+    // Compress tool descriptions for agent-mode requests to reduce prompt
+    // tokens sent per model step. Plan mode is excluded because its tool set
+    // is already minimal (read-only + create_plan); uncompressed descriptions
+    // keep the plan guidance readable for the model.
+    const toolSpecsForRequest = !planTurnActive
+      ? effectiveToolSpecs.map(compactToolSpec)
+      : effectiveToolSpecs
     // Forward the just-generated image(s) back to a vision-capable model so it can
     // self-review and regenerate if the result is off. Bytes come from the
     // already-persisted attachment/file; the persisted tool output keeps NO base64
@@ -1471,6 +1524,12 @@ export class AgentLoop {
       history,
       (output) => this.resolveGeneratedImageForForward(output, threadId, thread?.workspace),
       MAX_FORWARDED_GENERATED_IMAGES
+    )
+    // Always compress current-turn tool results in the history so large
+    // bash/read outputs from consecutive model steps don't saturate the
+    // context window. Runs independently of the token economy toggle.
+    const historyForRequest = forwardHistory.map(
+      (item) => item.turnId === turnId ? compactHistoryItem(item) : item
     )
     const runtimeContextInstruction = shouldInjectInitialRuntimeContext({
       stepIndex,
@@ -1482,13 +1541,17 @@ export class AgentLoop {
           nowIso: this.opts.nowIso()
         })
       : null
+    const goalChanged = activeGoalInstruction !== this.lastInjectedGoalInstruction
+    const todoChanged = activeTodoInstruction !== this.lastInjectedTodoInstruction
+    if (activeGoalInstruction && goalChanged) this.lastInjectedGoalInstruction = activeGoalInstruction
+    if (activeTodoInstruction && todoChanged) this.lastInjectedTodoInstruction = activeTodoInstruction
     const contextInstructions = [
       ...(runtimeContextInstruction ? [runtimeContextInstruction] : []),
-      ...(activeGoalInstruction ? [activeGoalInstruction] : []),
+      ...(goalChanged && activeGoalInstruction ? [activeGoalInstruction] : []),
       ...(goalRecoveryInstruction && (this.goalNoToolRecoveryStepsByTurn.get(turnId) ?? 0) > 0
         ? [goalRecoveryInstruction]
         : []),
-      ...(activeTodoInstruction ? [activeTodoInstruction] : []),
+      ...(todoChanged && activeTodoInstruction ? [activeTodoInstruction] : []),
       ...((this.emptyPostToolRecoveryStepsByTurn.get(turnId) ?? 0) > 0
         ? [emptyPostToolRecoveryInstruction()]
         : []),
@@ -1527,10 +1590,10 @@ export class AgentLoop {
       ...(planTurnActive ? { modeInstruction: PLAN_MODE_INSTRUCTION } : {}),
       ...(contextInstructions.length ? { contextInstructions } : {}),
       prefix: this.opts.prefix.fewShots,
-      history: capToolResultImages(forwardHistory, MAX_FORWARDED_TOOL_IMAGES),
+      history: capToolResultImages(historyForRequest, MAX_FORWARDED_TOOL_IMAGES),
       ...(attachments.imageAttachments.length ? { attachments: attachments.imageAttachments } : {}),
       ...(attachments.textFallbacks.length ? { attachmentTextFallbacks: attachments.textFallbacks } : {}),
-      tools: effectiveToolSpecs,
+      tools: toolSpecsForRequest,
       ...(requiredToolName ? { requiredToolName } : {}),
       ...(modelRoute.reasoningEffort ? { reasoningEffort: modelRoute.reasoningEffort } : {}),
       abortSignal: signal
