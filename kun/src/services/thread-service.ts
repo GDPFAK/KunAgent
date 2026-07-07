@@ -336,40 +336,50 @@ export class ThreadService {
     current: ThreadRecord,
     nextItems: readonly ThreadTodoItem[]
   ): Promise<void> {
-    const previousById = new Map((current.todos?.items ?? []).map((item) => [item.id, item]))
-    const changedPlanItems = nextItems.filter((item) => {
-      if (item.source?.kind !== 'plan') return false
-      const previous = previousById.get(item.id)
-      return !previous || previous.status !== item.status
-    })
-    if (changedPlanItems.length === 0) return
+    try {
+      const previousById = new Map((current.todos?.items ?? []).map((item) => [item.id, item]))
+      const changedPlanItems = nextItems.filter((item) => {
+        if (item.source?.kind !== 'plan') return false
+        const previous = previousById.get(item.id)
+        return !previous || previous.status !== item.status
+      })
+      if (changedPlanItems.length === 0) return
 
-    const byRelativePath = new Map<string, ThreadTodoItem[]>()
-    for (const item of changedPlanItems) {
-      const source = item.source
-      if (!source || source.kind !== 'plan') continue
-      const relativePath = normalizePlanRelativePath(source.relativePath)
-      if (!isGuiPlanRelativePath(relativePath)) {
-        throw new Error(`invalid GUI plan relative path: ${source.relativePath}`)
-      }
-      byRelativePath.set(relativePath, [...(byRelativePath.get(relativePath) ?? []), item])
-    }
-
-    for (const [relativePath, items] of byRelativePath) {
-      const absolutePath = resolveWorkspaceRelativePath(current.workspace, relativePath)
-      await withFileMutationQueue(absolutePath, async () => {
-        let markdown = await readFile(absolutePath, 'utf-8')
-        let changed = false
-        for (const item of items) {
-          const patched = patchPlanTodoStatus(markdown, {
-            content: item.content,
-            status: item.status,
-            source: item.source
-          })
-          markdown = patched.markdown
-          changed ||= patched.changed
+      const byRelativePath = new Map<string, ThreadTodoItem[]>()
+      for (const item of changedPlanItems) {
+        const source = item.source
+        if (!source || source.kind !== 'plan') continue
+        const relativePath = normalizePlanRelativePath(source.relativePath)
+        if (!isGuiPlanRelativePath(relativePath)) {
+          throw new Error(`invalid GUI plan relative path: ${source.relativePath}`)
         }
-        if (changed) await writeFile(absolutePath, markdown, 'utf-8')
+        byRelativePath.set(relativePath, [...(byRelativePath.get(relativePath) ?? []), item])
+      }
+
+      for (const [relativePath, items] of byRelativePath) {
+        const absolutePath = resolveWorkspaceRelativePath(current.workspace, relativePath)
+        await withFileMutationQueue(absolutePath, async () => {
+          let markdown = await readFile(absolutePath, 'utf-8')
+          let changed = false
+          for (const item of items) {
+            const patched = patchPlanTodoStatus(markdown, {
+              content: item.content,
+              status: item.status,
+              source: item.source
+            })
+            markdown = patched.markdown
+            changed ||= patched.changed
+          }
+          if (changed) await writeFile(absolutePath, markdown, 'utf-8')
+        })
+      }
+    } catch (error) {
+      await this.events.record({
+        kind: 'error',
+        threadId: current.id,
+        message: `Failed to sync todo status to plan markdown: ${error instanceof Error ? error.message : String(error)}`,
+        code: 'plan_markdown_sync_failed',
+        severity: 'warning'
       })
     }
   }
