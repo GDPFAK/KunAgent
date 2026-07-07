@@ -32,65 +32,68 @@ const HAS_ELECTRON_BINARY = existsSync(join(ELECTRON_DIST, 'electron.exe'))
 if (!HAS_ELECTRON_BINARY) {
   console.log('[postinstall] Electron binary missing in node_modules/electron/dist.')
 
+  // Determine expected Electron version from the installed package
+  const { readdirSync, writeFileSync } = require('node:fs')
+  const electronVersion = require(join(ELECTRON_PKG, 'package.json')).version
+  const platform = process.platform === 'win32' ? 'win32' : process.platform === 'darwin' ? 'darwin' : 'linux'
+  const arch = process.arch
+  const expectedZip = `electron-v${electronVersion}-${platform}-${arch}.zip`
+
   // Search for cached electron zip (flat or in hashed subdirectories)
-  const { readdirSync } = require('node:fs')
   let cachedZip = null
   if (existsSync(PROJECT_ELECTRON_CACHE)) {
-    // Search recursively through hashed subdirs
-    const entries = readdirSync(PROJECT_ELECTRON_CACHE, { withFileTypes: true })
-    for (const entry of entries) {
-      const fullPath = join(PROJECT_ELECTRON_CACHE, entry.name)
-      if (entry.isDirectory()) {
-        const subFiles = readdirSync(fullPath)
-        const zipFile = subFiles.find(f => f.endsWith('.zip') && f.startsWith('electron-v'))
-        if (zipFile) {
-          cachedZip = join(fullPath, zipFile)
-          break
+    // First check flat cache for exact version
+    const flatZip = join(PROJECT_ELECTRON_CACHE, expectedZip)
+    if (existsSync(flatZip)) {
+      cachedZip = flatZip
+    } else {
+      // Search recursively through hashed subdirs for exact version
+      const entries = readdirSync(PROJECT_ELECTRON_CACHE, { withFileTypes: true })
+      for (const entry of entries) {
+        const fullPath = join(PROJECT_ELECTRON_CACHE, entry.name)
+        if (entry.isDirectory()) {
+          const subFiles = readdirSync(fullPath)
+          const zipFile = subFiles.find(f => f === expectedZip)
+          if (zipFile) {
+            cachedZip = join(fullPath, zipFile)
+            break
+          }
         }
-      } else if (entry.name.endsWith('.zip') && entry.name.startsWith('electron-v')) {
-        cachedZip = fullPath
       }
     }
   }
 
   if (cachedZip) {
     console.log('[postinstall] Extracting Electron from cache:', cachedZip)
-    const { writeFileSync } = require('node:fs')
-    const tryExtract = () => {
-      const extractZip = require('extract-zip')
-      return extractZip(cachedZip, { dir: ELECTRON_DIST }).then(() => {
-        writeFileSync(join(ELECTRON_PKG, 'path.txt'), 'electron.exe')
-        console.log('[postinstall] ✓ Electron extracted from cache.')
-      })
-    }
-    tryExtract().catch((extractErr) => {
-      console.warn('[postinstall] Could not extract from cache:', extractErr.message)
-      // Fallback: use @electron/get to download
-      try {
-        const { downloadArtifact } = require('@electron/get')
-        if (!process.env.ELECTRON_MIRROR) {
-          process.env.ELECTRON_MIRROR = 'https://npmmirror.com/mirrors/electron/'
-        }
-        downloadArtifact({
-          version: require(join(ELECTRON_PKG, 'package.json')).version,
-          artifactName: 'electron',
-          cacheRoot: PROJECT_ELECTRON_CACHE,
-          platform: process.platform,
-          arch: process.arch
-        }).then((zipPath) => {
-          const extractZip = require('extract-zip')
-          return extractZip(zipPath, { dir: ELECTRON_DIST })
-        }).then(() => {
-          writeFileSync(join(ELECTRON_PKG, 'path.txt'), 'electron.exe')
-          console.log('[postinstall] ✓ Electron downloaded and extracted.')
-        }).catch((dlErr) => {
-          console.warn('[postinstall] @electron/get download also failed:', dlErr.message)
-          console.log('[postinstall] Try: node scripts/fetch-electron.cjs')
-        })
-      } catch (dlErr) {
-        console.warn('[postinstall] @electron/get not available:', dlErr.message)
+    // extract-zip is promise-based; write a temp script and run it synchronously
+    // so the binary is ready before the script continues to build steps.
+    const { writeFileSync, unlinkSync } = require('node:fs')
+    const { join: pathJoin } = require('node:path')
+    const tmpScript = pathJoin(ROOT, '.cache', 'electron', '_extract.cjs')
+    writeFileSync(tmpScript, [
+      `const ez = require(${JSON.stringify(require.resolve('extract-zip'))})`,
+      `const cachedZip = ${JSON.stringify(cachedZip)}`,
+      `const distDir = ${JSON.stringify(ELECTRON_DIST)}`,
+      `const pathTxt = ${JSON.stringify(join(ELECTRON_PKG, 'path.txt'))}`,
+      `ez(cachedZip, { dir: distDir }).then(() => {`,
+      `  require('fs').writeFileSync(pathTxt, 'electron.exe')`,
+      `  process.exit(0)`,
+      `}).catch(err => { console.error(err.message); process.exit(1) })`
+    ].join('\n'), 'utf8')
+    const extractResult = run('node', [tmpScript])
+    try { unlinkSync(tmpScript) } catch {}
+    if (extractResult.status === 0) {
+      console.log('[postinstall] ✓ Electron extracted from cache.')
+    } else {
+      console.warn('[postinstall] Extraction from cache failed, falling back to electron install.js')
+      const installResult = run('node', [join(ELECTRON_PKG, 'install.js')])
+      if (installResult.status === 0) {
+        console.log('[postinstall] ✓ Electron binary ready via install.js.')
+      } else {
+        console.warn('[postinstall] install.js also failed.')
+        console.log('[postinstall] Try: node scripts/fetch-electron.cjs')
       }
-    })
+    }
   } else {
     console.log('[postinstall] No Electron zip in project cache.')
     console.log('[postinstall] To pre-download Electron from a Chinese mirror, run:')
