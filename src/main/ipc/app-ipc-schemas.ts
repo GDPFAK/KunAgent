@@ -1369,12 +1369,20 @@ function stripLegacySettingsPatchKeys(payload: unknown): unknown {
   }
 
   // Strip legacy/unknown keys from the workflow settings object that would
-  // be rejected by workflowSettingsPatchSchema .strict().
+  // be rejected by workflowSettingsPatchSchema .strict(). 保留已知字段,
+  // 删除所有其他键以免 GUI 全量保存设置时被 strict() 拒绝。
   if (typeof next.workflow === 'object' && next.workflow !== null && !Array.isArray(next.workflow)) {
-    const workflow = { ...(next.workflow as Record<string, unknown>) }
-    delete workflow.resilience
-    // Remove a duplicate nested "workflow" key if present (legacy shape).
-    delete workflow.workflow
+    const allowed = new Set([
+      'enabled', 'defaultWorkspaceRoot', 'providerId', 'model', 'mode',
+      'keepAwake', 'webhookPort', 'webhookSecret', 'workflows', 'presets',
+      'modules', 'hookTriggers'
+    ])
+    const workflow: Record<string, unknown> = {}
+    for (const key of Object.keys(next.workflow as Record<string, unknown>)) {
+      if (allowed.has(key)) {
+        workflow[key] = (next.workflow as Record<string, unknown>)[key]
+      }
+    }
     next.workflow = workflow
   }
 
