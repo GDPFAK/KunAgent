@@ -1,4 +1,4 @@
-import type { ReactElement } from 'react'
+﻿import type { ReactElement } from 'react'
 import { memo, useEffect, useMemo, useRef, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -15,6 +15,8 @@ import { DiffView } from '../DiffView'
 import { AssistantMarkdown } from './AssistantMarkdown'
 import { ImagePreviewLightbox } from './ImagePreviewLightbox'
 import { ModelMetaTag, WritePromptMetaDisclosure } from './message-timeline-cards'
+import { AgentRoleBadge } from './AgentRoleBadge'
+import { ErrorBoundary } from '../ErrorBoundary'
 import { readNumber, formatDuration, formatToolTitle } from './message-timeline-tools'
 import { answersByQuestionId, shouldShowQuestionHeader } from './user-input-panel-logic'
 
@@ -23,7 +25,7 @@ const COPY_FEEDBACK_RESET_MS = 1600
 /**
  * User message bubble with hover affordance to rewind/edit. Click the rewind
  * pill, the bubble flips into a textarea, and Resend submits an edited
- * version of the message — locally truncating subsequent turns and starting
+ * version of the message 鈥?locally truncating subsequent turns and starting
  * a fresh turn on the same thread (see chat-store `rewindAndResend`).
  */
 function UserMessageBubble({
@@ -147,6 +149,9 @@ function UserMessageBubble({
             <span className="min-w-0 flex-1" />
           )}
           <ModelMetaTag label={block.modelLabel} />
+          <ErrorBoundary>
+            <AgentRoleBadge roleId={block.kind === 'assistant' ? 'coder' : ''} />
+          </ErrorBoundary>
         </div>
       </div>
     )
@@ -707,7 +712,7 @@ function MediaPreviewTile({
             {title}
           </div>
           <div className="mt-0.5 truncate text-[11px] text-ds-faint">
-            {[mimeType, byteSize].filter(Boolean).join(' · ') || t('generatedFilePreviewUnavailable')}
+            {[mimeType, byteSize].filter(Boolean).join(' 路 ') || t('generatedFilePreviewUnavailable')}
           </div>
         </div>
       </div>
@@ -1009,7 +1014,7 @@ function UserInputBubble({
   // A `pending` block is only actionable while the live runtime is awaiting it.
   // One rehydrated from a finished thread keeps its stored `pending` status but
   // is not live, so it renders as a read-only ended record rather than a live
-  // prompt — and crucially never offers cancel, which would hit a dead gate and
+  // prompt 鈥?and crucially never offers cancel, which would hit a dead gate and
   // raise "user input not found" (issue #606).
   const pending = block.status === 'pending' && block.live === true
   const done = block.status !== 'pending'
@@ -1416,7 +1421,7 @@ function MessageBubbleImpl({
 
 function ToolEntry({ block, nested = false }: { block: ToolBlock; nested?: boolean }): ReactElement {
   const { t } = useTranslation('common')
-  // Errored tool calls stay collapsed by default — only the red header is shown so the
+  // Errored tool calls stay collapsed by default 鈥?only the red header is shown so the
   // (often verbose) error payload doesn't disrupt reading. The user can still expand it.
   const [open, setOpen] = useState(() => block.status === 'running')
 
@@ -1499,7 +1504,7 @@ function ToolEntry({ block, nested = false }: { block: ToolBlock; nested?: boole
           </div>
           <div className="mt-0.5 break-words">
             {block.filePath ? (
-              <span className="font-mono text-[12px] opacity-90">{block.filePath} — </span>
+              <span className="font-mono text-[12px] opacity-90">{block.filePath} 鈥?</span>
             ) : null}
             <span>{block.summary}</span>
           </div>

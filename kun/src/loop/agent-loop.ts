@@ -91,6 +91,9 @@ import {
   resolveAutoModelRoute,
   type AutoModelRouteSelection
 } from './auto-model-router.js'
+import { heuristicAgentRole } from './agent-router.js'
+import type { AgentRoleConfig } from '../contracts/agent-role.js'
+import type { KunAgentRoleRegistry } from '../delegation/role-registry.js'
 import { ToolStormBreaker, type ToolStormBreakerOptions } from './tool-storm-breaker.js'
 import { healLoadedHistoryItems } from './history-healing.js'
 import { repairDispatchToolArguments } from './tool-call-repair.js'
@@ -702,6 +705,10 @@ export type AgentLoopOptions = {
    * subscription. kun's tools/persona/permissions are injected into the SDK.
    */
   sdkRuntime?: AgentSdkRuntime
+  /** Capability flags for optional features like agent role routing. */
+  capabilities?: import('../contracts/capabilities.js').KunCapabilitiesConfig
+  /** Agent role registry for role-specific system prompts and routing. */
+  roleRegistry?: KunAgentRoleRegistry
 }
 
 /**
@@ -719,6 +726,8 @@ export type AgentLoopOptions = {
 export class AgentLoop {
   private readonly opts: AgentLoopOptions
   private readonly autoModelRoutes = new Map<string, AutoModelRouteSelection>()
+  /** Per-turn resolved agent role config. Populated when roles are enabled. */
+  private readonly turnRoles = new Map<string, AgentRoleConfig | undefined>()
   private readonly promptTokenPressure = new Map<string, { model: string; promptTokens: number }>()
   /** Threads for which a one-time pressure hydration from persisted usage was already attempted. */
   private readonly hydratedPressureThreads = new Set<string>()
@@ -884,6 +893,7 @@ export class AgentLoop {
       // marker it reads.
       await this.evaluateGoalResume(threadId, turnId, finalStatus ?? 'failed')
       this.autoModelRoutes.delete(autoModelRouteKey(threadId, turnId))
+      this.turnRoles.delete(autoModelRouteKey(threadId, turnId))
       this.toolStormBreakers.delete(turnId)
       this.lastNoToolTextByTurn.delete(turnId)
       this.goalNoToolRecoveryStepsByTurn.delete(turnId)
@@ -1573,20 +1583,27 @@ export class AgentLoop {
       contextInstructionCount: contextInstructions.length
     })
     const tokenEconomy = normalizeTokenEconomyConfig(this.opts.tokenEconomy)
+    // Resolve role-specific system prompt when roles capability is enabled.
+    // This runs after the model route resolution (which populates turnRoles).
+    const turnKey = autoModelRouteKey(threadId, turnId)
+    const roleConfig = this.opts.capabilities?.roles?.enabled ? this.turnRoles.get(turnKey) : undefined
+    const baseSystemPrompt = this.opts.prefix.systemPrompt
+    let effectiveSystemPrompt = thread?.systemPrompt?.trim()
+      ? `${baseSystemPrompt}\n\n${thread.systemPrompt.trim()}`
+      : baseSystemPrompt
+    if (roleConfig?.systemPrompt) {
+      if (roleConfig.omitBasePrompt) {
+        effectiveSystemPrompt = roleConfig.systemPrompt
+      } else {
+        effectiveSystemPrompt = `${effectiveSystemPrompt}\n\n[Role: ${roleConfig.name ?? ''}]\n${roleConfig.systemPrompt}`
+      }
+    }
     const baseRequest: ModelRequest = {
       threadId,
       turnId,
       model,
       ...(thread?.providerId?.trim() ? { providerId: thread.providerId.trim() } : {}),
-      // Thread-level systemPrompt (primary-agent persona snapshot) is
-      // appended to the runtime base — same augment strategy as child agents
-      // (child-agent-executor) — so the agent keeps kun's tool/safety
-      // conventions and skill catalog instead of losing them to the persona.
-      // Empty/whitespace falls back to the immutable prefix verbatim so
-      // unbound threads keep the prompt-cache fingerprint.
-      systemPrompt: thread?.systemPrompt?.trim()
-        ? `${this.opts.prefix.systemPrompt}\n\n${thread.systemPrompt.trim()}`
-        : this.opts.prefix.systemPrompt,
+      systemPrompt: effectiveSystemPrompt,
       ...(planTurnActive ? { modeInstruction: PLAN_MODE_INSTRUCTION } : {}),
       ...(contextInstructions.length ? { contextInstructions } : {}),
       prefix: this.opts.prefix.fewShots,
@@ -2984,6 +3001,20 @@ export class AgentLoop {
       abortSignal: input.signal
     })
     this.autoModelRoutes.set(key, route)
+    // Resolve agent role when roles capability is enabled. Uses a synchronous
+    // heuristic (zero-cost) rather than the model-based router to avoid adding
+    // latency to the turn start. Falls back to undefined (no role) on any error.
+    if (this.opts.capabilities?.roles?.enabled) {
+      try {
+        const { role: roleId } = heuristicAgentRole(input.latestRequest)
+        const roleConfig = this.opts.roleRegistry?.getById(roleId)
+        this.turnRoles.set(key, roleConfig)
+      } catch {
+        // Role resolution failure is non-fatal — the turn continues without
+        // role-specific prompting.
+        this.turnRoles.set(key, undefined)
+      }
+    }
     return {
       model: route.model,
       reasoningEffort: requestedReasoningEffort ?? route.reasoningEffort

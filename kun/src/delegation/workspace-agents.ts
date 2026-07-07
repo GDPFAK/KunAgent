@@ -30,6 +30,7 @@ export type WorkspaceAgentProfile = {
   id: string
   source: 'workspace'
   filePath: string
+  role?: string
   profile: SubagentProfileConfig
 }
 
@@ -55,14 +56,14 @@ export async function loadWorkspaceAgentProfiles(workspace: string): Promise<Wor
       const parsed = parseAgentMarkdown(text, entry.replace(/\.md$/i, ''))
       if (parsed) results.push({ ...parsed, filePath, source: 'workspace' })
     } catch {
-      // Skip unreadable / malformed files; do not bubble â€” overlay should
+      // Skip unreadable / malformed files; do not bubble ¡ª overlay should
       // never break the parent delegate_task call.
     }
   }
   return results
 }
 
-function parseAgentMarkdown(text: string, defaultId: string): { id: string; profile: SubagentProfileConfig } | null {
+function parseAgentMarkdown(text: string, defaultId: string): { id: string; role?: string; profile: SubagentProfileConfig } | null {
   const match = FRONTMATTER_RE.exec(text)
   if (!match) return null
   const yamlRaw = match[1] ?? ''
@@ -97,7 +98,7 @@ function parseAgentMarkdown(text: string, defaultId: string): { id: string; prof
   void omitBase
   const parsed = SubagentProfileConfig.safeParse(raw)
   if (!parsed.success) return null
-  return { id, profile: parsed.data }
+  return { id, ...(fields.role?.trim() ? { role: fields.role.trim() } : {}), profile: parsed.data }
 }
 
 function normalizeMode(value: string | undefined): SubagentMode {
@@ -130,7 +131,7 @@ function parseListField(fields: Record<string, string>, key: string): string[] |
 
 /**
  * Lean YAML key:value parser. Only supports flat scalars, lists, and
- * double-quoted strings â€” sufficient for agent frontmatter without pulling
+ * double-quoted strings ¡ª sufficient for agent frontmatter without pulling
  * in a YAML dependency.
  */
 function parseSimpleYaml(raw: string): Record<string, string> {
