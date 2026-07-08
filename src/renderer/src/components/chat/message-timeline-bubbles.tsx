@@ -149,9 +149,6 @@ function UserMessageBubble({
             <span className="min-w-0 flex-1" />
           )}
           <ModelMetaTag label={block.modelLabel} />
-          <ErrorBoundary>
-            <AgentRoleBadge roleId={block.kind === 'assistant' ? 'coder' : ''} />
-          </ErrorBoundary>
         </div>
       </div>
     )
@@ -1274,6 +1271,9 @@ function MessageBubbleImpl({
         {!streaming ? (
           <div className="mt-1 flex min-h-5 min-w-0 items-center justify-between gap-3 text-[11.5px] text-ds-faint opacity-0 transition duration-150 group-hover/message:opacity-100">
             <span className="min-w-0 truncate">{createdAtLabel ?? ''}</span>
+            <ErrorBoundary>
+              {block.roleId ? <AgentRoleBadge roleId={block.roleId} name={block.roleName} color={block.color} /> : null}
+            </ErrorBoundary>
             <div className="flex shrink-0 items-center gap-1.5">
               {rollbackAction ? (
                 <button

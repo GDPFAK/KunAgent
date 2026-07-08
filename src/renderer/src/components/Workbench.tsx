@@ -43,6 +43,11 @@ import { Sidebar } from './chat/Sidebar'
 import { WorkbenchSideRail, type RightPanelMode } from './chat/WorkbenchTopBar'
 import { MessageTimeline } from './chat/MessageTimeline'
 import { SubagentReturnBar } from './chat/message-timeline-empty'
+import { AgentStatusPanel } from './chat/AgentStatusPanel'
+import { AgentRoleSelector } from './chat/AgentRoleSelector'
+import { useAgentRoleStore } from '../stores/agent-role-store'
+import { KUN_ROLES_PATH } from '@shared/kun-endpoints'
+import type { GuiAgentRoleCatalogResponse } from '@shared/agent-role'
 import { IkunCameoLayer, KunCelebrationLayer } from './chat/AnimatedWorkLogo'
 import {
   FloatingComposer,
@@ -571,6 +576,11 @@ export function Workbench(): ReactElement {
   const [openFilePreviewTargets, setOpenFilePreviewTargets] = useState<WorkspaceFileTarget[]>([])
   const initUiPlugins = useUiPluginStore((s) => s.initUiPlugins)
   const uiModeCameosEnabled = useUiModeCameosEnabled()
+  const { roles, activeRoleId, defaultRoleId } = useAgentRoleStore()
+  const activeRole = useMemo(
+    () => roles.find((r) => r.id === activeRoleId),
+    [roles, activeRoleId]
+  )
   const [focusModeEnabled, setFocusModeEnabled] = useState(readFocusModePreference)
   const [runtimeLogPath, setRuntimeLogPath] = useState('')
   const [planPanelOverlayPreferred, setPlanPanelOverlayPreferred] = useState(false)
@@ -1211,12 +1221,18 @@ export function Workbench(): ReactElement {
     const localSkillsTask = typeof window !== 'undefined' && typeof window.kunGui?.listSkills === 'function'
       ? window.kunGui.listSkills(activeSkillWorkspace || undefined)
       : Promise.resolve({ ok: true as const, skills: [], validationErrors: [] })
+    const rolesTask = runtimeReady
+      ? rendererRuntimeClient.runtimeRequest(KUN_ROLES_PATH, 'GET')
+          .then((res) => res.ok ? JSON.parse(res.body) as GuiAgentRoleCatalogResponse : null)
+          .catch(() => null)
+      : Promise.resolve(null)
     void Promise.allSettled([
       runtimeReady && provider.getRuntimeInfo ? provider.getRuntimeInfo() : Promise.resolve(null),
       runtimeReady && provider.listSkills ? provider.listSkills() : Promise.resolve([]),
-      localSkillsTask
+      localSkillsTask,
+      rolesTask
     ])
-      .then(([runtimeResult, skillsResult, localSkillsResult]) => {
+      .then(([runtimeResult, skillsResult, localSkillsResult, rolesResult]) => {
         if (cancelled) return
         setRuntimeInfo(runtimeResult.status === 'fulfilled' ? runtimeResult.value : null)
         const runtimeSkillList = skillsResult.status === 'fulfilled' ? skillsResult.value : []
@@ -1225,6 +1241,9 @@ export function Workbench(): ReactElement {
             ? localSkillsResult.value.skills
             : []
         setRuntimeSkills(mergeSkillCommands(runtimeSkillList, localSkillList))
+        if (rolesResult.status === 'fulfilled' && rolesResult.value) {
+          useAgentRoleStore.getState().setRoles(rolesResult.value)
+        }
       })
       .catch(() => {
         if (!cancelled) {
@@ -1276,8 +1295,7 @@ export function Workbench(): ReactElement {
     runtimeConnection,
     route,
     mode: composerMode,
-    attachmentStoreAvailable: runtimeInfo?.capabilities.attachments.available,
-    modelSupportsImageInput: selectedModelSupportsImageInput
+    attachmentStoreAvailable: runtimeInfo?.capabilities.attachments.available
   })
   const webAccessAvailable =
     runtimeInfo?.capabilities.web.fetch.available === true ||
@@ -3645,6 +3663,19 @@ export function Workbench(): ReactElement {
                 }}
               />
               ) : (
+              <div className="flex flex-col">
+              {runtimeConnection === 'ready' && roles.length > 0 ? (
+                <div className="flex items-center gap-2 px-4 py-1 border-b border-ds-border">
+                  <AgentRoleSelector
+                    roles={roles}
+                    activeRoleId={activeRoleId}
+                    defaultRoleId={defaultRoleId}
+                    disabled={busy}
+                    compact
+                    onSelect={(roleId) => useAgentRoleStore.getState().setActiveRoleId(roleId)}
+                  />
+                </div>
+              ) : null}
               <FloatingComposer
                 input={input}
                 setInput={setInput}
@@ -3727,7 +3758,15 @@ export function Workbench(): ReactElement {
                   openSideConversationDraft()
                 }}
               />
+              </div>
               )}
+              <AgentStatusPanel
+                activeRole={activeRole}
+                roles={roles}
+                hasRunningSubAgents={false}
+                runningSubAgentCount={0}
+                totalSubAgentCount={0}
+              />
             </div>
             </div>
             {terminalOpen ? (

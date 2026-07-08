@@ -1,5 +1,6 @@
 import type { TurnItem } from '../contracts/items.js'
 import type { UsageSnapshot } from '../contracts/usage.js'
+import type { ToolProviderKind } from './tool-host.js'
 
 /**
  * One streaming chunk from a model response. The loop consumes these
@@ -100,6 +101,8 @@ export type ModelToolSpec = {
   description: string
   inputSchema: Record<string, unknown>
   toolKind?: 'tool_call' | 'command_execution' | 'file_change'
+  providerId?: string
+  providerKind?: ToolProviderKind
 }
 
 /**

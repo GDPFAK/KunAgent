@@ -20,6 +20,7 @@ import {
   kunApprovalPath,
   kunThreadCompactPath,
   kunThreadEventsPath,
+  KUN_ROLES_PATH,
   kunThreadForkPath,
   kunThreadGoalPath,
   kunThreadReviewPath,
@@ -37,6 +38,8 @@ import {
   type KunThreadMode
 } from '@shared/kun-endpoints'
 import { parseRuntimeErrorBody, runtimeErrorToError, type RuntimeError } from '@shared/runtime-error'
+import type { GuiAgentRoleCatalogResponse } from '@shared/agent-role'
+import { useAgentRoleStore } from '../stores/agent-role-store'
 import type {
   CoreAttachmentDiagnosticsJson,
   CoreAttachmentContentResponseJson,
@@ -312,6 +315,10 @@ export class KunRuntimeProvider implements AgentProvider {
     }
     if (options?.fileReferences?.length) {
       body.fileReferences = options.fileReferences
+    }
+    const activeRoleId = useAgentRoleStore.getState().activeRoleId
+    if (activeRoleId) {
+      body.roleId = activeRoleId
     }
     const response = await rendererRuntimeClient.runtimeRequest(
       kunThreadTurnsPath(threadId),
@@ -648,6 +655,17 @@ export class KunRuntimeProvider implements AgentProvider {
       response.body,
       'runtime returned an invalid skills response'
     ).skills ?? []
+  }
+
+  async fetchAgentRoles(): Promise<GuiAgentRoleCatalogResponse> {
+    const response = await rendererRuntimeClient.runtimeRequest(KUN_ROLES_PATH, 'GET')
+    if (!response.ok) {
+      throw runtimeErrorToError(readRuntimeError(response.body, 'failed to fetch agent roles'))
+    }
+    return readRuntimeJson<GuiAgentRoleCatalogResponse>(
+      response.body,
+      'runtime returned an invalid agent roles response'
+    )
   }
 
   async uploadAttachment(input: {

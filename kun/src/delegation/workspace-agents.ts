@@ -1,4 +1,5 @@
 import { readdir, readFile } from 'node:fs/promises'
+import { watch, type FSWatcher } from 'node:fs'
 import { join } from 'node:path'
 import { SubagentProfileConfig, type SubagentMode, type SubagentToolPolicy } from '../contracts/capabilities.js'
 
@@ -56,11 +57,60 @@ export async function loadWorkspaceAgentProfiles(workspace: string): Promise<Wor
       const parsed = parseAgentMarkdown(text, entry.replace(/\.md$/i, ''))
       if (parsed) results.push({ ...parsed, filePath, source: 'workspace' })
     } catch {
-      // Skip unreadable / malformed files; do not bubble ¡ª overlay should
+      // Skip unreadable / malformed files; do not bubble ï¿½ï¿½ overlay should
       // never break the parent delegate_task call.
     }
   }
   return results
+}
+
+/**
+ * Watch the workspace agent profiles directory for changes and call
+ * `onUpdate` whenever a file is added, changed, or removed. Returns a
+ * `dispose` function to stop watching.
+ *
+ * Uses `fs.watch` with `recursive: false` (single directory level).
+ * Debounces rapid consecutive events at 500ms to avoid redundant reloads.
+ */
+export function watchWorkspaceAgentProfiles(
+  workspace: string,
+  onUpdate: (profiles: WorkspaceAgentProfile[]) => void
+): { dispose: () => void } {
+  const dir = join(workspace, '.kun', 'agents')
+  let timeoutId: ReturnType<typeof setTimeout> | undefined
+  let aborted = false
+
+  const reload = async (): Promise<void> => {
+    if (aborted) return
+    try {
+      const profiles = await loadWorkspaceAgentProfiles(workspace)
+      if (!aborted) onUpdate(profiles)
+    } catch {
+      // Ignore â€” next change will retry
+    }
+  }
+
+  const debouncedReload = (): void => {
+    if (timeoutId) clearTimeout(timeoutId)
+    timeoutId = setTimeout(() => { timeoutId = undefined; void reload() }, 500)
+  }
+
+  let watcher: FSWatcher | undefined
+  try {
+    watcher = watch(dir, { recursive: false })
+    watcher.on('change', () => { debouncedReload() })
+    watcher.on('error', () => { /* watcher errors are non-fatal */ })
+  } catch {
+    // Watcher creation failed (e.g. dir doesn't exist) â€” silently ignore
+  }
+
+  return {
+    dispose: () => {
+      aborted = true
+      if (timeoutId) clearTimeout(timeoutId)
+      if (watcher) watcher.close()
+    }
+  }
 }
 
 function parseAgentMarkdown(text: string, defaultId: string): { id: string; role?: string; profile: SubagentProfileConfig } | null {
@@ -131,7 +181,7 @@ function parseListField(fields: Record<string, string>, key: string): string[] |
 
 /**
  * Lean YAML key:value parser. Only supports flat scalars, lists, and
- * double-quoted strings ¡ª sufficient for agent frontmatter without pulling
+ * double-quoted strings ï¿½ï¿½ sufficient for agent frontmatter without pulling
  * in a YAML dependency.
  */
 function parseSimpleYaml(raw: string): Record<string, string> {

@@ -78,6 +78,7 @@ import { resolveConfiguredHooks, type HooksConfig } from '../hooks/hook-config.j
 import { FileMemoryStore } from '../memory/memory-store.js'
 import { DelegationRuntime, FileDelegationStore } from '../delegation/delegation-runtime.js'
 import { createChildAgentExecutor } from '../delegation/child-agent-executor.js'
+import { KunAgentRoleRegistry } from '../delegation/role-registry.js'
 
 export type KunServeRuntimeOptions = {
   host: string
@@ -349,6 +350,10 @@ export async function createKunServeRuntime(
         }
       })
     : undefined
+  const roleRegistry = await KunAgentRoleRegistry.create({
+    config: options.roles,
+    workspace: undefined
+  })
   const capabilities = buildRuntimeCapabilityManifest({
     config: options.capabilities,
     model: modelCapabilities(options.model),
@@ -526,6 +531,7 @@ export async function createKunServeRuntime(
     ...(attachmentStore ? { attachmentStore } : {}),
     ...(memoryStore ? { memoryStore } : {}),
     ...(delegationRuntime ? { delegationRuntime } : {}),
+    ...(roleRegistry ? { roleRegistry } : {}),
     modelClient,
     defaultModel: options.model,
     ...(options.roles ? { roles: options.roles } : {}),

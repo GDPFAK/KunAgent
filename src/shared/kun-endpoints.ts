@@ -121,6 +121,13 @@ export const KUN_USAGE_TEMPLATE = '/v1/usage'
 export const KUN_DEBUG_LLM_ROUNDS_PATH = '/v1/debug/llm-rounds'
 export const KUN_DEBUG_LLM_ROUNDS_TEMPLATE = '/v1/debug/llm-rounds'
 
+export const KUN_DELEGATION_PROFILES_PATH = '/v1/delegation/profiles'
+export const KUN_DELEGATION_PROFILES_TEMPLATE = '/v1/delegation/profiles'
+export const KUN_DELEGATION_DIAGNOSTICS_PATH = '/v1/delegation/diagnostics'
+export const KUN_DELEGATION_DIAGNOSTICS_TEMPLATE = '/v1/delegation/diagnostics'
+export const KUN_ROLES_PATH = '/v1/roles'
+export const KUN_ROLES_TEMPLATE = '/v1/roles'
+
 /** Thread mode shared with the Kun contract. */
 export type KunThreadMode = 'agent' | 'plan'
 

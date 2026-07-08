@@ -32,48 +32,147 @@ export type AgentRouteSelection = {
   source: AgentRouteSource
 }
 
-// ─── Role-Based Heuristic ────────────────────────────────────────────────────
+// ─── Role-Based Heuristic with Scoring Matrix ────────────────────────────
 
-export function heuristicAgentRole(input: string): { role: AgentRoleId; confidence: number } {
+/**
+ * Each role's heuristic profile: positive keywords, negative keywords (penalty),
+ * base weight, and optional input length bounds. The scorer evaluates all roles
+ * independently and picks the highest-scoring match, replacing the old first-hit
+ * if/else chain with a fair multi-role comparison.
+ */
+type RoleHeuristic = {
+  role: AgentRoleId
+  /** Keywords that positively contribute to this role's score. */
+  keywords: string[]
+  /** Keywords that reduce this role's score (prefer other roles). */
+  negKeywords: string[]
+  /** Base weight when at least one keyword matches. */
+  weight: number
+  /** Minimum input length (in characters) required for this role. */
+  minLen?: number
+  /** Maximum input length (in characters) for this role. */
+  maxLen?: number
+}
+
+const ROLE_HEURISTICS: RoleHeuristic[] = [
+  {
+    role: 'coder',
+    keywords: ['implement', 'refactor', 'fix', 'debug', 'write', 'create', 'build', 'test', 'bug', 'add feature', 'error'],
+    negKeywords: ['review', 'plan', 'find', 'search', 'summarize', 'audit', 'lint'],
+    weight: 0.75
+  },
+  {
+    role: 'reviewer',
+    keywords: ['review', 'audit', 'lint', 'check code', 'check security', 'inspect', 'quality'],
+    negKeywords: ['implement', 'write', 'create', 'build', 'debug'],
+    weight: 0.85
+  },
+  {
+    role: 'planner',
+    keywords: ['plan', 'break down', 'decompose', 'steps to', 'outline', 'strategy', 'architecture'],
+    negKeywords: ['fix', 'debug', 'implement', 'write code'],
+    weight: 0.80
+  },
+  {
+    role: 'researcher',
+    keywords: ['find', 'search', 'investigate', 'what is', 'explain', 'research', 'documentation', 'how does'],
+    negKeywords: ['fix', 'implement', 'build', 'debug', 'review'],
+    weight: 0.80
+  },
+  {
+    role: 'title',
+    keywords: ['title', 'name', 'call this'],
+    negKeywords: [],
+    weight: 0.90,
+    maxLen: 30
+  },
+  {
+    role: 'summarizer',
+    keywords: ['summarize', 'summary', 'condense', 'tl;dr'],
+    negKeywords: [],
+    weight: 0.85
+  },
+  {
+    role: 'explore',
+    keywords: ['where', 'who'],
+    negKeywords: ['implement', 'fix', 'build', 'create', 'write', 'debug'],
+    weight: 0.70,
+    maxLen: 80
+  }
+]
+
+export function scoredHeuristicAgentRole(input: string): { role: AgentRoleId; confidence: number; scores: Record<string, number> } {
   const lower = input.toLowerCase()
   const len = [...input].length
+  const scores: Record<string, number> = {}
 
-  if (len < 30 && (lower.includes('title') || lower.includes('name') || lower.includes('call this'))) {
-    return { role: 'title', confidence: 0.9 }
+  for (const h of ROLE_HEURISTICS) {
+    let score = 0
+
+    // Length bounds: outside range → score 0
+    if (h.minLen !== undefined && len < h.minLen) { scores[h.role] = 0; continue }
+    if (h.maxLen !== undefined && len > h.maxLen) { scores[h.role] = 0; continue }
+
+    // Count matching positive keywords
+    let posHits = 0
+    for (const kw of h.keywords) {
+      if (lower.includes(kw)) posHits++
+    }
+
+    // Count matching negative keywords (penalty)
+    let negHits = 0
+    for (const kw of h.negKeywords) {
+      if (lower.includes(kw)) negHits++
+    }
+
+    // Score = base weight requires at least one keyword hit.
+    // No keyword match → score 0 (must demonstrate intent for this role).
+    if (posHits === 0) {
+      score = 0
+    } else {
+      score = h.weight + ((posHits - 1) * 0.05) - (negHits * 0.10)
+    }
+    if (score < 0) score = 0
+    scores[h.role] = score
   }
 
-  if (lower.includes('review') || lower.includes('audit') || lower.includes('lint') ||
-    (lower.includes('check') && (lower.includes('code') || lower.includes('security')))) {
-    return { role: 'reviewer', confidence: 0.85 }
+  // Find the role with the highest score
+  let bestRole: AgentRoleId = 'coder'
+  let bestScore = 0
+  for (const h of ROLE_HEURISTICS) {
+    const s = scores[h.role] ?? 0
+    if (s > bestScore) {
+      bestScore = s
+      bestRole = h.role
+    }
   }
 
-  if (lower.includes('plan') || lower.includes('break down') || lower.includes('decompose') ||
-    lower.includes('steps to') || lower.includes('outline') || lower.includes('strategy')) {
-    return { role: 'planner', confidence: 0.8 }
-  }
+  return { role: bestRole, confidence: Math.min(bestScore, 1.0), scores }
+}
 
-  if (lower.includes('find') || lower.includes('search') || lower.includes('investigate') ||
-    lower.includes('what is') || lower.includes('explain') || lower.includes('research') ||
-    lower.includes('documentation') || lower.includes('how does')) {
-    return { role: 'researcher', confidence: 0.8 }
-  }
+/** Legacy heuristicAgentRole — wraps the new scorer for backward compatibility. */
+export function heuristicAgentRole(input: string): { role: AgentRoleId; confidence: number } {
+  const { role, confidence } = scoredHeuristicAgentRole(input)
+  return { role, confidence }
+}
 
-  if (lower.includes('summarize') || lower.includes('summary') || lower.includes('condense') || lower.includes('tl;dr')) {
-    return { role: 'summarizer', confidence: 0.85 }
-  }
+/**
+ * Detect a role-switch request embedded in assistant text.
+ * Format: `[switch_role: <roleId>]` where roleId is a valid AgentRoleId.
+ * Returns the target role id and cleaned text when found, or null.
+ */
+const ROLE_SWITCH_RE = /\[switch_role\s*:\s*(\w+)\s*\]/i
 
-  if (len < 80 && (lower.startsWith('where') || lower.startsWith('who'))) {
-    return { role: 'explore', confidence: 0.7 }
+export function detectRoleSwitchIntent(text: string): { role: AgentRoleId; cleanText: string } | null {
+  const match = ROLE_SWITCH_RE.exec(text)
+  if (!match) return null
+  const rawRole = match[1]?.toLowerCase().trim() ?? ''
+  const validRoles: AgentRoleId[] = ['coder', 'planner', 'reviewer', 'researcher', 'title', 'summarizer', 'explore']
+  if (!(validRoles as readonly string[]).includes(rawRole)) return null
+  return {
+    role: rawRole as AgentRoleId,
+    cleanText: text.replace(ROLE_SWITCH_RE, '').trim()
   }
-
-  if (lower.includes('implement') || lower.includes('refactor') || lower.includes('debug') ||
-    lower.includes('fix') || lower.includes('add feature') || lower.includes('write') ||
-    lower.includes('create') || lower.includes('build') || lower.includes('test') ||
-    lower.includes('error') || lower.includes('bug')) {
-    return { role: 'coder', confidence: 0.75 }
-  }
-
-  return { role: 'coder', confidence: 0.5 }
 }
 
 // ─── Model-Based Agent Router ────────────────────────────────────────────────

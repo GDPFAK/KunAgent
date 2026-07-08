@@ -397,12 +397,14 @@ export type ComputerUseCapabilityConfig = z.infer<typeof ComputerUseCapabilityCo
  * Agent role capability configuration.
  *
  * This toggle controls whether the multi-agent role system is active at all.
- * When `enabled: false` (the default), the runtime behaves exactly as today —
- * a single AgentLoop with no role routing, no planner, and no role-specific
- * prompts. All role-related code paths check this flag and fall through to
+ * When `enabled: true` (the default), the runtime activates scoring matrix
+ * routing, role switching, GUI role selection, and role-specific prompts.
+ * Set to `false` to revert to a single AgentLoop with no role awareness.
+ * All role-related code paths check this flag and fall through to
  * the legacy path when it is off.
  */
 export const RolesCapabilityConfig = CapabilityToggleConfig.extend({
+  enabled: z.boolean().default(true),
   // Future: maxParallelRoles, autoRoute, etc.
 }).strict()
 export type RolesCapabilityConfig = z.infer<typeof RolesCapabilityConfig>

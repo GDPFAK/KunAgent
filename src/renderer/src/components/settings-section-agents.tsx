@@ -542,6 +542,20 @@ export function AgentsSettingsSection({ ctx }: { ctx: Record<string, any> }): Re
   const activeProviderId = kun.providerId?.trim() || DEFAULT_MODEL_PROVIDER_ID
   const activeProvider = modelProviders.find((item) => item.id === activeProviderId) ?? modelProviders[0]
   const activeProviderModels = activeProvider?.models ?? []
+  const kunRoles = kun.roles
+  const setAgentRolePatch = (roleId: string, model: string | undefined): void => {
+    const current: Record<string, unknown> = kunRoles ?? {}
+    const agentRoles = (current as { agentRoles?: Record<string, unknown> }).agentRoles ?? {}
+    updateKun({
+      roles: {
+        ...kunRoles,
+        agentRoles: {
+          ...agentRoles,
+          [roleId]: model ? { ...(agentRoles[roleId] as Record<string, unknown> ?? {}), model } : undefined
+        }
+      }
+    })
+  }
   const selectKunProvider = (providerId: string): void => {
     const nextProvider = modelProviders.find((item) => item.id === providerId) ?? activeProvider
     const nextModel = nextProvider?.models.includes(kun.model)
@@ -736,6 +750,89 @@ export function AgentsSettingsSection({ ctx }: { ctx: Record<string, any> }): Re
                           </div>
                         ) : null}
                       </div>
+                    }
+                  />
+                </SettingsCard>
+              </div>
+
+              <div className="mt-6">
+                <SettingsCard title={t('agentRoles')}>
+                  <SettingRow
+                    title={t('coder')}
+                    description={t('coderRoleDesc')}
+                    control={
+                      <ModelSelect
+                        value={kunRoles?.agentRoles?.coder?.model ?? ''}
+                        options={activeProviderModels}
+                        defaultLabel={t('modelDefault')}
+                        allowCustom
+                        onChange={(next) => setAgentRolePatch('coder', next || undefined)}
+                      />
+                    }
+                  />
+                  <SettingRow
+                    title={t('planner')}
+                    description={t('plannerRoleDesc')}
+                    control={
+                      <ModelSelect
+                        value={kunRoles?.agentRoles?.planner?.model ?? ''}
+                        options={activeProviderModels}
+                        defaultLabel={t('modelDefault')}
+                        allowCustom
+                        onChange={(next) => setAgentRolePatch('planner', next || undefined)}
+                      />
+                    }
+                  />
+                  <SettingRow
+                    title={t('reviewer')}
+                    description={t('reviewerRoleDesc')}
+                    control={
+                      <ModelSelect
+                        value={kunRoles?.agentRoles?.reviewer?.model ?? ''}
+                        options={activeProviderModels}
+                        defaultLabel={t('modelDefault')}
+                        allowCustom
+                        onChange={(next) => setAgentRolePatch('reviewer', next || undefined)}
+                      />
+                    }
+                  />
+                  <SettingRow
+                    title={t('researcher')}
+                    description={t('researcherRoleDesc')}
+                    control={
+                      <ModelSelect
+                        value={kunRoles?.agentRoles?.researcher?.model ?? ''}
+                        options={activeProviderModels}
+                        defaultLabel={t('modelDefault')}
+                        allowCustom
+                        onChange={(next) => setAgentRolePatch('researcher', next || undefined)}
+                      />
+                    }
+                  />
+                  <SettingRow
+                    title={t('summarizer')}
+                    description={t('summarizerRoleDesc')}
+                    control={
+                      <ModelSelect
+                        value={kunRoles?.agentRoles?.summarizer?.model ?? ''}
+                        options={activeProviderModels}
+                        defaultLabel={t('modelDefault')}
+                        allowCustom
+                        onChange={(next) => setAgentRolePatch('summarizer', next || undefined)}
+                      />
+                    }
+                  />
+                  <SettingRow
+                    title={t('explore')}
+                    description={t('exploreRoleDesc')}
+                    control={
+                      <ModelSelect
+                        value={kunRoles?.agentRoles?.explore?.model ?? ''}
+                        options={activeProviderModels}
+                        defaultLabel={t('modelDefault')}
+                        allowCustom
+                        onChange={(next) => setAgentRolePatch('explore', next || undefined)}
+                      />
                     }
                   />
                 </SettingsCard>

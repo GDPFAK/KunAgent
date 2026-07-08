@@ -84,7 +84,9 @@ export const TurnSchema = z.object({
    * rejects calls to them instead of blocking on a GUI answer.
    */
   disableUserInput: z.boolean().optional(),
-  error: z.string().optional()
+  error: z.string().optional(),
+  /** Agent role override set via GUI AgentRoleSelector. */
+  roleId: z.string().optional()
 })
 export type Turn = z.infer<typeof TurnSchema>
 
@@ -123,7 +125,13 @@ export const StartTurnRequest = z.object({
    * user (IM bridges such as WeChat/Feishu, headless runs). The turn
    * runs without the `user_input`/`request_user_input` tools.
    */
-  disableUserInput: z.boolean().optional()
+  disableUserInput: z.boolean().optional(),
+  /**
+   * Optional agent role override. When set, Kun uses this role id instead
+   * of the heuristic role routing for this turn. This allows the GUI to
+   * let users manually select a role via the AgentRoleSelector.
+   */
+  roleId: z.string().optional()
 })
 export type StartTurnRequest = z.input<typeof StartTurnRequest>
 

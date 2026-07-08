@@ -43,6 +43,16 @@ export type GuiAgentRoleInfo = {
   reasoningEffort?: string
   /** Whether this role is the default. */
   isDefault: boolean
+  /** Base confidence for heuristic routing (0.0–1.0). */
+  confidence?: number
+  /** Trigger keywords that activate this role. */
+  routingKeywords?: string[]
+  /** Output token cap for this role. */
+  maxTokens?: number
+  /** Explicit tool allow-list (overrides toolPolicy when set). */
+  allowedTools?: string[]
+  /** Tool deny-list layered on top of toolPolicy. */
+  blockedTools?: string[]
 }
 
 /**

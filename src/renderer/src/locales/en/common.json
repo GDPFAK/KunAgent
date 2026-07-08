@@ -2438,5 +2438,18 @@
   "color": "Color",
   "mode": "Mode",
   "systemPrompt": "System prompt",
-  "toolPolicy": "Tool access"
+  "toolPolicy": "Tool access",
+  "agentRoles": "Agent Roles",
+  "coder": "Coder",
+  "coderRoleDesc": "Primary coding agent with full tool access",
+  "planner": "Planner",
+  "plannerRoleDesc": "Task decomposition and orchestration specialist",
+  "reviewer": "Reviewer",
+  "reviewerRoleDesc": "Read-only code quality inspector",
+  "researcher": "Researcher",
+  "researcherRoleDesc": "Read-only codebase investigator",
+  "summarizer": "Summarizer",
+  "summarizerRoleDesc": "Conversation summarization agent",
+  "explore": "Explore",
+  "exploreRoleDesc": "Fast read-only codebase explorer"
 }
