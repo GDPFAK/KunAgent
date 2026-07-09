@@ -83,6 +83,18 @@ function validateBundledKunRuntime(context) {
     join(root, 'node_modules', 'better-sqlite3', 'package.json'),
     'root better-sqlite3 dependency'
   )
+
+  // Guard against circular kun-gui residue that would cause infinite
+  // nesting in the shipped app. This is a safety net complementing the
+  // proactive cleanup in before-pack and the glob exclusions in
+  // electron-builder.config.cjs.
+  const kunGuiResidue = join(root, 'kun', 'node_modules', 'kun-gui')
+  if (existsSync(kunGuiResidue)) {
+    throw new Error(
+      `[after-pack] Circular kun-gui dependency found in packed app: ${kunGuiResidue}. ` +
+      `The before-pack cleanup should have removed this. Check scripts/before-pack.cjs.`
+    )
+  }
 }
 
 function maybeAdhocSignMacApp(context) {

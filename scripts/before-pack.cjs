@@ -2,6 +2,7 @@ const { execFileSync } = require('node:child_process')
 const { existsSync, readdirSync, rmSync } = require('node:fs')
 const { join } = require('node:path')
 
+const KUN_GUI_CIRCULAR_PATH = join(__dirname, '..', 'kun', 'node_modules', 'kun-gui')
 const WHISPER_RESOURCES_DIR = join(__dirname, '..', 'resources', 'whisper')
 
 function normalizePlatform(platform) {
@@ -31,6 +32,16 @@ function pruneWhisperResources(platform, arch) {
 async function beforePack(context) {
   const platform = normalizePlatform(context.electronPlatformName)
   const arch = normalizeArch(context.arch)
+
+  // Remove circular kun-gui self-reference that npm may create inside
+  // kun/node_modules/ on Windows builds via junction/symlink. Without this
+  // cleanup, electron-builder follows the link during file copy, producing
+  // infinite nesting that exceeds Windows MAX_PATH.
+  if (existsSync(KUN_GUI_CIRCULAR_PATH)) {
+    rmSync(KUN_GUI_CIRCULAR_PATH, { recursive: true, force: true })
+    console.log(`[before-pack] Removed circular kun-gui dependency from kun/node_modules.`)
+  }
+
   if (process.env.KUN_SKIP_WHISPER_RUNNER === '1') {
     console.warn(`[before-pack] Skipping bundled Whisper runner for ${platform}-${arch}.`)
     return
@@ -53,6 +64,7 @@ async function beforePack(context) {
 }
 
 exports._internals = {
+  KUN_GUI_CIRCULAR_PATH,
   normalizePlatform,
   normalizeArch,
   pruneWhisperResources
