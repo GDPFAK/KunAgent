@@ -177,7 +177,7 @@ function runtimeJsonError(code: string, message: string): Error {
 traceStartup('main module evaluated')
 
 if (runningClawScheduleMcpServer && process.platform === 'darwin') {
-  app.dock.hide()
+  app.dock?.hide()
 }
 
 // 在最早的阶段把 app 名称、AppUserModelId 都设好。
@@ -1497,7 +1497,7 @@ app.whenReady().then(async () => {
 
   if (process.platform === 'darwin') {
     const macDockIcon = createAppIcon(kunMacLogoPng)
-    app.dock.setIcon(macDockIcon.isEmpty() ? appIcon : macDockIcon)
+    app.dock?.setIcon(macDockIcon.isEmpty() ? appIcon : macDockIcon)
   }
 
   store = new JsonSettingsStore(app.getPath('userData'))

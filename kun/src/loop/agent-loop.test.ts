@@ -205,7 +205,7 @@ describe('buildRuntimeContextInstruction', () => {
     })
 
     expect(instruction).toContain('Current opened project absolute path: `/tmp/kun-test-project`')
-    expect(instruction).toContain('Current user local time: 2000-01-02 03:04:05 Sunday (UTC')
+    expect(instruction).toContain('Current user local time: 2000-01-02 03:04 Sunday (UTC')
     expect(instruction).toContain('GMT')
     expect(instruction).toContain('Treat this block as environment context')
   })

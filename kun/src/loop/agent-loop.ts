@@ -408,7 +408,6 @@ function formatLocalDateTimeForPrompt(nowIso: string, timeZone?: string): string
       day: '2-digit',
       hour: '2-digit',
       minute: '2-digit',
-      second: '2-digit',
       hourCycle: 'h23',
       timeZoneName: 'shortOffset'
     })
@@ -418,13 +417,12 @@ function formatLocalDateTimeForPrompt(nowIso: string, timeZone?: string): string
     const day = parts.get('day')
     const hour = parts.get('hour')
     const minute = parts.get('minute')
-    const second = parts.get('second')
     const weekday = parts.get('weekday')
-    if (!year || !month || !day || !hour || !minute || !second || !weekday) {
+    if (!year || !month || !day || !hour || !minute || !weekday) {
       return fallback || date.toISOString()
     }
     const zone = [resolvedTimeZone, parts.get('timeZoneName')].filter(Boolean).join(', ')
-    return `${year}-${month}-${day} ${hour}:${minute}:${second} ${weekday}${zone ? ` (${zone})` : ''}`
+    return `${year}-${month}-${day} ${hour}:${minute} ${weekday}${zone ? ` (${zone})` : ''}`
   } catch {
     return fallback || date.toISOString()
   }

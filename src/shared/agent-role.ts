@@ -62,4 +62,6 @@ export type GuiAgentRoleCatalogResponse = {
   roles: GuiAgentRoleInfo[]
   activeRoleId: GuiAgentRoleId
   defaultRoleId: GuiAgentRoleId
+  /** Whether the user has explicitly configured roles (config or workspace). False when only built-in defaults exist. */
+  hasConfiguredRoles: boolean
 }

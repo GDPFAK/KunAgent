@@ -316,9 +316,9 @@ export class KunRuntimeProvider implements AgentProvider {
     if (options?.fileReferences?.length) {
       body.fileReferences = options.fileReferences
     }
-    const activeRoleId = useAgentRoleStore.getState().activeRoleId
-    if (activeRoleId) {
-      body.roleId = activeRoleId
+    const userSelectedRoleId = useAgentRoleStore.getState().userSelectedRoleId
+    if (userSelectedRoleId) {
+      body.roleId = userSelectedRoleId
     }
     const response = await rendererRuntimeClient.runtimeRequest(
       kunThreadTurnsPath(threadId),

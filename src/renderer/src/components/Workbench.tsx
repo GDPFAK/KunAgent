@@ -576,7 +576,7 @@ export function Workbench(): ReactElement {
   const [openFilePreviewTargets, setOpenFilePreviewTargets] = useState<WorkspaceFileTarget[]>([])
   const initUiPlugins = useUiPluginStore((s) => s.initUiPlugins)
   const uiModeCameosEnabled = useUiModeCameosEnabled()
-  const { roles, activeRoleId, defaultRoleId } = useAgentRoleStore()
+  const { roles, activeRoleId, defaultRoleId, hasConfiguredRoles, loading: rolesLoading } = useAgentRoleStore()
   const activeRole = useMemo(
     () => roles.find((r) => r.id === activeRoleId),
     [roles, activeRoleId]
@@ -3662,9 +3662,9 @@ export function Workbench(): ReactElement {
                   if (activeThreadParentId) void selectThread(activeThreadParentId)
                 }}
               />
-              ) : (
+              ) : hasConfiguredRoles && !rolesLoading ? (
               <div className="flex flex-col">
-              {runtimeConnection === 'ready' && roles.length > 0 ? (
+              {roles.length > 0 ? (
                 <div className="flex items-center gap-2 px-4 py-1 border-b border-ds-border">
                   <AgentRoleSelector
                     roles={roles}
@@ -3758,8 +3758,7 @@ export function Workbench(): ReactElement {
                   openSideConversationDraft()
                 }}
               />
-              </div>
-              )}
+              {hasConfiguredRoles && !rolesLoading ? (
               <AgentStatusPanel
                 activeRole={activeRole}
                 roles={roles}
@@ -3767,6 +3766,92 @@ export function Workbench(): ReactElement {
                 runningSubAgentCount={0}
                 totalSubAgentCount={0}
               />
+              ) : null}
+              </div>
+              ) : (
+              <FloatingComposer
+                input={input}
+                setInput={setInput}
+                mode={composerMode}
+                setMode={setComposerMode}
+                busy={busy}
+                runtimeReady={runtimeConnection === 'ready'}
+                hasActiveThread={Boolean(activeThreadId)}
+                contextWindowTokens={selectedContextWindowTokens}
+                runtimeToolCount={
+                  runtimeInfo
+                    ? runtimeInfo.capabilities.mcp.search?.active
+                      ? runtimeInfo.capabilities.mcp.search.advertisedToolCount
+                      : runtimeInfo.capabilities.mcp.toolCount
+                    : undefined
+                }
+                runtimeSkillCount={runtimeInfo?.capabilities.skills.discoveredSkills}
+                composerModel={
+                  route === 'claw'
+                    ? clawChannels.find((channel) => channel.id === activeClawChannelId)?.model ?? 'auto'
+                    : composerModel
+                }
+                composerProviderId={route === 'chat' ? composerProviderId : undefined}
+                composerPickList={composerPickList}
+                composerModelGroups={composerModelGroups}
+                composerReasoningEffort={
+                  route === 'chat' || route === 'claw' ? composerReasoningEffort : undefined
+                }
+                lockVisionToTextModelSwitch={lockVisionToTextModelSwitch}
+                onComposerModelChange={(modelId, providerId) => {
+                  if (route === 'claw' && activeClawChannelId) {
+                    void setClawChannelModel(activeClawChannelId, modelId)
+                    return
+                  }
+                  setComposerModel(modelId, providerId)
+                }}
+                onComposerReasoningEffortChange={
+                  route === 'chat' || route === 'claw' ? setComposerReasoningEffort : undefined
+                }
+                onConfigureProviders={() => openSettings('providers')}
+                onSend={handleSend}
+                attachments={composerAttachments}
+                attachmentUploadEnabled={attachmentUploadEnabled}
+                attachmentUploadBusy={attachmentUploadBusy}
+                attachmentUploadError={attachmentUploadError}
+                fileReferenceEnabled={route === 'chat' && !activeSddDraft}
+                fileReferences={composerFileReferences}
+                webAccessAvailable={webAccessAvailable}
+                executionSettings={composerExecutionSettings}
+                executionSettingsApplying={composerExecutionApplying}
+                changedFiles={composerChangeSummary?.files}
+                changedFileStats={composerChangeSummary}
+                skillCommands={runtimeSkills}
+                disabledSkillIds={disabledSkillIds}
+                onPickAttachments={(files) => void handlePickAttachments(files)}
+                onPasteClipboardImage={(options) => void handlePasteClipboardImage(options)}
+                onRemoveAttachment={removeComposerAttachment}
+                onAddFileReference={addComposerFileReference}
+                onOpenFileReferencePicker={openFileTreeSidePanel}
+                onRemoveFileReference={removeComposerFileReference}
+                queuedMessages={queuedMessages}
+                onRemoveQueuedMessage={removeQueuedMessage}
+                onInterrupt={(options) => void interrupt(options)}
+                onPlanCommand={() => void handleGuiPlanCommand()}
+                useWorktreePool={useWorktreePool}
+                worktreeBranch={worktreeBranch}
+                onWorktreeBranchChange={setWorktreeBranch}
+                onToggleWorktreeMode={() => setUseWorktreePool((v) => !v)}
+                onNewCommand={() => void createThread({ workspaceRoot: activeSkillWorkspace, forceNew: true })}
+                onReviewCommand={(target) => void reviewActiveThread(target)}
+                onExecutionSettingsChange={updateComposerExecutionSettings}
+                onOpenChanges={() => setRightPanelMode('changes')}
+                onReviewChanges={() => void reviewActiveThread({ kind: 'uncommittedChanges' })}
+                reviewChangesDisabled={busy || runtimeConnection !== 'ready'}
+                onBtwCommand={(seedText) => {
+                  if (seedText?.trim()) {
+                    void spawnSideConversation(seedText)
+                    return
+                  }
+                  openSideConversationDraft()
+                }}
+              />
+              )}
             </div>
             </div>
             {terminalOpen ? (

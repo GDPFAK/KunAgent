@@ -128,6 +128,11 @@ export class KunAgentRoleRegistry implements AgentRoleRegistry {
     return 'coder'
   }
 
+  /** Whether any roles have user configuration or workspace overrides beyond built-in defaults. */
+  hasConfiguredRoles(): boolean {
+    return Object.keys(this.configOverrides).length > 0 || Object.keys(this.workspaceOverrides).length > 0
+  }
+
   /** Return all known role ids including custom ones from config/workspace. */
   allIds(): string[] {
     const ids = new Set([...this.ids(), ...Object.keys(this.configOverrides), ...Object.keys(this.workspaceOverrides)])

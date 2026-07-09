@@ -28,7 +28,8 @@ export async function roleCatalog(
   if (!roleRegistry) {
     return jsonResponse({
       defaultRoleId: 'coder',
-      roles: []
+      roles: [],
+      hasConfiguredRoles: false
     })
   }
 
@@ -68,6 +69,7 @@ export async function roleCatalog(
 
   return jsonResponse({
     defaultRoleId: defaultId,
-    roles
+    roles,
+    hasConfiguredRoles: roleRegistry.hasConfiguredRoles()
   })
 }

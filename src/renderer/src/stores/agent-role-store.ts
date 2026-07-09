@@ -5,6 +5,9 @@ interface AgentRoleStoreState {
   roles: GuiAgentRoleInfo[]
   activeRoleId: string | null
   defaultRoleId: string | null
+  /** Role explicitly selected by the user via AgentRoleSelector. Only set on explicit user action. */
+  userSelectedRoleId: string | null
+  hasConfiguredRoles: boolean
   loading: boolean
   error: string | null
   setRoles: (catalog: GuiAgentRoleCatalogResponse) => void
@@ -20,15 +23,19 @@ export const useAgentRoleStore = create<AgentRoleStoreState>((set, get) => ({
   roles: [],
   activeRoleId: null,
   defaultRoleId: null,
+  userSelectedRoleId: null,
+  hasConfiguredRoles: false,
   loading: false,
   error: null,
   setRoles: (catalog) =>
     set({
       roles: catalog.roles,
       defaultRoleId: catalog.defaultRoleId,
-      activeRoleId: catalog.activeRoleId ?? catalog.defaultRoleId
+      activeRoleId: catalog.activeRoleId ?? catalog.defaultRoleId,
+      // NOTE: userSelectedRoleId is NOT set here — only explicit user action sets it
+      hasConfiguredRoles: catalog.hasConfiguredRoles
     }),
-  setActiveRoleId: (roleId) => set({ activeRoleId: roleId }),
+  setActiveRoleId: (roleId) => set({ activeRoleId: roleId, userSelectedRoleId: roleId }),
   setLoading: (loading) => set({ loading }),
   setError: (error) => set({ error }),
   activeRole: () => {
@@ -40,6 +47,8 @@ export const useAgentRoleStore = create<AgentRoleStoreState>((set, get) => ({
       roles: [],
       activeRoleId: null,
       defaultRoleId: null,
+      userSelectedRoleId: null,
+      hasConfiguredRoles: false,
       loading: false,
       error: null
     })
