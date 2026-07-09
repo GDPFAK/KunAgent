@@ -17,6 +17,7 @@ export function createTurnRecord(input: {
   workspaceCheckpointId?: string
   createdAt?: string
   status?: TurnStatus
+  roleId?: string
 }): TurnEntity {
   const model = input.model?.trim()
   const reasoningEffort = normalizeReasoningEffort(input.reasoningEffort)
@@ -36,6 +37,7 @@ export function createTurnRecord(input: {
     ...(input.mode ? { mode: input.mode } : {}),
     ...(input.disableUserInput ? { disableUserInput: true } : {}),
     ...(input.workspaceCheckpointId ? { workspaceCheckpointId: input.workspaceCheckpointId } : {}),
+    ...(input.roleId ? { roleId: input.roleId } : {}),
     createdAt: input.createdAt ?? new Date().toISOString()
   }
 }

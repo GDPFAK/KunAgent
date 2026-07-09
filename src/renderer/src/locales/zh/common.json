@@ -2438,5 +2438,18 @@
   "color": "颜色",
   "mode": "模式",
   "systemPrompt": "系统提示词",
-  "toolPolicy": "工具权限"
+  "toolPolicy": "工具权限",
+  "agentRoles": "角色配置",
+  "coder": "编码代理",
+  "coderRoleDesc": "主力编码代理，拥有完整工具集",
+  "planner": "规划代理",
+  "plannerRoleDesc": "任务分解与编排专家",
+  "reviewer": "审查代理",
+  "reviewerRoleDesc": "只读代码质量审查",
+  "researcher": "调研代理",
+  "researcherRoleDesc": "只读代码库调研",
+  "summarizer": "摘要代理",
+  "summarizerRoleDesc": "对话摘要生成",
+  "explore": "探索代理",
+  "exploreRoleDesc": "快速只读代码库探索"
 }

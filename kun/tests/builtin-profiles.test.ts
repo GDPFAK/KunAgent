@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+﻿import { describe, expect, it } from 'vitest'
 import { mergeBuiltinSubagentProfiles } from '../src/delegation/builtin-profiles.js'
 import { SubagentsCapabilityConfig } from '../src/contracts/capabilities.js'
 
@@ -28,7 +28,7 @@ describe('mergeBuiltinSubagentProfiles', () => {
     })
     const merged = mergeBuiltinSubagentProfiles(config)
     expect(Object.keys(merged.profiles).sort()).toEqual(
-      ['design-reviewer', 'explore', 'general', 'mine', 'over-engineering-reviewer'].sort()
+      ['coder', 'design-reviewer', 'explore', 'general', 'mine', 'over-engineering-reviewer', 'planner', 'researcher', 'summarizer', 'title'].sort()
     )
   })
 })

@@ -51,6 +51,7 @@ import {
   delegationDiagnostics,
   delegationProfiles
 } from './delegation.js'
+import { roleCatalog } from './roles.js'
 import { isAuthorized, bearerToken } from '../auth.js'
 import { ERRORS } from './runtime-error.js'
 import type { ServerRuntime } from './server-runtime.js'
@@ -141,6 +142,10 @@ export function buildRouter(runtime: ServerRuntime): Router {
   router.add('GET', '/v1/delegation/diagnostics', async (request) => {
     if (!authorize(request, runtime)) return ERRORS.unauthorized()
     return delegationDiagnostics(runtime.delegationRuntime, request)
+  })
+  router.add('GET', '/v1/roles', async (request) => {
+    if (!authorize(request, runtime)) return ERRORS.unauthorized()
+    return roleCatalog(runtime.roleRegistry, runtime.delegationRuntime)
   })
   router.add('GET', '/v1/delegation/profiles', async (request) => {
     if (!authorize(request, runtime)) return ERRORS.unauthorized()

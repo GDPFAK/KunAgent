@@ -91,6 +91,9 @@ import {
   resolveAutoModelRoute,
   type AutoModelRouteSelection
 } from './auto-model-router.js'
+import { heuristicAgentRole, detectRoleSwitchIntent } from './agent-router.js'
+import type { AgentRoleId, AgentRoleConfig } from '../contracts/agent-role.js'
+import type { KunAgentRoleRegistry } from '../delegation/role-registry.js'
 import { ToolStormBreaker, type ToolStormBreakerOptions } from './tool-storm-breaker.js'
 import { healLoadedHistoryItems } from './history-healing.js'
 import { repairDispatchToolArguments } from './tool-call-repair.js'
@@ -113,6 +116,18 @@ const MAX_PARALLEL_TOOL_CALLS = 3
 // N images"), bounding context growth for long computer-use sessions.
 const MAX_FORWARDED_TOOL_IMAGES = 3
 const MAX_TURN_MODEL_STEPS = 64
+
+/**
+ * Known vision-capable model IDs to try for auto-vision-dispatch, ordered by
+ * preference. Flash models preferred first for speed/cost; Pro models are
+ * fallbacks when no flash model is available.
+ */
+const VISION_DISPATCH_MODEL_CANDIDATES: readonly string[] = [
+  'deepseek-v4-flash',
+  'deepseek-chat',
+  'deepseek-v4-pro',
+  'deepseek-reasoner'
+]
 
 /**
  * Maximum prompt tokens an auto-resume chain may accumulate across consecutive
@@ -393,7 +408,6 @@ function formatLocalDateTimeForPrompt(nowIso: string, timeZone?: string): string
       day: '2-digit',
       hour: '2-digit',
       minute: '2-digit',
-      second: '2-digit',
       hourCycle: 'h23',
       timeZoneName: 'shortOffset'
     })
@@ -403,13 +417,12 @@ function formatLocalDateTimeForPrompt(nowIso: string, timeZone?: string): string
     const day = parts.get('day')
     const hour = parts.get('hour')
     const minute = parts.get('minute')
-    const second = parts.get('second')
     const weekday = parts.get('weekday')
-    if (!year || !month || !day || !hour || !minute || !second || !weekday) {
+    if (!year || !month || !day || !hour || !minute || !weekday) {
       return fallback || date.toISOString()
     }
     const zone = [resolvedTimeZone, parts.get('timeZoneName')].filter(Boolean).join(', ')
-    return `${year}-${month}-${day} ${hour}:${minute}:${second} ${weekday}${zone ? ` (${zone})` : ''}`
+    return `${year}-${month}-${day} ${hour}:${minute} ${weekday}${zone ? ` (${zone})` : ''}`
   } catch {
     return fallback || date.toISOString()
   }
@@ -702,6 +715,10 @@ export type AgentLoopOptions = {
    * subscription. kun's tools/persona/permissions are injected into the SDK.
    */
   sdkRuntime?: AgentSdkRuntime
+  /** Capability flags for optional features like agent role routing. */
+  capabilities?: import('../contracts/capabilities.js').KunCapabilitiesConfig
+  /** Agent role registry for role-specific system prompts and routing. */
+  roleRegistry?: KunAgentRoleRegistry
 }
 
 /**
@@ -719,6 +736,8 @@ export type AgentLoopOptions = {
 export class AgentLoop {
   private readonly opts: AgentLoopOptions
   private readonly autoModelRoutes = new Map<string, AutoModelRouteSelection>()
+  /** Per-turn resolved agent role config. Populated when roles are enabled. */
+  private readonly turnRoles = new Map<string, AgentRoleConfig | undefined>()
   private readonly promptTokenPressure = new Map<string, { model: string; promptTokens: number }>()
   /** Threads for which a one-time pressure hydration from persisted usage was already attempted. */
   private readonly hydratedPressureThreads = new Set<string>()
@@ -738,6 +757,8 @@ export class AgentLoop {
   private lastInjectedGoalInstruction: string | null = null
   /** Last-injected todo continuation instruction, tracked to avoid re-injecting unchanged content. */
   private lastInjectedTodoInstruction: string | null = null
+  /** Role switch requested by the model via `[switch_role: xxx]`, consumed on next role resolution. */
+  private pendingRoleSwitch: AgentRoleId | null = null
   private readonly goalResume: GoalResumeCoordinator
 
   constructor(opts: AgentLoopOptions) {
@@ -884,6 +905,7 @@ export class AgentLoop {
       // marker it reads.
       await this.evaluateGoalResume(threadId, turnId, finalStatus ?? 'failed')
       this.autoModelRoutes.delete(autoModelRouteKey(threadId, turnId))
+      this.turnRoles.delete(autoModelRouteKey(threadId, turnId))
       this.toolStormBreakers.delete(turnId)
       this.lastNoToolTextByTurn.delete(turnId)
       this.goalNoToolRecoveryStepsByTurn.delete(turnId)
@@ -1363,7 +1385,8 @@ export class AgentLoop {
       items,
       signal,
       reasoningEffort: turn?.reasoningEffort,
-      candidates: [turn?.model, thread?.model, this.opts.model.model]
+      candidates: [turn?.model, thread?.model, this.opts.model.model],
+      roleId: turn?.roleId
     })
     await this.recordPipelineStage(threadId, turnId, 'input_routed', {
       model: modelRoute.model,
@@ -1573,20 +1596,27 @@ export class AgentLoop {
       contextInstructionCount: contextInstructions.length
     })
     const tokenEconomy = normalizeTokenEconomyConfig(this.opts.tokenEconomy)
+    // Resolve role-specific system prompt when roles capability is enabled.
+    // This runs after the model route resolution (which populates turnRoles).
+    const turnKey = autoModelRouteKey(threadId, turnId)
+    const roleConfig = this.opts.capabilities?.roles?.enabled ? this.turnRoles.get(turnKey) : undefined
+    const baseSystemPrompt = this.opts.prefix.systemPrompt
+    let effectiveSystemPrompt = thread?.systemPrompt?.trim()
+      ? `${baseSystemPrompt}\n\n${thread.systemPrompt.trim()}`
+      : baseSystemPrompt
+    if (roleConfig?.systemPrompt) {
+      if (roleConfig.omitBasePrompt) {
+        effectiveSystemPrompt = roleConfig.systemPrompt
+      } else {
+        effectiveSystemPrompt = `${effectiveSystemPrompt}\n\n[Role: ${roleConfig.name ?? ''}]\n${roleConfig.systemPrompt}`
+      }
+    }
     const baseRequest: ModelRequest = {
       threadId,
       turnId,
       model,
       ...(thread?.providerId?.trim() ? { providerId: thread.providerId.trim() } : {}),
-      // Thread-level systemPrompt (primary-agent persona snapshot) is
-      // appended to the runtime base — same augment strategy as child agents
-      // (child-agent-executor) — so the agent keeps kun's tool/safety
-      // conventions and skill catalog instead of losing them to the persona.
-      // Empty/whitespace falls back to the immutable prefix verbatim so
-      // unbound threads keep the prompt-cache fingerprint.
-      systemPrompt: thread?.systemPrompt?.trim()
-        ? `${this.opts.prefix.systemPrompt}\n\n${thread.systemPrompt.trim()}`
-        : this.opts.prefix.systemPrompt,
+      systemPrompt: effectiveSystemPrompt,
       ...(planTurnActive ? { modeInstruction: PLAN_MODE_INSTRUCTION } : {}),
       ...(contextInstructions.length ? { contextInstructions } : {}),
       prefix: this.opts.prefix.fewShots,
@@ -1836,6 +1866,16 @@ export class AgentLoop {
       toolCallCount: completedToolCalls.length
     })
     await persistAccumulatedResponse()
+    // Detect role-switch intent embedded in the assistant text.
+    // When found, strip the directive from the accumulated text and
+    // store the intent so the next turn's role resolution can use it.
+    if (textAccumulator.value) {
+      const switchIntent = detectRoleSwitchIntent(textAccumulator.value)
+      if (switchIntent) {
+        textAccumulator.value = switchIntent.cleanText
+        this.pendingRoleSwitch = switchIntent.role
+      }
+    }
     if (stopReason === 'error') return 'failed'
     if (completedToolCalls.length === 0) {
       if (request.requiredToolName) {
@@ -2957,6 +2997,7 @@ export class AgentLoop {
     signal: AbortSignal
     reasoningEffort?: string
     candidates: Array<string | undefined>
+    roleId?: string
   }): Promise<{ model: string; reasoningEffort?: string }> {
     const requestedReasoningEffort = normalizeRequestedReasoningEffort(input.reasoningEffort)
     const resolved = resolveModelMode(...input.candidates)
@@ -2984,6 +3025,30 @@ export class AgentLoop {
       abortSignal: input.signal
     })
     this.autoModelRoutes.set(key, route)
+    // Resolve agent role when roles capability is enabled. Uses the
+    // pendingRoleSwitch (set by model's `[switch_role: xxx]` directive) if
+    // available, otherwise falls back to the synchronous heuristic.
+    // Falls back to undefined (no role) on any error.
+    if (this.opts.capabilities?.roles?.enabled) {
+      try {
+        let roleId: AgentRoleId
+        if (input.roleId) {
+          roleId = input.roleId as AgentRoleId
+        } else if (this.pendingRoleSwitch) {
+          roleId = this.pendingRoleSwitch
+          this.pendingRoleSwitch = null // consumed
+        } else {
+          const result = heuristicAgentRole(input.latestRequest)
+          roleId = result.role
+        }
+        const roleConfig = this.opts.roleRegistry?.getById(roleId)
+        this.turnRoles.set(key, roleConfig)
+      } catch {
+        // Role resolution failure is non-fatal — the turn continues without
+        // role-specific prompting.
+        this.turnRoles.set(key, undefined)
+      }
+    }
     return {
       model: route.model,
       reasoningEffort: requestedReasoningEffort ?? route.reasoningEffort
@@ -3021,10 +3086,24 @@ export class AgentLoop {
         })
         continue
       }
-      textFallbacks.push(buildTextAttachmentFallback(
-        attachment,
-        textFallbackPolicy.textFallbackMaxBase64Bytes
-      ))
+      // Model does not support image input. Try auto-dispatch to a
+      // vision-capable model for analysis, falling back to text-only
+      // base64 fallback if no vision model is available or it fails.
+      const visionDescription = await this.dispatchImageToVisionModel(attachment, input.threadId)
+      if (visionDescription) {
+        textFallbacks.push({
+          id: attachment.id,
+          name: attachment.name,
+          mimeType: 'text/plain',
+          dataBase64: Buffer.from(visionDescription, 'utf8').toString('base64'),
+          byteSize: Buffer.byteLength(visionDescription, 'utf8')
+        })
+      } else {
+        textFallbacks.push(buildTextAttachmentFallback(
+          attachment,
+          textFallbackPolicy.textFallbackMaxBase64Bytes
+        ))
+      }
     }
     return { imageAttachments, textFallbacks }
   }
@@ -3096,6 +3175,93 @@ export class AgentLoop {
     })
     this.opts.memoryStore.setLastInjected(memories.map((memory) => memory.id))
     return memories
+  }
+
+  /**
+   * Find a vision-capable model from the configured model list.
+   * Checks known candidates via `modelCapabilities` and returns the first
+   * match. Returns null when no vision model is available — the caller
+   * degrades gracefully to text-only fallback.
+   */
+  private findVisionCapableModel(): string | null {
+    if (!this.opts.modelCapabilities) return null
+    for (const candidate of VISION_DISPATCH_MODEL_CANDIDATES) {
+      try {
+        const caps = this.opts.modelCapabilities(candidate)
+        if (caps.inputModalities.includes('image')) {
+          return candidate
+        }
+      } catch {
+        // Skip models that can't be resolved
+        continue
+      }
+    }
+    return null
+  }
+
+  /**
+   * Dispatch an image attachment to a vision-capable model for analysis.
+   * Returns a concise Chinese description of the image, or null on any
+   * failure (the caller falls back to the existing text fallback).
+   *
+   * The request is lightweight: no tools, no history, low maxTokens,
+   * 15-second timeout. Failures are silent — a timeout or error just
+   * returns null so the conversation is never blocked.
+   */
+  private async dispatchImageToVisionModel(
+    attachment: AttachmentContent,
+    threadId: string
+  ): Promise<string | null> {
+    // 1. Find a vision model
+    const visionModel = this.findVisionCapableModel()
+    if (!visionModel) return null
+
+    try {
+      // 2. Build a quick analysis request
+      const result = this.opts.model.stream({
+        threadId: `${threadId}_vision_dispatch`,
+        turnId: `vision_${attachment.id}_${Date.now()}`,
+        model: visionModel,
+        systemPrompt: [
+          'You are an image analyst. Describe the image concisely in Chinese.',
+          'Focus on: text content, UI layout, code screenshots, diagrams, colors, and any visual details relevant to a developer.',
+          'Be objective and factual. Do not speculate. Keep under 200 words.'
+        ].join('\n'),
+        prefix: [],
+        history: [makeUserItem({
+          id: `vision_user_${attachment.id}`,
+          threadId: `${threadId}_vision_dispatch`,
+          turnId: `vision_${attachment.id}_${Date.now()}`,
+          text: '请描述这张图片的视觉内容'
+        })],
+        attachments: [{
+          id: attachment.id,
+          name: attachment.name,
+          mimeType: attachment.mimeType,
+          dataBase64: attachment.data.toString('base64')
+        }],
+        tools: [],
+        abortSignal: AbortSignal.timeout(15_000),
+        stream: false,
+        maxTokens: 512,
+        temperature: 0,
+        reasoningEffort: 'off'
+      })
+
+      // 3. Collect the description text
+      let description = ''
+      for await (const chunk of result) {
+        if (chunk.kind === 'assistant_text_delta') {
+          description += chunk.text
+        }
+        if (chunk.kind === 'error') throw new Error(chunk.message)
+      }
+      return description.trim() || null
+    } catch (err) {
+      // Silent failure: any error returns null, caller falls back to text fallback
+      console.warn(`[Vision Dispatch] Failed to analyze image ${attachment.id}:`, err)
+      return null
+    }
   }
 
   /** Convenience factory for tests: builds a loop with sensible defaults. */

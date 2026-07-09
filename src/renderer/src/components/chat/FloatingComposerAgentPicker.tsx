@@ -2,6 +2,7 @@ import type { ReactElement } from 'react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Bot, ChevronDown } from 'lucide-react'
 import type { KunSubagentProfileV1 } from '@shared/app-settings'
+import { KUN_DELEGATION_PROFILES_PATH } from '@shared/kun-endpoints'
 import { rendererRuntimeClient } from '../../agent/runtime-client'
 import { useChatStore } from '../../store/chat-store'
 
@@ -12,8 +13,51 @@ type Props = {
   disabled?: boolean
 }
 
+/**
+ * Runtime profile from GET /v1/delegation/profiles.
+ * The DelegationRuntime.listProfiles() returns this shape keyed by name.
+ */
+type RuntimeAgentProfile = {
+  name: string
+  mode: string
+  toolPolicy: string
+  model?: string
+  providerId?: string
+  description?: string
+}
+
 function isAvailableForPrimary(profile: KunSubagentProfileV1): boolean {
   return profile.enabled && (profile.mode === 'primary' || profile.mode === 'all')
+}
+
+/** Map a runtime profile to a GUI profile for display in the picker. */
+function runtimeProfileToGui(
+  name: string,
+  profile: RuntimeAgentProfile
+): KunSubagentProfileV1 {
+  return {
+    id: name,
+    enabled: true,
+    name: name,
+    mode: profile.mode as KunSubagentProfileV1['mode'],
+    toolPolicy: profile.toolPolicy as 'readOnly' | 'inherit',
+    description: profile.description,
+    model: profile.model,
+    providerId: profile.providerId,
+    // Assign known colors per profile id
+    color:
+      name === 'coder'
+        ? '#3b82d8'
+        : name === 'general'
+          ? '#3b82d8'
+          : name === 'explore'
+            ? '#1d9e75'
+            : name === 'design-reviewer'
+              ? '#7f77dd'
+              : name === 'over-engineering-reviewer'
+                ? '#e8943a'
+                : undefined
+  }
 }
 
 export function FloatingComposerAgentPicker({ compact = false, disabled }: Props): ReactElement | null {
@@ -27,8 +71,39 @@ export function FloatingComposerAgentPicker({ compact = false, disabled }: Props
   const loadAgents = useCallback(async (force = false): Promise<void> => {
     try {
       const settings = await rendererRuntimeClient.getSettings({ forceRefresh: force })
-      const profiles = settings.agents?.kun?.subagents?.profiles ?? []
-      setAgents(profiles.filter(isAvailableForPrimary))
+      const settingsProfiles = settings.agents?.kun?.subagents?.profiles ?? []
+      const primary = settingsProfiles.filter(isAvailableForPrimary)
+      if (primary.length > 0) {
+        setAgents(primary)
+        loadedRef.current = true
+        return
+      }
+      // No primary agents in settings — try fetching from the runtime's
+      // delegation/profiles endpoint which includes built-in profiles.
+      try {
+        const res = await rendererRuntimeClient.runtimeRequest(
+          KUN_DELEGATION_PROFILES_PATH,
+          'GET'
+        )
+        if (res.ok) {
+          const data = JSON.parse(res.body) as {
+            profiles: RuntimeAgentProfile[]
+            defaultProfile?: string
+          }
+          const profilesArray = Array.isArray(data.profiles) ? data.profiles : []
+          const profileList = profilesArray
+            .filter((p: RuntimeAgentProfile) => p.mode === 'primary' || p.mode === 'all')
+            .map((p: RuntimeAgentProfile) => runtimeProfileToGui(p.name, p))
+          if (profileList.length > 0) {
+            setAgents(profileList)
+            loadedRef.current = true
+            return
+          }
+        }
+      } catch {
+        // runtime not reachable — no agents shown
+      }
+      setAgents([])
       loadedRef.current = true
     } catch {
       /* swallow — picker just won't show entries */
