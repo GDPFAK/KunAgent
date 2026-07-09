@@ -224,6 +224,24 @@ describe('app-ipc-schemas', () => {
     expect(payload.disabledSkillIds).toEqual(['test-skill-08'])
   })
 
+  it('accepts modelFallback settings in kun runtime patch', () => {
+    const payload = settingsPatchSchema.parse({
+      agents: {
+        kun: {
+          modelFallback: {
+            enabled: true,
+            ttfbTimeoutMs: 15000,
+            fallbackModels: ['claude-sonnet-4-20250514', 'gemini-2.5-flash']
+          }
+        }
+      }
+    })
+
+    expect(payload.agents?.kun?.modelFallback?.enabled).toBe(true)
+    expect(payload.agents?.kun?.modelFallback?.ttfbTimeoutMs).toBe(15000)
+    expect(payload.agents?.kun?.modelFallback?.fallbackModels).toHaveLength(2)
+  })
+
   it('rejects low local service ports', () => {
     expect(() => settingsPatchSchema.parse({
       agents: { kun: { port: 9999 } }

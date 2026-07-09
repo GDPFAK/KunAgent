@@ -1449,7 +1449,9 @@ export function Workbench(): ReactElement {
           throw new Error(t('composerAttachmentUnsupportedType'))
         }
         if (!selectedModelSupportsImageInput) {
-          throw new Error(t('composerAttachmentModelUnsupported'))
+          // Not a block — runtime auto-dispatches to a vision model when the
+          // current model does not support image input (dispatchImageToVisionModel).
+          // Allow the upload to proceed; the runtime handles the rest.
         }
         if (!attachmentCapabilities || typeof provider.uploadAttachment !== 'function') {
           throw new Error(t('composerAttachmentUnavailable'))

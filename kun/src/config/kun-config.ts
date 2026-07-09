@@ -337,7 +337,13 @@ export const KunConfigSchema = z
     roles: RolesConfigSchema.optional(),
     capabilities: KunCapabilitiesConfig.default(DEFAULT_KUN_CAPABILITIES_CONFIG),
     hooks: HooksConfigSchema.optional(),
-    quality: QualityConfigSchema.optional()
+    quality: QualityConfigSchema.optional(),
+    /** Model fallback settings — auto-switch to a fallback model when TTFB exceeds threshold. */
+    modelFallback: z.object({
+      enabled: z.boolean().optional(),
+      ttfbTimeoutMs: z.number().int().positive().optional(),
+      fallbackModels: z.array(z.string().trim().min(1)).max(50).optional()
+    }).strict().optional()
   })
   .strict()
   .superRefine((config, ctx) => {

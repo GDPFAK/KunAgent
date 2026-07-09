@@ -482,6 +482,7 @@ export async function syncGuiManagedKunConfig(
     | 'summaryProviderId'
     | 'codeReviewModel'
     | 'codeReviewProviderId'
+    | 'modelFallback'
   >,
   options?: {
     scheduleMcp?: {
@@ -605,6 +606,7 @@ export async function syncGuiManagedKunConfig(
         }
       }
     },
+    modelFallback: runtime.modelFallback,
     ...(workflowHookEntries.length ? { hooks: workflowHookEntries } : {})
   }
   const parsedNext = KunConfigSchema.safeParse(next)
@@ -1353,6 +1355,9 @@ function sanitizeKunConfigSections(
     runtime: parseKunConfigSection(RuntimeTuningConfigSchema, existing.runtime),
     quality: parseKunConfigSection(QualityConfigSchema, existing.quality),
     capabilities: sanitizeKunCapabilitiesConfig(existing.capabilities),
+    ...('modelFallback' in existing
+      ? { modelFallback: existing.modelFallback }
+      : {}),
     ...('roles' in existing
       ? { roles: parseKunConfigSection(RolesConfigSchema, existing.roles) }
       : {}),

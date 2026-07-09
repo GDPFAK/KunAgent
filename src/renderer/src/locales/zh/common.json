@@ -2451,5 +2451,12 @@
   "summarizer": "摘要代理",
   "summarizerRoleDesc": "对话摘要生成",
   "explore": "探索代理",
-  "exploreRoleDesc": "快速只读代码库探索"
+  "exploreRoleDesc": "快速只读代码库探索",
+  "modelFallback": "模型回退",
+  "modelFallbackEnabled": "慢速自动回退",
+  "modelFallbackEnabledDesc": "启用后，当模型响应过慢时自动切换到备用模型重试。",
+  "modelFallbackTtfb": "首 token 超时",
+  "modelFallbackTtfbDesc": "等待首个 token 的最长时间，超过则视为模型响应慢。",
+  "modelFallbackModels": "回退模型列表",
+  "modelFallbackModelsDesc": "选择当主模型超时后用于重试的模型。"
 }

@@ -71,6 +71,10 @@ export type ModelRequest = {
    * `high` and `max` enable it with a concrete reasoning effort.
    */
   reasoningEffort?: string
+  /** Max ms to wait for the first response token. 0 or undefined = no timeout. */
+  ttfbTimeoutMs?: number
+  /** Ordered fallback model ids. If TTFB times out, retry with the next one. */
+  fallbackModels?: string[]
   abortSignal: AbortSignal
 }
 

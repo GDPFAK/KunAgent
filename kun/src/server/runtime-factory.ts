@@ -123,6 +123,12 @@ export type KunServeRuntimeOptions = {
   hooks?: HooksConfig
   /** Design-quality linter config; drives the builtin PostToolUse hook. */
   quality?: QualityConfig
+  /** Model fallback settings — auto-switch to a fallback model when TTFB exceeds threshold. */
+  modelFallback?: {
+    enabled: boolean
+    ttfbTimeoutMs: number
+    fallbackModels: string[]
+  }
   startedAt?: string
 }
 
@@ -499,6 +505,7 @@ export async function createKunServeRuntime(
     skillRuntime,
     tokenEconomy,
     contextCompaction: options.contextCompaction,
+    modelFallback: options.modelFallback,
     ...(options.roles ? { roles: options.roles } : {}),
     ...(options.runtime?.toolStorm ? { toolStorm: options.runtime.toolStorm } : {}),
     ...(options.runtime?.toolArgumentRepair ? { toolArgumentRepair: options.runtime.toolArgumentRepair } : {}),

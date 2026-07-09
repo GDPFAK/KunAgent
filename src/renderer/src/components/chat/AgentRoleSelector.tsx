@@ -1,5 +1,6 @@
 import type { ReactElement } from 'react'
 import { useState, useRef, useEffect } from 'react'
+import { useTranslation } from 'react-i18next'
 import { ChevronDown } from 'lucide-react'
 import type { GuiAgentRoleInfo } from '@shared/agent-role'
 
@@ -10,6 +11,11 @@ export type AgentRoleSelectorProps = {
   onSelect: (roleId: string) => void
   disabled?: boolean
   compact?: boolean
+}
+
+/** Map role id to i18n key. Falls back to the id itself if no translation exists. */
+function roleLabel(t: (key: string) => string, role: GuiAgentRoleInfo): string {
+  return t(role.id) !== role.id ? t(role.id) : (role.name ?? role.id)
 }
 
 /**
@@ -39,10 +45,11 @@ export function AgentRoleSelector({
     return () => document.removeEventListener('mousedown', handler)
   }, [open])
 
+  const { t } = useTranslation('common')
   if (roles.length === 0) return null
 
   const current = roles.find((r) => r.id === activeRoleId)
-  const displayName = current?.name ?? current?.id ?? defaultRoleId ?? 'coder'
+  const displayName = current ? roleLabel(t, current) : (defaultRoleId ?? 'coder')
   const dotColor = current?.color ?? '#3b82d8'
 
   return (
@@ -75,7 +82,7 @@ export function AgentRoleSelector({
                   ${isActive ? 'bg-ds-accent/10 text-ds-ink font-medium' : 'text-ds-muted hover:bg-ds-hover'}`}
               >
                 <span className="inline-block h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: role.color ?? '#3b82d8' }} />
-                <span className="min-w-0 flex-1 truncate">{role.name ?? role.id}</span>
+                <span className="min-w-0 flex-1 truncate">{roleLabel(t, role)}</span>
                 {role.isDefault && (
                   <span className="shrink-0 text-[10px] text-ds-faint/70">默认</span>
                 )}

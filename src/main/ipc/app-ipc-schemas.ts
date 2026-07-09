@@ -437,6 +437,11 @@ const kunRuntimePatchSchema = z.object({
     ignoreFiles: z.array(z.string().trim().min(1).max(256)).max(200).optional(),
     maxFindings: z.number().int().positive().max(100).optional()
   }).strict().optional(),
+  modelFallback: z.object({
+    enabled: z.boolean().optional(),
+    ttfbTimeoutMs: z.number().int().positive().max(60_000).optional(),
+    fallbackModels: z.array(z.string().trim().min(1).max(128)).max(20).optional()
+  }).strict().optional(),
   imageGeneration: z.object({
     enabled: z.boolean().optional(),
     providerId: z.string().trim().max(64).optional(),
@@ -518,7 +523,9 @@ const kunRuntimePatchSchema = z.object({
   titleReasoningEffort: modelReasoningEffortSchema.optional(),
   summaryReasoningEffort: modelReasoningEffortSchema.optional(),
   codeReviewReasoningEffort: modelReasoningEffortSchema.optional(),
-  subagents: subagentsPatchSchema.optional()
+  subagents: subagentsPatchSchema.optional(),
+  /** Agent role configuration overrides. Passed through to Kun config.json roles.agentRoles. */
+  roles: z.any().optional()
 }).strict()
 
 const logPatchSchema = z.object({
