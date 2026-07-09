@@ -393,6 +393,22 @@ export const ComputerUseCapabilityConfig = CapabilityToggleConfig.extend({
 }).strict()
 export type ComputerUseCapabilityConfig = z.infer<typeof ComputerUseCapabilityConfig>
 
+/**
+ * Agent role capability configuration.
+ *
+ * This toggle controls whether the multi-agent role system is active at all.
+ * When `enabled: true` (the default), the runtime activates scoring matrix
+ * routing, role switching, GUI role selection, and role-specific prompts.
+ * Set to `false` to revert to a single AgentLoop with no role awareness.
+ * All role-related code paths check this flag and fall through to
+ * the legacy path when it is off.
+ */
+export const RolesCapabilityConfig = CapabilityToggleConfig.extend({
+  enabled: z.boolean().default(true),
+  // Future: maxParallelRoles, autoRoute, etc.
+}).strict()
+export type RolesCapabilityConfig = z.infer<typeof RolesCapabilityConfig>
+
 export const KunCapabilitiesConfig = z
   .object({
     mcp: McpCapabilityConfig.default(() => McpCapabilityConfig.parse({})),
@@ -405,7 +421,8 @@ export const KunCapabilitiesConfig = z
     speechGen: SpeechGenCapabilityConfig.default(() => SpeechGenCapabilityConfig.parse({})),
     musicGen: MusicGenCapabilityConfig.default(() => MusicGenCapabilityConfig.parse({})),
     videoGen: VideoGenCapabilityConfig.default(() => VideoGenCapabilityConfig.parse({})),
-    computerUse: ComputerUseCapabilityConfig.default(() => ComputerUseCapabilityConfig.parse({}))
+    computerUse: ComputerUseCapabilityConfig.default(() => ComputerUseCapabilityConfig.parse({})),
+    roles: RolesCapabilityConfig.default(() => RolesCapabilityConfig.parse({}))
   })
   .strict()
 export type KunCapabilitiesConfig = z.infer<typeof KunCapabilitiesConfig>
@@ -490,6 +507,10 @@ export const RuntimeCapabilityManifest = z
     }).strict(),
     computerUse: RuntimeCapabilityState.extend({
       mode: ComputerUseMode
+    }).strict(),
+    roles: RuntimeCapabilityState.extend({
+      configuredRoles: z.number().int().nonnegative(),
+      defaultRole: z.string().optional()
     }).strict()
   })
   .strict()
@@ -551,6 +572,12 @@ export function buildRuntimeCapabilityManifest(input: {
   computerUse?: {
     available?: boolean
     reason?: string
+  }
+  roles?: {
+    available?: boolean
+    reason?: string
+    configuredRoles?: number
+    defaultRole?: string
   }
 }): RuntimeCapabilityManifest {
   const config = KunCapabilitiesConfig.parse(input.config ?? {})
@@ -692,6 +719,16 @@ export function buildRuntimeCapabilityManifest(input: {
         input.computerUse?.reason ?? 'computer-use backend is unavailable on this platform'
       ),
       mode: config.computerUse.mode
+    },
+    roles: {
+      ...providerCapabilityState(
+        config.roles.enabled,
+        'role system is disabled by config',
+        input.roles?.available === true,
+        input.roles?.reason ?? 'role system is unavailable'
+      ),
+      configuredRoles: input.roles?.configuredRoles ?? 0,
+      ...(input.roles?.defaultRole ? { defaultRole: input.roles.defaultRole } : {})
     }
   })
 }

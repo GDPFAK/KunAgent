@@ -254,7 +254,7 @@ function parseIpcPayload<T>(channel: string, schema: z.ZodType<T>, payload: unkn
   ) {
     for (const issue of parsed.error.issues) {
       if (issue.code === 'unrecognized_keys' && issue.keys && issue.keys.length > 0) {
-        const cleaned = removeKeysAt(payload, issue.path, new Set(issue.keys))
+        const cleaned = removeKeysAt(payload, issue.path as readonly (string | number)[], new Set(issue.keys as string[]))
         const retried = schema.safeParse(cleaned)
         if (retried.success) return retried.data
         break // only attempt one round of stripping

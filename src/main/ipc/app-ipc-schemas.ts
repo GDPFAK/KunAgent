@@ -5,10 +5,13 @@ import {
   KUN_ATTACHMENT_DIAGNOSTICS_TEMPLATE,
   KUN_ATTACHMENTS_TEMPLATE,
   KUN_ATTACHMENT_TEMPLATE,
+  KUN_DELEGATION_DIAGNOSTICS_TEMPLATE,
+  KUN_DELEGATION_PROFILES_TEMPLATE,
   KUN_HEALTH_TEMPLATE,
   KUN_MEMORY_DIAGNOSTICS_TEMPLATE,
   KUN_MEMORY_RECORD_TEMPLATE,
   KUN_MEMORY_TEMPLATE,
+  KUN_ROLES_TEMPLATE,
   KUN_RUNTIME_INFO_TEMPLATE,
   KUN_RUNTIME_TOOLS_TEMPLATE,
   KUN_SESSION_RESUME_TEMPLATE,
@@ -173,7 +176,10 @@ const ENDPOINTS: readonly EndpointTemplate[] = [
   compileEndpoint(KUN_USER_INPUT_TEMPLATE, ['POST']),
   compileEndpoint(KUN_SESSION_RESUME_TEMPLATE, ['POST']),
   compileEndpoint(KUN_USAGE_TEMPLATE, ['GET']),
-  compileEndpoint(KUN_DEBUG_LLM_ROUNDS_TEMPLATE, ['GET'])
+  compileEndpoint(KUN_DEBUG_LLM_ROUNDS_TEMPLATE, ['GET']),
+  compileEndpoint(KUN_ROLES_TEMPLATE, ['GET']),
+  compileEndpoint(KUN_DELEGATION_PROFILES_TEMPLATE, ['GET']),
+  compileEndpoint(KUN_DELEGATION_DIAGNOSTICS_TEMPLATE, ['GET'])
 ]
 
 function isAllowedRuntimeRequest(value: { path: string; method?: string }): boolean {
@@ -431,6 +437,11 @@ const kunRuntimePatchSchema = z.object({
     ignoreFiles: z.array(z.string().trim().min(1).max(256)).max(200).optional(),
     maxFindings: z.number().int().positive().max(100).optional()
   }).strict().optional(),
+  modelFallback: z.object({
+    enabled: z.boolean().optional(),
+    ttfbTimeoutMs: z.number().int().positive().max(60_000).optional(),
+    fallbackModels: z.array(z.string().trim().min(1).max(128)).max(20).optional()
+  }).strict().optional(),
   imageGeneration: z.object({
     enabled: z.boolean().optional(),
     providerId: z.string().trim().max(64).optional(),
@@ -512,7 +523,9 @@ const kunRuntimePatchSchema = z.object({
   titleReasoningEffort: modelReasoningEffortSchema.optional(),
   summaryReasoningEffort: modelReasoningEffortSchema.optional(),
   codeReviewReasoningEffort: modelReasoningEffortSchema.optional(),
-  subagents: subagentsPatchSchema.optional()
+  subagents: subagentsPatchSchema.optional(),
+  /** Agent role configuration overrides. Passed through to Kun config.json roles.agentRoles. */
+  roles: z.any().optional()
 }).strict()
 
 const logPatchSchema = z.object({

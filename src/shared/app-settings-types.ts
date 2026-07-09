@@ -336,6 +336,10 @@ export type KunRuntimeSettingsV1 = {
   summaryReasoningEffort?: ModelReasoningEffort
   /** Reasoning depth for the code-review subagent model call. Default 'off'. */
   codeReviewReasoningEffort?: ModelReasoningEffort
+  /** Agent role configuration overrides (model, providerId, etc. per role). */
+  roles?: Record<string, unknown>
+  /** Model fallback settings — auto-switch to a fallback model when TTFB exceeds the threshold. */
+  modelFallback: KunModelFallbackSettingsV1
 }
 
 export function kunToolPermissionModeSettings(
@@ -479,6 +483,15 @@ export type KunVideoGenerationSettingsV1 = {
   defaultResolution: string
   timeoutMs: number
   pollIntervalMs: number
+}
+
+/** Model fallback settings — auto-switch to a fallback model when TTFB exceeds the threshold. */
+export type KunModelFallbackSettingsV1 = {
+  enabled: boolean
+  /** Max milliseconds to wait for the first response token before considering the model slow. 0 = no timeout. */
+  ttfbTimeoutMs: number
+  /** Ordered fallback model ids. Empty = use all models from the active provider. */
+  fallbackModels: string[]
 }
 
 export type KunMcpSearchMode = 'direct' | 'search' | 'auto'

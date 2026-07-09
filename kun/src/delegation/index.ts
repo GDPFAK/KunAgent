@@ -1,1 +1,5 @@
 export * from './delegation-runtime.js'
+export * from './role-registry.js'
+export * from './builtin-profiles.js'
+export * from './workspace-agents.js'
+export * from './planner-agent.js'

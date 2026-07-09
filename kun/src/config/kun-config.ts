@@ -298,7 +298,32 @@ export const RolesConfigSchema = z
     // Per-role reasoning depth. Default 'off' (the GUI omits it entirely).
     titleReasoningEffort: ModelReasoningEffort.optional(),
     summaryReasoningEffort: ModelReasoningEffort.optional(),
-    codeReviewReasoningEffort: ModelReasoningEffort.optional()
+    codeReviewReasoningEffort: ModelReasoningEffort.optional(),
+    /**
+     * Agent role configuration overrides.
+     *
+     * Each key is an AgentRoleId (e.g. "coder", "planner", "reviewer").
+     * Values are partial AgentRoleConfig overrides — only the fields the user
+     * wants to customize. Absent fields inherit from built-in defaults.
+     * Example:
+     * ```json
+     * { "agentRoles": { "coder": { "model": "deepseek-v4-pro" } } }
+     * ```
+     */
+    agentRoles: z.record(z.string().min(1), z
+      .object({
+        model: z.string().min(1).optional(),
+        providerId: z.string().min(1).optional(),
+        systemPrompt: z.string().min(1).optional(),
+        omitBasePrompt: z.boolean().optional(),
+        toolPolicy: z.enum(['inherit', 'readOnly']).optional(),
+        allowedTools: z.array(z.string().min(1)).optional(),
+        blockedTools: z.array(z.string().min(1)).optional(),
+        reasoningEffort: ModelReasoningEffort.optional(),
+        maxTokens: z.number().int().positive().optional()
+      })
+      .strict()
+    ).optional()
   })
   .strict()
 export type RolesConfig = z.infer<typeof RolesConfigSchema>
@@ -312,9 +337,37 @@ export const KunConfigSchema = z
     roles: RolesConfigSchema.optional(),
     capabilities: KunCapabilitiesConfig.default(DEFAULT_KUN_CAPABILITIES_CONFIG),
     hooks: HooksConfigSchema.optional(),
-    quality: QualityConfigSchema.optional()
+    quality: QualityConfigSchema.optional(),
+    /** Model fallback settings — auto-switch to a fallback model when TTFB exceeds threshold. */
+    modelFallback: z.object({
+      enabled: z.boolean().optional(),
+      ttfbTimeoutMs: z.number().int().positive().optional(),
+      fallbackModels: z.array(z.string().trim().min(1)).max(50).optional()
+    }).strict().optional()
   })
   .strict()
+  .superRefine((config, ctx) => {
+    // Validate agentRoles references: each role's model must exist in the models config.
+    if (config.roles?.agentRoles && config.models) {
+      const knownModels = new Set(Object.keys(config.models))
+      for (const [roleId, roleConfig] of Object.entries(config.roles.agentRoles)) {
+        if (roleConfig.model && !knownModels.has(roleConfig.model)) {
+          ctx.addIssue({
+            code: 'custom',
+            path: ['roles', 'agentRoles', roleId, 'model'],
+            message: `Agent role "${roleId}" references model "${roleConfig.model}" which is not defined in the models section.`
+          })
+        }
+        if (roleConfig.providerId && config.serve?.providers && !config.serve.providers[roleConfig.providerId]) {
+          ctx.addIssue({
+            code: 'custom',
+            path: ['roles', 'agentRoles', roleId, 'providerId'],
+            message: `Agent role "${roleId}" references provider "${roleConfig.providerId}" which is not defined in serve.providers.`
+          })
+        }
+      }
+    }
+  })
 
 export type KunConfig = z.infer<typeof KunConfigSchema>
 export type QualityConfig = z.infer<typeof QualityConfigSchema>

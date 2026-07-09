@@ -43,6 +43,10 @@ export type ChildAgentExecutorOptions = {
   modelCapabilities?: (model: string) => ModelCapabilityMetadata
   skillRuntime?: SkillRuntime
   memoryStore?: MemoryStore
+  /** Capability flags — passed through to the child AgentLoop so role routing works in subagents. */
+  capabilities?: import('../contracts/capabilities.js').KunCapabilitiesConfig
+  /** Agent role registry — passed through to the child AgentLoop. */
+  roleRegistry?: import('./role-registry.js').KunAgentRoleRegistry
   /**
    * Persistence wiring. When the main runtime's stores + event recorder are
    * supplied, the child runs as a persisted `relation: 'side'` thread on the
@@ -162,7 +166,9 @@ export function createChildAgentExecutor(options: ChildAgentExecutorOptions): Ch
       ...(options.contextCompaction ? { contextCompaction: options.contextCompaction } : {}),
       ...(options.tokenEconomy ? { tokenEconomy: options.tokenEconomy } : {}),
       ...(options.runtime?.toolStorm ? { toolStorm: options.runtime.toolStorm } : {}),
-      ...(options.runtime?.toolArgumentRepair ? { toolArgumentRepair: options.runtime.toolArgumentRepair } : {})
+      ...(options.runtime?.toolArgumentRepair ? { toolArgumentRepair: options.runtime.toolArgumentRepair } : {}),
+      ...(options.capabilities ? { capabilities: options.capabilities } : {}),
+      ...(options.roleRegistry ? { roleRegistry: options.roleRegistry } : {})
     })
 
     const model = input.model?.trim() || options.defaultModel

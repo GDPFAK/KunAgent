@@ -65,7 +65,7 @@ export const OVER_ENGINEERING_REVIEWER_PROFILE: SubagentProfileConfig = {
  * delegations, including several in parallel.
  */
 export const GENERAL_PROFILE: SubagentProfileConfig = {
-  mode: 'subagent',
+  mode: 'all',
   toolPolicy: 'inherit',
   description: '通用代理:研究复杂问题、执行多步骤任务,可读写文件、运行命令,可并行。',
   promptPreamble: [
@@ -96,7 +96,37 @@ export const BUILTIN_SUBAGENT_PROFILES: Readonly<Record<string, SubagentProfileC
   general: GENERAL_PROFILE,
   explore: EXPLORE_PROFILE,
   'design-reviewer': DESIGN_REVIEWER_PROFILE,
-  'over-engineering-reviewer': OVER_ENGINEERING_REVIEWER_PROFILE
+  'over-engineering-reviewer': OVER_ENGINEERING_REVIEWER_PROFILE,
+  coder: {
+    mode: 'all',
+    toolPolicy: 'inherit',
+    description: '编码代理:实现功能、修复Bug、重构代码,可读写文件和运行命令。',
+    promptPreamble: '你是 Kun 的编码代理(Coder)。你有完整的工具访问权限。实现功能、修复问题、重构代码。聚焦任务本身,完成后简洁汇报结果。'
+  },
+  planner: {
+    mode: 'subagent',
+    toolPolicy: 'inherit',
+    description: '规划代理:将复杂任务分解为可执行的子任务清单。',
+    promptPreamble: '你是 Kun 的规划代理(Planner)。分析用户给的任务,将其分解为有序的子任务清单。每个子任务要独立可执行,标记依赖关系。'
+  },
+  researcher: {
+    mode: 'subagent',
+    toolPolicy: 'readOnly',
+    description: '调研代理:搜索代码库、查找文档、回答技术问题,只读。',
+    promptPreamble: '你是 Kun 的调研代理(Researcher)。你只读取文件、搜索代码库、查找文档。回答关于代码库的问题。高效、精准、只读。'
+  },
+  title: {
+    mode: 'subagent',
+    toolPolicy: 'readOnly',
+    description: '标题生成:为会话生成简短的描述性标题。',
+    promptPreamble: '为以下对话生成一个简短(不超过8个字)的描述性标题。只返回标题本身,不包含任何其他文字。'
+  },
+  summarizer: {
+    mode: 'subagent',
+    toolPolicy: 'readOnly',
+    description: '会话摘要:压缩长对话上下文为结构化摘要。',
+    promptPreamble: '为以上对话生成结构化的中文摘要。包含:已做事项、当前状态、关键决策与文件变更。保持简洁。'
+  }
 }
 
 /** Merge builtin profiles into a subagents config (user profiles take precedence). */

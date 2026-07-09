@@ -71,6 +71,10 @@ export type ModelRequest = {
    * `high` and `max` enable it with a concrete reasoning effort.
    */
   reasoningEffort?: string
+  /** Max ms to wait for the first response token. 0 or undefined = no timeout. */
+  ttfbTimeoutMs?: number
+  /** Ordered fallback model ids. If TTFB times out, retry with the next one. */
+  fallbackModels?: string[]
   abortSignal: AbortSignal
 }
 
@@ -114,4 +118,49 @@ export interface ModelClient {
   readonly provider: string
   readonly model: string
   stream(request: ModelRequest): AsyncIterable<ModelStreamChunk>
+}
+
+/**
+ * Pluggable router strategy interface.
+ *
+ * Implementations determine which agent role and model to use for a
+ * given user request. The runtime calls `route()` at the start of each
+ * turn when the agent role system is enabled. The result feeds into
+ * `AgentLoop`'s model selection and system prompt resolution.
+ *
+ * Two built-in strategies are provided:
+ * - `HeuristicRouterStrategy` — keyword-based, zero-cost, synchronous
+ * - `ModelBasedRouterStrategy` — uses a fast classifier model
+ */
+export interface RouterStrategy {
+  readonly name: string
+
+  /** Route a user request to an agent role + model combination. */
+  route(input: RouterInput): Promise<RouterOutput>
+}
+
+export type RouterInput = {
+  threadId: string
+  turnId: string
+  /** The user's latest natural-language request. */
+  latestRequest: string
+  /** Recent conversation context (already formatted). */
+  recentContext: string
+  /** The user's currently selected model mode from the GUI. */
+  selectedModelMode: string
+  /** Abort signal — the router should stop and return a fallback when signalled. */
+  abortSignal: AbortSignal
+}
+
+export type RouterOutput = {
+  /** Resolved agent role id. */
+  role: string
+  /** Resolved model id. */
+  model: string
+  /** Optional reasoning effort override. */
+  reasoningEffort?: string
+  /** Confidence score (0.0–1.0). */
+  confidence: number
+  /** Strategy name that produced this result. */
+  source: string
 }

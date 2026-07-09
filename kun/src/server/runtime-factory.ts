@@ -78,6 +78,7 @@ import { resolveConfiguredHooks, type HooksConfig } from '../hooks/hook-config.j
 import { FileMemoryStore } from '../memory/memory-store.js'
 import { DelegationRuntime, FileDelegationStore } from '../delegation/delegation-runtime.js'
 import { createChildAgentExecutor } from '../delegation/child-agent-executor.js'
+import { KunAgentRoleRegistry } from '../delegation/role-registry.js'
 
 export type KunServeRuntimeOptions = {
   host: string
@@ -122,6 +123,12 @@ export type KunServeRuntimeOptions = {
   hooks?: HooksConfig
   /** Design-quality linter config; drives the builtin PostToolUse hook. */
   quality?: QualityConfig
+  /** Model fallback settings — auto-switch to a fallback model when TTFB exceeds threshold. */
+  modelFallback?: {
+    enabled: boolean
+    ttfbTimeoutMs: number
+    fallbackModels: string[]
+  }
   startedAt?: string
 }
 
@@ -349,6 +356,10 @@ export async function createKunServeRuntime(
         }
       })
     : undefined
+  const roleRegistry = await KunAgentRoleRegistry.create({
+    config: options.roles,
+    workspace: undefined
+  })
   const capabilities = buildRuntimeCapabilityManifest({
     config: options.capabilities,
     model: modelCapabilities(options.model),
@@ -494,6 +505,7 @@ export async function createKunServeRuntime(
     skillRuntime,
     tokenEconomy,
     contextCompaction: options.contextCompaction,
+    modelFallback: options.modelFallback,
     ...(options.roles ? { roles: options.roles } : {}),
     ...(options.runtime?.toolStorm ? { toolStorm: options.runtime.toolStorm } : {}),
     ...(options.runtime?.toolArgumentRepair ? { toolArgumentRepair: options.runtime.toolArgumentRepair } : {}),
@@ -526,6 +538,7 @@ export async function createKunServeRuntime(
     ...(attachmentStore ? { attachmentStore } : {}),
     ...(memoryStore ? { memoryStore } : {}),
     ...(delegationRuntime ? { delegationRuntime } : {}),
+    ...(roleRegistry ? { roleRegistry } : {}),
     modelClient,
     defaultModel: options.model,
     ...(options.roles ? { roles: options.roles } : {}),

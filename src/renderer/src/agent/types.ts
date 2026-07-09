@@ -266,7 +266,7 @@ export type ChatBlock =
       managedBy?: 'claw'
       meta?: RuntimeDisclosureMetadata
     }
-  | { kind: 'assistant'; id: string; turnId?: string; createdAt?: string; text: string }
+  | { kind: 'assistant'; id: string; turnId?: string; createdAt?: string; text: string; modelLabel?: string; roleId?: string; roleName?: string; color?: string }
   | { kind: 'reasoning'; id: string; createdAt?: string; text: string }
   | ToolBlock
   | CompactionBlock

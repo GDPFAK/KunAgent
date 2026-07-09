@@ -542,6 +542,30 @@ export function AgentsSettingsSection({ ctx }: { ctx: Record<string, any> }): Re
   const activeProviderId = kun.providerId?.trim() || DEFAULT_MODEL_PROVIDER_ID
   const activeProvider = modelProviders.find((item) => item.id === activeProviderId) ?? modelProviders[0]
   const activeProviderModels = activeProvider?.models ?? []
+  /** All model IDs from all configured providers, deduplicated and sorted. */
+  const allProviderModels = useMemo(() => {
+    const seen = new Set<string>()
+    for (const p of modelProviders) {
+      for (const m of p.models ?? []) {
+        if (m.trim()) seen.add(m.trim())
+      }
+    }
+    return [...seen].sort((a, b) => a.localeCompare(b))
+  }, [modelProviders])
+  const kunRoles = kun.roles
+  const setAgentRolePatch = (roleId: string, model: string | undefined): void => {
+    const current: Record<string, unknown> = kunRoles ?? {}
+    const agentRoles = (current as { agentRoles?: Record<string, unknown> }).agentRoles ?? {}
+    updateKun({
+      roles: {
+        ...kunRoles,
+        agentRoles: {
+          ...agentRoles,
+          [roleId]: model ? { ...(agentRoles[roleId] as Record<string, unknown> ?? {}), model } : undefined
+        }
+      }
+    })
+  }
   const selectKunProvider = (providerId: string): void => {
     const nextProvider = modelProviders.find((item) => item.id === providerId) ?? activeProvider
     const nextModel = nextProvider?.models.includes(kun.model)
@@ -596,7 +620,7 @@ export function AgentsSettingsSection({ ctx }: { ctx: Record<string, any> }): Re
                     control={
                       <ModelSelect
                         value={kun.model}
-                        options={activeProviderModels}
+                        options={allProviderModels}
                         optionLabel={(model) =>
                           model === activeProviderModels[0]
                             ? t('modelSelectDefaultSuffix', { model })
@@ -738,6 +762,169 @@ export function AgentsSettingsSection({ ctx }: { ctx: Record<string, any> }): Re
                       </div>
                     }
                   />
+                </SettingsCard>
+              </div>
+
+              <div className="mt-6">
+                <SettingsCard title={tCommon('agentRoles')}>
+                  <SettingRow
+                    title={tCommon('coder')}
+                    description={tCommon('coderRoleDesc')}
+                    control={
+                      <ModelSelect
+                        value={kunRoles?.agentRoles?.coder?.model ?? ''}
+                        options={allProviderModels}
+                        defaultLabel={tCommon('modelDefault')}
+                        allowCustom
+                        onChange={(next) => setAgentRolePatch('coder', next || undefined)}
+                      />
+                    }
+                  />
+                  <SettingRow
+                    title={tCommon('planner')}
+                    description={tCommon('plannerRoleDesc')}
+                    control={
+                      <ModelSelect
+                        value={kunRoles?.agentRoles?.planner?.model ?? ''}
+                        options={allProviderModels}
+                        defaultLabel={tCommon('modelDefault')}
+                        allowCustom
+                        onChange={(next) => setAgentRolePatch('planner', next || undefined)}
+                      />
+                    }
+                  />
+                  <SettingRow
+                    title={tCommon('reviewer')}
+                    description={tCommon('reviewerRoleDesc')}
+                    control={
+                      <ModelSelect
+                        value={kunRoles?.agentRoles?.reviewer?.model ?? ''}
+                        options={allProviderModels}
+                        defaultLabel={tCommon('modelDefault')}
+                        allowCustom
+                        onChange={(next) => setAgentRolePatch('reviewer', next || undefined)}
+                      />
+                    }
+                  />
+                  <SettingRow
+                    title={tCommon('researcher')}
+                    description={tCommon('researcherRoleDesc')}
+                    control={
+                      <ModelSelect
+                        value={kunRoles?.agentRoles?.researcher?.model ?? ''}
+                        options={allProviderModels}
+                        defaultLabel={tCommon('modelDefault')}
+                        allowCustom
+                        onChange={(next) => setAgentRolePatch('researcher', next || undefined)}
+                      />
+                    }
+                  />
+                  <SettingRow
+                    title={tCommon('summarizer')}
+                    description={tCommon('summarizerRoleDesc')}
+                    control={
+                      <ModelSelect
+                        value={kunRoles?.agentRoles?.summarizer?.model ?? ''}
+                        options={allProviderModels}
+                        defaultLabel={tCommon('modelDefault')}
+                        allowCustom
+                        onChange={(next) => setAgentRolePatch('summarizer', next || undefined)}
+                      />
+                    }
+                  />
+                  <SettingRow
+                    title={tCommon('explore')}
+                    description={tCommon('exploreRoleDesc')}
+                    control={
+                      <ModelSelect
+                        value={kunRoles?.agentRoles?.explore?.model ?? ''}
+                        options={allProviderModels}
+                        defaultLabel={tCommon('modelDefault')}
+                        allowCustom
+                        onChange={(next) => setAgentRolePatch('explore', next || undefined)}
+                      />
+                    }
+                  />
+                </SettingsCard>
+              </div>
+
+              <div className="mt-6">
+                <SettingsCard title={tCommon('modelFallback')}>
+                  <SettingRow
+                    title={tCommon('modelFallbackEnabled')}
+                    description={tCommon('modelFallbackEnabledDesc')}
+                    control={
+                      <Toggle
+                        checked={kun.modelFallback?.enabled ?? false}
+                        onChange={(v) => updateKun({ modelFallback: { ...(kun.modelFallback ?? {}), enabled: v } })}
+                      />
+                    }
+                  />
+                  {kun.modelFallback?.enabled ? (
+                    <>
+                      <SettingRow
+                        title={tCommon('modelFallbackTtfb')}
+                        description={tCommon('modelFallbackTtfbDesc')}
+                        control={
+                          <div className="flex items-center gap-3">
+                            <input
+                              type="range"
+                              min={1000}
+                              max={30000}
+                              step={1000}
+                              className="w-28"
+                              value={kun.modelFallback?.ttfbTimeoutMs ?? 8000}
+                              onChange={(e) => updateKun({ modelFallback: { ...(kun.modelFallback ?? {}), ttfbTimeoutMs: Number(e.target.value) } })}
+                            />
+                            <span className="min-w-[4rem] text-[13px] text-ds-muted">
+                              {(kun.modelFallback?.ttfbTimeoutMs ?? 8000) / 1000}s
+                            </span>
+                          </div>
+                        }
+                      />
+                      <SettingRow
+                        title={tCommon('modelFallbackModels')}
+                        description={tCommon('modelFallbackModelsDesc')}
+                        control={
+                          <ModelSelect
+                            value=""
+                            options={allProviderModels}
+                            defaultLabel={tCommon('modelDefault')}
+                            allowCustom
+                            onChange={(next) => {
+                              if (!next?.trim()) return
+                              const current = kun.modelFallback?.fallbackModels ?? []
+                              if (!current.includes(next.trim())) {
+                                updateKun({ modelFallback: { ...(kun.modelFallback ?? {}), fallbackModels: [...current, next.trim()] } })
+                              }
+                            }}
+                          />
+                        }
+                      />
+                      {kun.modelFallback?.fallbackModels?.length ? (
+                        <div className="px-3 py-2">
+                          <div className="flex flex-wrap gap-2">
+                            {kun.modelFallback.fallbackModels.map((m: string, i: number) => (
+                              <span key={m} className="inline-flex items-center gap-1 rounded-full bg-ds-card px-2.5 py-1 text-[12px] text-ds-ink">
+                                {m}
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const list = [...kun.modelFallback.fallbackModels]
+                                    list.splice(i, 1)
+                                    updateKun({ modelFallback: { ...(kun.modelFallback ?? {}), fallbackModels: list } })
+                                  }}
+                                  className="ml-0.5 text-ds-faint hover:text-ds-ink"
+                                >
+                                  ×
+                                </button>
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      ) : null}
+                    </>
+                  ) : null}
                 </SettingsCard>
               </div>
 
@@ -1644,7 +1831,7 @@ export function AgentsSettingsSection({ ctx }: { ctx: Record<string, any> }): Re
                           {runtimeInfo?.capabilities?.subagents?.enabled ? (
                             <div className="rounded-xl border border-ds-border-muted bg-ds-main/40 px-3 py-2">
                               Subagents: <span className="font-mono text-ds-ink">
-                                {runtimeInfo?.capabilities?.subagents?.maxParallel ?? 0}∥ · {runtimeInfo?.capabilities?.subagents?.maxChildRuns ?? 0} max
+                                {runtimeInfo?.capabilities?.subagents?.maxParallel ?? 0}�?· {runtimeInfo?.capabilities?.subagents?.maxChildRuns ?? 0} max
                                 {runtimeInfo?.capabilities?.subagents?.defaultToolPolicy ? ` · ${runtimeInfo.capabilities.subagents.defaultToolPolicy}` : ''}
                                 {runtimeInfo?.capabilities?.subagents?.profiles?.length ? ` · ${runtimeInfo.capabilities.subagents.profiles.length} profile(s)` : ''}
                               </span>
