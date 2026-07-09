@@ -4,7 +4,6 @@ kun/node_modules/kun-gui/
 out/
 dist/
 .cache/*
-openspec/
 .kunsdd/
 !.cache/electron/.gitkeep
 .deepseek/
