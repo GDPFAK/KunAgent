@@ -1,8 +1,8 @@
 const { execFileSync } = require('node:child_process')
-const { existsSync, readdirSync, rmSync } = require('node:fs')
-const { join } = require('node:path')
+const { existsSync, readdirSync, rmSync, statSync } = require('node:fs')
+const { join, sep } = require('node:path')
 
-const KUN_GUI_CIRCULAR_PATH = join(__dirname, '..', 'kun', 'node_modules', 'kun-gui')
+const KUN_NM = join(__dirname, '..', 'kun', 'node_modules')
 const WHISPER_RESOURCES_DIR = join(__dirname, '..', 'resources', 'whisper')
 
 function normalizePlatform(platform) {
@@ -29,25 +29,66 @@ function pruneWhisperResources(platform, arch) {
   }
 }
 
+/**
+ * Recursively walk a directory tree and remove every directory whose basename
+ * matches `name`.  Returns the count of removed dirs.
+ *
+ * This catches circular symlink chains such as
+ *   kun/node_modules/kun-gui/kun/node_modules/kun-gui/…
+ * that npm install/prune may create when a transitive dependency resolves to
+ * the root package (name: "kun-gui").  A single-level rmSync is not enough
+ * because the nesting can be arbitrarily deep on Windows where symlinks get
+ * resolved during file copy.
+ */
+function removeAllByName(root, name) {
+  if (!existsSync(root)) return 0
+  let removed = 0
+  try {
+    const entries = readdirSync(root, { withFileTypes: true })
+    for (const entry of entries) {
+      const fullPath = join(root, entry.name)
+      try {
+        if (entry.name === name) {
+          rmSync(fullPath, { recursive: true, force: true })
+          removed += 1
+          continue
+        }
+        if (entry.isDirectory()) {
+          // Skip reparse points / junctions that would cause infinite recursion
+          const stats = statSync(fullPath)
+          if (stats.isDirectory()) {
+            removed += removeAllByName(fullPath, name)
+          }
+        }
+      } catch {
+        // Best-effort: if we can't stat/read an entry, skip it.
+      }
+    }
+  } catch {
+    // Best-effort: if we can't read the directory, skip it.
+  }
+  return removed
+}
+
 function removeCircularKunGui(context) {
   // The kun runtime may transitively pull in kun-gui (the root package) as
-  // a dependency, creating a circular bundle. Electron-builder glob exclusions
-  // (!kun/node_modules/kun-gui/**) are unreliable here — physically remove it
+  // a dependency, creating a circular bundle (kun → … → kun-gui → kun → …).
+  // Electron-builder glob exclusions (!kun/node_modules/kun-gui/**) are
+  // unreliable here — physically remove every kun-gui directory at any depth
   // before packing so after-pack validation passes.
-  const appDir = context.appOutDir
-    ? join(context.appOutDir, 'resources', 'app.asar.unpacked')
-    : null
-  const candidates = [
-    // Before pack: the source node_modules under the project root.
-    join(__dirname, '..', 'kun', 'node_modules', 'kun-gui'),
+  const roots = [
+    join(__dirname, '..', 'kun', 'node_modules'),
     // During pack (appOutDir is set by electron-builder).
-    ...(appDir ? [join(appDir, 'kun', 'node_modules', 'kun-gui')] : [])
+    ...(context.appOutDir
+      ? [join(context.appOutDir, 'resources', 'app.asar.unpacked', 'kun', 'node_modules')]
+      : [])
   ]
-  for (const dir of candidates) {
-    if (existsSync(dir)) {
-      rmSync(dir, { recursive: true, force: true })
-      console.log(`[before-pack] Removed circular kun-gui dependency: ${dir}`)
-    }
+  let total = 0
+  for (const nmDir of roots) {
+    total += removeAllByName(nmDir, 'kun-gui')
+  }
+  if (total > 0) {
+    console.log(`[before-pack] Removed ${total} circular kun-gui director${total === 1 ? 'y' : 'ies'}.`)
   }
 }
 
@@ -56,15 +97,6 @@ async function beforePack(context) {
 
   const platform = normalizePlatform(context.electronPlatformName)
   const arch = normalizeArch(context.arch)
-
-  // Remove circular kun-gui self-reference that npm may create inside
-  // kun/node_modules/ on Windows builds via junction/symlink. Without this
-  // cleanup, electron-builder follows the link during file copy, producing
-  // infinite nesting that exceeds Windows MAX_PATH.
-  if (existsSync(KUN_GUI_CIRCULAR_PATH)) {
-    rmSync(KUN_GUI_CIRCULAR_PATH, { recursive: true, force: true })
-    console.log(`[before-pack] Removed circular kun-gui dependency from kun/node_modules.`)
-  }
 
   if (process.env.KUN_SKIP_WHISPER_RUNNER === '1') {
     console.warn(`[before-pack] Skipping bundled Whisper runner for ${platform}-${arch}.`)
@@ -88,10 +120,10 @@ async function beforePack(context) {
 }
 
 exports._internals = {
-  KUN_GUI_CIRCULAR_PATH,
   normalizePlatform,
   normalizeArch,
   pruneWhisperResources,
+  removeAllByName,
   removeCircularKunGui
 }
 exports.default = beforePack

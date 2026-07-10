@@ -46,6 +46,32 @@ function npmCommand(args, platform = process.platform) {
   return { command: 'npm', args }
 }
 
+function removeAllByName(root, name) {
+  if (!existsSync(root)) return 0
+  let removed = 0
+  try {
+    const entries = readdirSync(root, { withFileTypes: true })
+    for (const entry of entries) {
+      const fullPath = join(root, entry.name)
+      try {
+        if (entry.name === name) {
+          rmSync(fullPath, { recursive: true, force: true })
+          removed += 1
+          continue
+        }
+        if (entry.isDirectory()) {
+          removed += removeAllByName(fullPath, name)
+        }
+      } catch {
+        // Best-effort: skip entries we can't access.
+      }
+    }
+  } catch {
+    // Best-effort: skip directories we can't read.
+  }
+  return removed
+}
+
 function prunePackedKunDependencies(context) {
   const root = unpackedAppRoot(context)
   const kunDir = join(root, 'kun')
@@ -72,6 +98,15 @@ function prunePackedKunDependencies(context) {
     'root better-sqlite3 dependency'
   )
   rmSync(join(kunDir, 'node_modules', 'better-sqlite3'), { recursive: true, force: true })
+
+  // npm prune --omit=dev may recreate circular kun-gui references inside the
+  // packed kun/node_modules/ if any transitive dependency resolves to the
+  // root package (name: "kun-gui").  Remove every kun-gui directory at any
+  // depth so 7-zip compression doesn't fail on nested MAX_PATH issues.
+  const removed = removeAllByName(join(kunDir, 'node_modules'), 'kun-gui')
+  if (removed > 0) {
+    console.log(`[after-pack] Cleaned up ${removed} circular kun-gui director${removed === 1 ? 'y' : 'ies'} after npm prune.`)
+  }
 }
 
 function validateBundledKunRuntime(context) {

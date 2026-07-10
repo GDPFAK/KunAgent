@@ -661,7 +661,7 @@ async function probeThreadApi(settings: AppSettingsV1): Promise<
   try {
     const res = await fetch(`${base}/v1/threads?limit=1`, {
       headers,
-      signal: AbortSignal.timeout(2_000)
+      signal: AbortSignal.timeout(10_000)
     })
     if (res.ok) return { ok: true }
     const info = parseRuntimeErrorBody(
