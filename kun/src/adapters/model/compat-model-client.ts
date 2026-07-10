@@ -307,7 +307,7 @@ export class CompatModelClient implements ModelClient {
             yield { kind: 'error', message: 'model response had no body' }
             return
           }
-          yield* this.streamSse(response.body, request.abortSignal, endpointFormat, requestModel)
+          yield* this.streamSseWithFallback(response.body, request.abortSignal, endpointFormat, requestModel, request.ttfbTimeoutMs, request.fallbackModels, url, headers, round, stream)
           return
         }
         const retryText = await response.text()
@@ -352,7 +352,55 @@ export class CompatModelClient implements ModelClient {
       yield { kind: 'error', message: 'model response had no body' }
       return
     }
-    yield* this.streamSse(response.body, request.abortSignal, endpointFormat, requestModel)
+    yield* this.streamSseWithFallback(response.body, request.abortSignal, endpointFormat, requestModel, request.ttfbTimeoutMs, request.fallbackModels, url, headers, round, stream)
+  }
+
+  /**
+   * Stream SSE chunks with TTFB fallback retry.
+   * If the first chunk triggers a `ttfb_timeout` and fallbackModels are configured,
+   * rebuild the request with the next model and retry (at most 1 retry).
+   */
+  private async *streamSseWithFallback(
+    responseBody: ReadableStream<Uint8Array>,
+    signal: AbortSignal,
+    endpointFormat: ModelEndpointFormat,
+    model: string,
+    ttfbTimeoutMs: number | undefined,
+    fallbackModels: string[] | undefined,
+    url: string,
+    headers: Record<string, string>,
+    round: LlmDebugRound | null,
+    stream: boolean
+  ): AsyncIterable<ModelStreamChunk> {
+    let activeModel = model
+    let fallbackAttempted = false
+    while (true) {
+      const sse = this.streamSse(responseBody, signal, endpointFormat, activeModel, ttfbTimeoutMs)
+      let timedOut = false
+      for await (const chunk of sse) {
+        if (chunk.kind === 'error' && chunk.code === 'ttfb_timeout') {
+          timedOut = true
+          break
+        }
+        yield chunk
+      }
+      if (!timedOut) return
+      // TTFB timeout — try fallback
+      if (fallbackAttempted || !fallbackModels || fallbackModels.length === 0) return
+      const nextModel = fallbackModels[0]
+      if (!nextModel || nextModel === activeModel) return
+      activeModel = nextModel
+      fallbackAttempted = true
+      // Rebuild body with fallback model
+      const fbBody = this.buildRequestBody(
+        { model: activeModel } as any,
+        stream,
+        { endpointFormat, includeStreamUsage: undefined }
+      )
+      const fbResult = await this.postChatCompletion(url, headers, fbBody, signal)
+      if (fbResult.kind === 'error' || !fbResult.response.ok || !fbResult.response.body) return
+      responseBody = fbResult.response.body
+    }
   }
 
   private endpointFormat(): ModelEndpointFormat {
@@ -914,7 +962,8 @@ export class CompatModelClient implements ModelClient {
     body: ReadableStream<Uint8Array>,
     signal: AbortSignal,
     endpointFormat: ModelEndpointFormat,
-    model: string
+    model: string,
+    ttfbTimeoutMs?: number
   ): AsyncIterable<ModelStreamChunk> {
     const decoder = new TextDecoder('utf-8')
     const reader = body.getReader()
@@ -929,10 +978,16 @@ export class CompatModelClient implements ModelClient {
     let finishReason: string | null = null
     let sawDone = false
     const idleTimeoutMs = normalizeStreamIdleTimeoutMs(this.config.streamIdleTimeoutMs)
+    let isFirstChunk = true
     try {
       while (!signal.aborted) {
-        const read = await readStreamChunk(reader, signal, idleTimeoutMs)
+        const chunkTimeout = isFirstChunk && ttfbTimeoutMs && ttfbTimeoutMs > 0 ? ttfbTimeoutMs : idleTimeoutMs
+        const read = await readStreamChunk(reader, signal, chunkTimeout)
         if (read.kind === 'timeout') {
+          if (isFirstChunk) {
+            yield { kind: 'error', message: `model timed out waiting for first token after ${ttfbTimeoutMs}ms`, code: 'ttfb_timeout' }
+            return
+          }
           yield {
             kind: 'error',
             message: `model stream stalled for ${idleTimeoutMs}ms without data`,
@@ -941,6 +996,7 @@ export class CompatModelClient implements ModelClient {
           return
         }
         if (read.kind === 'aborted') break
+        isFirstChunk = false
         if (read.kind === 'error') {
           yield { kind: 'error', message: read.message, code: 'stream_read_error' }
           return

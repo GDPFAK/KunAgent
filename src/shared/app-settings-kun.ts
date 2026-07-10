@@ -33,6 +33,7 @@ import {
   type KunStorageSettingsV1,
   type KunTextToSpeechSettingsV1,
   type KunTokenEconomySettingsV1,
+  type KunModelFallbackSettingsV1,
   type KunVideoGenerationSettingsV1,
   type ImageGenerationProtocol,
   type MusicGenerationProtocol,
@@ -151,7 +152,8 @@ export function defaultKunRuntimeSettings(
     modelProfiles: {},
     memoryEnabled: false,
     computerUse: defaultKunComputerUseSettings(),
-    quality: defaultKunQualitySettings()
+    quality: defaultKunQualitySettings(),
+    modelFallback: defaultKunModelFallbackSettings()
   }
 }
 
@@ -240,6 +242,14 @@ export function defaultKunVideoGenerationSettings(): KunVideoGenerationSettingsV
     defaultResolution: '1080P',
     timeoutMs: 900_000,
     pollIntervalMs: 10_000
+  }
+}
+
+export function defaultKunModelFallbackSettings(): KunModelFallbackSettingsV1 {
+  return {
+    enabled: false,
+    ttfbTimeoutMs: 8000,
+    fallbackModels: []
   }
 }
 
@@ -398,6 +408,11 @@ export function mergeKunRuntimeSettings(
     ...(patch?.musicGeneration ?? {})
   })
   const currentVideoGeneration = normalizeKunVideoGenerationSettings(current.videoGeneration)
+  const currentModelFallback = normalizeKunModelFallbackSettings(current.modelFallback)
+  const nextModelFallback = normalizeKunModelFallbackSettings({
+    ...currentModelFallback,
+    ...(patch?.modelFallback ?? {})
+  })
   const nextVideoGeneration = normalizeKunVideoGenerationSettings({
     ...currentVideoGeneration,
     ...(patch?.videoGeneration ?? {})
@@ -465,6 +480,7 @@ export function mergeKunRuntimeSettings(
     memoryEnabled: patch?.memoryEnabled ?? current.memoryEnabled ?? false,
     computerUse: nextComputerUse,
     quality: nextQuality,
+    modelFallback: nextModelFallback,
     ...(patch?.subagents !== undefined
       ? { subagents: patch.subagents }
       : current.subagents !== undefined
@@ -625,6 +641,15 @@ function normalizeKunMusicGenerationSettings(
 
 function normalizeKunMusicGenerationProtocol(value: unknown): MusicGenerationProtocol {
   return value === 'minimax-music' ? 'minimax-music' : DEFAULT_MUSIC_GENERATION_PROTOCOL
+}
+
+function normalizeKunModelFallbackSettings(input: Partial<KunModelFallbackSettingsV1> | undefined): KunModelFallbackSettingsV1 {
+  const defaults = defaultKunModelFallbackSettings()
+  return {
+    enabled: input?.enabled === true,
+    ttfbTimeoutMs: typeof input?.ttfbTimeoutMs === 'number' && input.ttfbTimeoutMs > 0 ? input.ttfbTimeoutMs : defaults.ttfbTimeoutMs,
+    fallbackModels: Array.isArray(input?.fallbackModels) ? input.fallbackModels.map((m) => m.trim()).filter(Boolean) : defaults.fallbackModels
+  }
 }
 
 function normalizeKunVideoGenerationSettings(
@@ -1146,7 +1171,8 @@ export function migrateLegacyAppSettings(parsed: LegacyAppSettingsShape): Partia
     textToSpeech: normalizeKunTextToSpeechSettings(explicitKun.textToSpeech),
     musicGeneration: normalizeKunMusicGenerationSettings(explicitKun.musicGeneration),
     videoGeneration: normalizeKunVideoGenerationSettings(explicitKun.videoGeneration),
-    quality: normalizeKunQualitySettings(explicitKun.quality)
+    quality: normalizeKunQualitySettings(explicitKun.quality),
+    modelFallback: normalizeKunModelFallbackSettings(explicitKun.modelFallback)
   }
   // Strip the legacy `agentProvider` discriminator and the legacy
   // per-provider settings from the surfaced migration result. The

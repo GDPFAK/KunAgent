@@ -646,6 +646,12 @@ export type AgentLoopOptions = {
   memoryStore?: MemoryStore
   tokenEconomy?: TokenEconomyConfig
   contextCompaction?: ContextCompactionConfig
+  /** Model fallback settings — auto-switch to a fallback model when TTFB exceeds threshold. */
+  modelFallback?: {
+    enabled: boolean
+    ttfbTimeoutMs: number
+    fallbackModels: string[]
+  }
   /** Internal-LLM role model routing (smallModel slot + title/summary/codeReview overrides). */
   roles?: RolesConfig
   toolStorm?: ToolStormBreakerOptions & { enabled?: boolean }
@@ -1636,7 +1642,13 @@ export class AgentLoop {
       ...economyRequest,
       history: applyRequestHistoryHygiene(economyRequest.history, tokenEconomy.historyHygiene, {
         currentTurnId: turnId
-      })
+      }),
+      ...(!this.opts.modelFallback?.enabled || !this.opts.modelFallback.fallbackModels.length
+        ? {}
+        : {
+            ttfbTimeoutMs: this.opts.modelFallback.ttfbTimeoutMs,
+            fallbackModels: this.opts.modelFallback.fallbackModels
+          })
     }
     if (tokenEconomy.enabled) {
       await this.recordTokenEconomySavings({

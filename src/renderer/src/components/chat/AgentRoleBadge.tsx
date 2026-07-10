@@ -1,4 +1,5 @@
 import type { ReactElement } from 'react'
+import { useTranslation } from 'react-i18next'
 
 /**
  * A minimal role badge rendered inline with the model tag on assistant messages.
@@ -32,8 +33,9 @@ const ROLE_EMOJI: Record<string, string> = {
 
 export function AgentRoleBadge({ roleId, name, color }: AgentRoleBadgeProps): ReactElement | null {
   try {
+    const { t } = useTranslation('common')
     const dotColor = color ?? '#3b82f6'
-    const displayName = name ?? roleId
+    const displayName = t(roleId) !== roleId ? t(roleId) : (name ?? roleId)
     const emoji = ROLE_EMOJI[roleId]
 
     return (

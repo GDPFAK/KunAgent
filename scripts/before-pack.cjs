@@ -2,6 +2,7 @@ const { execFileSync } = require('node:child_process')
 const { existsSync, readdirSync, rmSync } = require('node:fs')
 const { join } = require('node:path')
 
+const KUN_GUI_CIRCULAR_PATH = join(__dirname, '..', 'kun', 'node_modules', 'kun-gui')
 const WHISPER_RESOURCES_DIR = join(__dirname, '..', 'resources', 'whisper')
 
 function normalizePlatform(platform) {
@@ -28,9 +29,43 @@ function pruneWhisperResources(platform, arch) {
   }
 }
 
+function removeCircularKunGui(context) {
+  // The kun runtime may transitively pull in kun-gui (the root package) as
+  // a dependency, creating a circular bundle. Electron-builder glob exclusions
+  // (!kun/node_modules/kun-gui/**) are unreliable here — physically remove it
+  // before packing so after-pack validation passes.
+  const appDir = context.appOutDir
+    ? join(context.appOutDir, 'resources', 'app.asar.unpacked')
+    : null
+  const candidates = [
+    // Before pack: the source node_modules under the project root.
+    join(__dirname, '..', 'kun', 'node_modules', 'kun-gui'),
+    // During pack (appOutDir is set by electron-builder).
+    ...(appDir ? [join(appDir, 'kun', 'node_modules', 'kun-gui')] : [])
+  ]
+  for (const dir of candidates) {
+    if (existsSync(dir)) {
+      rmSync(dir, { recursive: true, force: true })
+      console.log(`[before-pack] Removed circular kun-gui dependency: ${dir}`)
+    }
+  }
+}
+
 async function beforePack(context) {
+  removeCircularKunGui(context)
+
   const platform = normalizePlatform(context.electronPlatformName)
   const arch = normalizeArch(context.arch)
+
+  // Remove circular kun-gui self-reference that npm may create inside
+  // kun/node_modules/ on Windows builds via junction/symlink. Without this
+  // cleanup, electron-builder follows the link during file copy, producing
+  // infinite nesting that exceeds Windows MAX_PATH.
+  if (existsSync(KUN_GUI_CIRCULAR_PATH)) {
+    rmSync(KUN_GUI_CIRCULAR_PATH, { recursive: true, force: true })
+    console.log(`[before-pack] Removed circular kun-gui dependency from kun/node_modules.`)
+  }
+
   if (process.env.KUN_SKIP_WHISPER_RUNNER === '1') {
     console.warn(`[before-pack] Skipping bundled Whisper runner for ${platform}-${arch}.`)
     return
@@ -53,8 +88,10 @@ async function beforePack(context) {
 }
 
 exports._internals = {
+  KUN_GUI_CIRCULAR_PATH,
   normalizePlatform,
   normalizeArch,
-  pruneWhisperResources
+  pruneWhisperResources,
+  removeCircularKunGui
 }
 exports.default = beforePack

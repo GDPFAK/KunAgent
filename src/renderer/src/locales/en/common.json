@@ -2451,5 +2451,12 @@
   "summarizer": "Summarizer",
   "summarizerRoleDesc": "Conversation summarization agent",
   "explore": "Explore",
-  "exploreRoleDesc": "Fast read-only codebase explorer"
+  "exploreRoleDesc": "Fast read-only codebase explorer",
+  "modelFallback": "Model Fallback",
+  "modelFallbackEnabled": "Auto-fallback on slow model",
+  "modelFallbackEnabledDesc": "When enabled, if the model takes too long to respond, the system automatically retries with the next available model.",
+  "modelFallbackTtfb": "TTFB timeout",
+  "modelFallbackTtfbDesc": "Max wait time for first token before considering the model slow.",
+  "modelFallbackModels": "Fallback models",
+  "modelFallbackModelsDesc": "Select fallback models to try when the primary model times out."
 }
