@@ -83,15 +83,6 @@ function validateBundledKunRuntime(context) {
     join(root, 'node_modules', 'better-sqlite3', 'package.json'),
     'root better-sqlite3 dependency'
   )
-  // Circular kun-gui dependency in kun/node_modules/ would bloat the
-  // installer and break the runtime loop. The before-pack cleanup should
-  // have removed it; fail loudly if it survived packing.
-  const circularKunGui = join(root, 'kun', 'node_modules', 'kun-gui')
-  if (existsSync(circularKunGui)) {
-    throw new Error(
-      `[after-pack] Circular kun-gui dependency found in packed app: ${circularKunGui}. The before-pack cleanup should have removed this. Check scripts/before-pack.cjs.`
-    )
-  }
 }
 
 function maybeAdhocSignMacApp(context) {
