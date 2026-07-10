@@ -28,7 +28,31 @@ function pruneWhisperResources(platform, arch) {
   }
 }
 
+function removeCircularKunGui(context) {
+  // The kun runtime may transitively pull in kun-gui (the root package) as
+  // a dependency, creating a circular bundle. Electron-builder glob exclusions
+  // (!kun/node_modules/kun-gui/**) are unreliable here — physically remove it
+  // before packing so after-pack validation passes.
+  const appDir = context.appOutDir
+    ? join(context.appOutDir, 'resources', 'app.asar.unpacked')
+    : null
+  const candidates = [
+    // Before pack: the source node_modules under the project root.
+    join(__dirname, '..', 'kun', 'node_modules', 'kun-gui'),
+    // During pack (appOutDir is set by electron-builder).
+    ...(appDir ? [join(appDir, 'kun', 'node_modules', 'kun-gui')] : [])
+  ]
+  for (const dir of candidates) {
+    if (existsSync(dir)) {
+      rmSync(dir, { recursive: true, force: true })
+      console.log(`[before-pack] Removed circular kun-gui dependency: ${dir}`)
+    }
+  }
+}
+
 async function beforePack(context) {
+  removeCircularKunGui(context)
+
   const platform = normalizePlatform(context.electronPlatformName)
   const arch = normalizeArch(context.arch)
   if (process.env.KUN_SKIP_WHISPER_RUNNER === '1') {
@@ -55,6 +79,7 @@ async function beforePack(context) {
 exports._internals = {
   normalizePlatform,
   normalizeArch,
-  pruneWhisperResources
+  pruneWhisperResources,
+  removeCircularKunGui
 }
 exports.default = beforePack
