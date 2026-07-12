@@ -337,7 +337,6 @@ function buildExecContext(options: ServeOptions, workspace: string): ToolHostCon
     threadMode: 'agent',
     model: modelCapabilitiesForModel(options.model, modelProfiles),
     memoryPolicy: { enabled: false },
-    delegationPolicy: { enabled: false },
     approvalPolicy: options.approvalPolicy,
     sandboxMode: options.sandboxMode,
     abortSignal: new AbortController().signal,
