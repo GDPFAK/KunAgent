@@ -23,6 +23,7 @@ import {
   spawnCapture,
   withToolBoundary
 } from './builtin-tool-utils.js'
+import { tryGetLspHover } from './lsp-diagnostics.js'
 
 export function createLsLocalTool(options: LsLocalToolOptions = {}): LocalTool {
   const statOp = options.operations?.stat ?? defaultLsLocalToolOperations.stat!
@@ -310,6 +311,25 @@ export function createGrepLocalTool(options: GrepLocalToolOptions = {}): LocalTo
           }
         }
       }
+      // V4: LSP enrichment for first N matches (default on, opt out with lspEnrichment: false)
+      let enriched: Record<string, { type?: string; definition?: string }> | undefined
+      if (options.lspEnrichment !== false && matches.length > 0) {
+        enriched = {}
+        const toEnrich = matches.slice(0, 3)
+        for (const match of toEnrich) {
+          try {
+            const result = await tryGetLspHover(match.path, match.line, root)
+            if (result) {
+              enriched[`${match.relative_path}:${match.line}`] = {
+                type: result.type,
+                definition: result.definition
+              }
+            }
+          } catch {
+            // Silently skip on error
+          }
+        }
+      }
       return {
         output: {
           path: absolutePath,
@@ -321,6 +341,7 @@ export function createGrepLocalTool(options: GrepLocalToolOptions = {}): LocalTo
           context: contextLines,
           backend: rg ? 'rg' : 'scan',
           matches,
+          ...(enriched ? { enriched } : {}),
           truncated: matches.length >= limit,
           match_limit_reached: matches.length >= limit ? limit : null
         }

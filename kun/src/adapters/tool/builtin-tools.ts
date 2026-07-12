@@ -7,7 +7,7 @@ import type {
 } from './builtin-tool-types.js'
 import { createBashLocalTool } from './builtin-bash-tool.js'
 import { createEditLocalTool, createWriteLocalTool } from './builtin-file-tools.js'
-import { createLspLocalTool } from './builtin-lsp-tool.js'
+import { createLspLocalTool, createLspDiagnosticsLocalTool } from './builtin-lsp-tool.js'
 import { createReadLocalTool } from './builtin-read-tool.js'
 import { createFindLocalTool, createGrepLocalTool, createLsLocalTool } from './builtin-search-tools.js'
 
@@ -39,6 +39,8 @@ export function createBuiltinLocalTool(
       return createLsLocalTool(options.ls)
     case 'lsp':
       return createLspLocalTool()
+    case 'lsp_diagnostics':
+      return createLspDiagnosticsLocalTool()
   }
 }
 
@@ -59,7 +61,8 @@ export function buildBuiltinLocalTools(options: BuiltinLocalToolsOptions = {}): 
     createGrepLocalTool(options.grep),
     createFindLocalTool(options.find),
     createLsLocalTool(options.ls),
-    createLspLocalTool()
+    createLspLocalTool(),
+    createLspDiagnosticsLocalTool()
   ]
 }
 
@@ -104,7 +107,8 @@ export function buildBuiltinLocalToolRecord(
     grep: createGrepLocalTool(options.grep),
     find: createFindLocalTool(options.find),
     ls: createLsLocalTool(options.ls),
-    lsp: createLspLocalTool()
+    lsp: createLspLocalTool(),
+    lsp_diagnostics: createLspDiagnosticsLocalTool()
   }
 }
 

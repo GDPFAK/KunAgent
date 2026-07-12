@@ -124,6 +124,10 @@ export class ContextCompactor {
         : tokens >= aggressiveThreshold
           ? 'aggressive'
           : 'normal'
+    const imageCount = this.estimator.estimateImageTokens?.(compactableItems) ?? 0
+    if (imageCount > 0) {
+      console.warn('[kun:context] compaction triggered with images', { mode, imageCount, estimatedTokens, promptTokens })
+    }
     const source = promptTokens !== undefined && promptTokens >= estimatedTokens ? 'usage prompt_tokens' : 'estimated prompt tokens'
     const keepRecent = mode === 'force' ? 1 : mode === 'aggressive' ? 2 : 4
     return {

@@ -264,7 +264,7 @@ describe('model provider settings', () => {
     expect(minimax && modelProviderPresetProfile(minimax)).toMatchObject({
       id: 'minimax',
       name: 'MiniMax',
-      baseUrl: 'https://api.minimaxi.com/anthropic',
+      baseUrl: 'https://api.minimaxi.com/v1/chat/completions',
       endpointFormat: 'messages',
       models: expect.arrayContaining(['MiniMax-M2.5', 'MiniMax-M3']),
       image: {

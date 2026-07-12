@@ -141,6 +141,14 @@ export const RuntimeTuningConfigSchema = z
       })
       .strict()
       .optional(),
+    toolWorkerPool: z
+      .object({
+        enabled: z.boolean().optional(),
+        maxWorkers: PositiveInt.optional(),
+        maxRetries: z.number().int().min(0).max(5).optional()
+      })
+      .strict()
+      .optional(),
     toolArgumentRepair: z
       .object({
         maxStringBytes: PositiveInt.optional()

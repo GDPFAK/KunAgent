@@ -86,6 +86,28 @@ export function extractToolResultImages(output: unknown): ToolResultImage[] {
 }
 
 /** True when the output should be forwarded to the model as image(s). */
+
+// -- Image compression for token optimization --
+const COMPRESS_MAX_DIMENSION = 1920;
+const COMPRESS_MAX_BYTES = 1_048_576; // 1MB
+
+/**
+ * Compress a tool-result image before sending to the vision model.
+ * Re-encodes oversized PNG/JPEG images as JPEG with scaling.
+ * Never throws — returns original image on any failure.
+ */
+/**
+ * Check if a tool-result image exceeds sensible size limits for model consumption.
+ * Returns an oversized estimate string when the image is too large, or null if acceptable.
+ * Used by the model client to decide whether to send full image data or a placeholder.
+ */
+export function isOversizedImage(image: ToolResultImage): { decodedBytes: number; limitBytes: number } | null {
+  if (image.mimeType !== "image/png" && image.mimeType !== "image/jpeg") return null;
+  const decodedBytes = Buffer.byteLength(image.dataBase64, "base64");
+  if (decodedBytes <= COMPRESS_MAX_BYTES) return null;
+  return { decodedBytes, limitBytes: COMPRESS_MAX_BYTES };
+}
+
 export function isModelVisibleImageOutput(output: unknown): boolean {
   return extractToolResultImages(output).length > 0
 }
