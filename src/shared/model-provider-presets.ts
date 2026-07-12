@@ -237,7 +237,7 @@ export const MODEL_PROVIDER_PRESETS: ModelProviderPreset[] = [
     // CLAUDE_CODE_OAUTH_TOKEN in the API Key field.
     kind: 'agent-sdk',
     baseUrl: 'https://api.anthropic.com',
-    endpointFormat: 'messages',
+    endpointFormat: 'chat_completions',
     // Ids match what the SDK's supportedModels() returns (see claude-subscription-models).
     models: ['claude-opus-4-8', 'claude-sonnet-4-6', 'claude-haiku-4-5'],
     // The SDK does NOT report a context window, so we set it manually: Opus 4.8 and
@@ -471,7 +471,7 @@ export const MODEL_PROVIDER_PRESETS: ModelProviderPreset[] = [
   {
     id: 'minimax',
     name: 'MiniMax',
-    baseUrl: 'https://api.minimaxi.com/anthropic',
+    baseUrl: 'https://api.minimaxi.com/v1/chat/completions',
     endpointFormat: 'messages',
     models: [
       'MiniMax-M3',
@@ -516,10 +516,10 @@ export const MODEL_PROVIDER_PRESETS: ModelProviderPreset[] = [
     tokenPlan: {
       baseUrl: 'https://api.minimaxi.com/anthropic',
       regions: [
-        { id: 'cn', baseUrl: 'https://api.minimaxi.com/anthropic' },
+        { id: 'cn', baseUrl: 'https://api.minimaxi.com/v1/chat/completions' },
         { id: 'global', baseUrl: 'https://api.minimax.io/anthropic' }
       ],
-      endpointFormat: 'messages',
+      endpointFormat: 'chat_completions',
       models: [
         'MiniMax-M3',
         'MiniMax-M2.7',

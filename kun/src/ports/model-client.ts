@@ -73,6 +73,8 @@ export type ModelRequest = {
   reasoningEffort?: string
   /** Max ms to wait for the first response token. 0 or undefined = no timeout. */
   ttfbTimeoutMs?: number
+  /** Max ms for the stream to idle before failing. Overrides the client default when set. */
+  streamIdleTimeoutMs?: number
   /** Ordered fallback model ids. If TTFB times out, retry with the next one. */
   fallbackModels?: string[]
   abortSignal: AbortSignal

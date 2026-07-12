@@ -15,6 +15,7 @@ import type { EditLocalToolOptions, WriteLocalToolOptions } from './builtin-tool
 import { defaultEditLocalToolOperations, defaultWriteLocalToolOperations } from './builtin-tool-operations.js'
 import { parseEditInstructions, resolveWorkspacePath, withToolBoundary } from './builtin-tool-utils.js'
 import { assertCanWritePath } from './sandbox-policy.js'
+import { tryGetLspDiagnostics, isCodeFile } from './lsp-diagnostics.js'
 
 /**
  * Arguments that failed JSON parsing arrive as `{ __raw: "<partial json>" }`
@@ -110,7 +111,7 @@ export function createEditLocalTool(_options: EditLocalToolOptions = {}): LocalT
     },
     policy: 'on-request',
     toolKind: 'file_change',
-    execute: async (args, context) => withToolBoundary(async () => {
+    execute: async (args, context, onUpdate) => withToolBoundary(async () => {
       const truncated = truncatedArgumentsError(args.__raw)
       if (truncated) return truncated
       const rawPath = typeof args.path === 'string' ? args.path : ''
@@ -120,7 +121,7 @@ export function createEditLocalTool(_options: EditLocalToolOptions = {}): LocalT
       }
       const { absolutePath, relativePath } = await resolveWorkspacePath(rawPath, context)
       assertCanWritePath(absolutePath, context)
-      return withFileMutationQueue(absolutePath, async () => {
+      const editResult = await withFileMutationQueue(absolutePath, async () => {
         const rawSource = await readFileOp(absolutePath)
         const { bom, text: source } = stripBom(rawSource)
         const lineEnding = detectLineEnding(source)
@@ -142,6 +143,22 @@ export function createEditLocalTool(_options: EditLocalToolOptions = {}): LocalT
           }
         }
       })
+      // Fire-and-forget LSP diagnostics for code files (V3: edit → EventBus → GUI)
+      if (isCodeFile(absolutePath) && onUpdate) {
+        tryGetLspDiagnostics(absolutePath, context.workspace).then((diagResult) => {
+          if (diagResult.status === 'ok' && diagResult.diagnostics.length > 0 && onUpdate) {
+            void onUpdate({
+              output: {
+                kind: 'lsp_diagnostics',
+                filePath: relativePath,
+                diagnostics: diagResult.diagnostics
+              },
+              isError: false
+            })
+          }
+        }).catch(() => {})
+      }
+      return editResult
     })
   })
 }

@@ -42,7 +42,24 @@ export const RuntimeEventKind = z.enum([
   'pipeline_stage',
   'usage',
   'error',
-  'heartbeat'
+  'heartbeat',
+  'worker_pool:worker_started',
+  'worker_pool:worker_crashed',
+  'worker_pool:task_progress',
+  'worker_pool:task_queued',
+  'worker_pool:task_retrying',
+  'worker_pool:task_failed',
+  'worker_pool:reconciliation_started',
+  'worker_pool:reconciliation_completed',
+  'delegation:queued',
+  'delegation:waiting_for_slot',
+  'delegation:slot_acquired',
+  'delegation:running',
+  'delegation:completed',
+  'delegation:failed',
+  'delegation:aborted',
+  'delegation:progress',
+  'lsp:diagnostics'
 ])
 export type RuntimeEventKind = z.infer<typeof RuntimeEventKind>
 
@@ -254,6 +271,65 @@ export const HeartbeatEvent = RuntimeEventBase.extend({
   kind: z.literal('heartbeat')
 })
 export type HeartbeatEvent = z.infer<typeof HeartbeatEvent>
+export const WorkerPoolEvent = RuntimeEventBase.extend({
+  kind: z.enum([
+    'worker_pool:worker_started',
+    'worker_pool:worker_crashed',
+    'worker_pool:task_progress',
+    'worker_pool:task_queued',
+    'worker_pool:task_retrying',
+    'worker_pool:task_failed',
+    'worker_pool:reconciliation_started',
+    'worker_pool:reconciliation_completed'
+  ]),
+  workerId: z.string().optional(),
+  childId: z.string().optional(),
+  exitCode: z.number().int().optional(),
+  text: z.string().optional(),
+  isError: z.boolean().optional(),
+  position: z.number().int().optional(),
+  count: z.number().int().optional()
+})
+export type WorkerPoolEvent = z.infer<typeof WorkerPoolEvent>
+
+export const DelegationEvent = RuntimeEventBase.extend({
+  kind: z.enum([
+    'delegation:queued',
+    'delegation:waiting_for_slot',
+    'delegation:slot_acquired',
+    'delegation:running',
+    'delegation:completed',
+    'delegation:failed',
+    'delegation:aborted',
+    'delegation:progress'
+  ]),
+  childId: z.string().min(1),
+  parentThreadId: z.string().optional(),
+  profile: z.string().optional(),
+  workerId: z.string().optional(),
+  text: z.string().optional(),
+  summary: z.string().optional(),
+  error: z.string().optional(),
+  position: z.number().int().optional(),
+  usage: z.object({
+    promptTokens: z.number().int().nonnegative().optional(),
+    completionTokens: z.number().int().nonnegative().optional(),
+    totalTokens: z.number().int().nonnegative().optional()
+  }).optional()
+})
+export type DelegationEvent = z.infer<typeof DelegationEvent>
+
+export const LspDiagnosticsEvent = RuntimeEventBase.extend({
+  kind: z.literal('lsp:diagnostics'),
+  filePath: z.string().min(1),
+  serverName: z.string().optional(),
+  diagnostics: z.array(z.object({
+    message: z.string(),
+    severity: z.number().int().optional(),
+    source: z.string().optional()
+  }))
+})
+export type LspDiagnosticsEvent = z.infer<typeof LspDiagnosticsEvent>
 
 export const RuntimeEvent = z.discriminatedUnion('kind', [
   ItemEvent,
@@ -271,7 +347,10 @@ export const RuntimeEvent = z.discriminatedUnion('kind', [
   PipelineStageEvent,
   UsageEvent,
   ErrorEvent,
-  HeartbeatEvent
+  HeartbeatEvent,
+  WorkerPoolEvent,
+  DelegationEvent,
+  LspDiagnosticsEvent
 ])
 export type RuntimeEvent = z.infer<typeof RuntimeEvent>
 

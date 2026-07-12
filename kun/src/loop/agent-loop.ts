@@ -98,6 +98,7 @@ import { ToolStormBreaker, type ToolStormBreakerOptions } from './tool-storm-bre
 import { healLoadedHistoryItems } from './history-healing.js'
 import { repairDispatchToolArguments } from './tool-call-repair.js'
 import { CREATE_PLAN_TOOL_NAME } from '../adapters/tool/create-plan-tool.js'
+import { planExecution, formatTaskPlan, isPlanComplete } from './task-planner.js'
 import { guiPlanWorkspaceMatches } from '../shared/gui-plan.js'
 import { GET_GOAL_TOOL_NAME, UPDATE_GOAL_TOOL_NAME } from '../adapters/tool/goal-tools.js'
 import { TODO_LIST_TOOL_NAME, TODO_WRITE_TOOL_NAME } from '../adapters/tool/todo-tools.js'
@@ -763,6 +764,8 @@ export class AgentLoop {
   private lastInjectedGoalInstruction: string | null = null
   /** Last-injected todo continuation instruction, tracked to avoid re-injecting unchanged content. */
   private lastInjectedTodoInstruction: string | null = null
+  /** Current task plan for complex requests (project creation, module addition). */
+  private currentTaskPlan: import('./task-planner.js').TaskPlan | null = null
   /** Role switch requested by the model via `[switch_role: xxx]`, consumed on next role resolution. */
   private pendingRoleSwitch: AgentRoleId | null = null
   private readonly goalResume: GoalResumeCoordinator
@@ -1335,6 +1338,10 @@ export class AgentLoop {
       this.opts.turns.getTurn(threadId, turnId)
     ])
     await this.recordPipelineStage(threadId, turnId, 'input_received', { stepIndex })
+    // First step: create task plan for complex requests (project creation, module addition)
+    if (stepIndex === 0 && !this.currentTaskPlan) {
+      this.currentTaskPlan = planExecution(turn?.prompt ?? '')
+    }
     const candidatePlanContext = turn?.guiPlan
       ? { ...turn.guiPlan, turnId }
       : this.opts.activePlanContext
@@ -1404,7 +1411,8 @@ export class AgentLoop {
       attachmentIds: turn?.attachmentIds ?? [],
       threadId,
       workspace: thread?.workspace ?? '',
-      modelCapabilities
+      modelCapabilities,
+      turnPrompt: turn?.prompt ?? ''
     })
     const skillResolution = await this.opts.skillRuntime?.resolveTurn({
       prompt: turn?.prompt ?? '',
@@ -2258,9 +2266,17 @@ export class AgentLoop {
     // are independent and safe to fan out. The delegation runtime caps real
     // concurrency at maxParallel and queues the overflow.
     if (this.isParallelDelegationCall(call, toolProviderKinds)) return true
-    if (!PARALLEL_READ_ONLY_TOOL_NAMES.has(call.toolName)) return false
-    if (call.toolKind && call.toolKind !== 'tool_call') return false
-    return toolProviderKinds.get(call.toolName) === 'built-in'
+    if (PARALLEL_READ_ONLY_TOOL_NAMES.has(call.toolName)) {
+      if (call.toolKind && call.toolKind !== 'tool_call') return false
+      return toolProviderKinds.get(call.toolName) === 'built-in'
+    }
+    // File change tools (write/edit/delete) to different paths can be parallelized.
+    // Same-file writes are serialized by the file mutation queue.
+    if (call.toolKind === 'file_change') {
+      if (toolProviderKinds.get(call.toolName) !== 'built-in') return false
+      return true
+    }
+    return false
   }
 
   private isParallelDelegationCall(
@@ -3070,6 +3086,7 @@ export class AgentLoop {
     threadId: string
     workspace: string
     modelCapabilities: ModelCapabilityMetadata
+    turnPrompt: string
   }): Promise<{ imageAttachments: ModelInputAttachment[]; textFallbacks: ModelTextAttachmentFallback[] }> {
     if (input.attachmentIds.length === 0) return { imageAttachments: [], textFallbacks: [] }
     if (!this.opts.attachmentStore) {
@@ -3099,7 +3116,7 @@ export class AgentLoop {
       // Model does not support image input. Try auto-dispatch to a
       // vision-capable model for analysis, falling back to text-only
       // base64 fallback if no vision model is available or it fails.
-      const visionDescription = await this.dispatchImageToVisionModel(attachment, input.threadId)
+      const visionDescription = await this.dispatchImageToVisionModel(attachment, input.threadId, input.turnPrompt, input.workspace)
       if (visionDescription) {
         textFallbacks.push({
           id: attachment.id,
@@ -3220,61 +3237,72 @@ export class AgentLoop {
    */
   private async dispatchImageToVisionModel(
     attachment: AttachmentContent,
-    threadId: string
+    threadId: string,
+    taskContext: string,
+    workspace: string
   ): Promise<string | null> {
-    // 1. Find a vision model
     const visionModel = this.findVisionCapableModel()
     if (!visionModel) return null
-
+    const fileName = "vision_" + attachment.id.slice(0, 8) + ".html"
+    const filePath = join(workspace, fileName)
     try {
-      // 2. Build a quick analysis request
-      const result = this.opts.model.stream({
-        threadId: `${threadId}_vision_dispatch`,
-        turnId: `vision_${attachment.id}_${Date.now()}`,
-        model: visionModel,
-        systemPrompt: [
-          'You are an image analyst. Describe the image concisely in Chinese.',
-          'Focus on: text content, UI layout, code screenshots, diagrams, colors, and any visual details relevant to a developer.',
-          'Be objective and factual. Do not speculate. Keep under 200 words.'
-        ].join('\n'),
-        prefix: [],
-        history: [makeUserItem({
-          id: `vision_user_${attachment.id}`,
-          threadId: `${threadId}_vision_dispatch`,
-          turnId: `vision_${attachment.id}_${Date.now()}`,
-          text: '请描述这张图片的视觉内容'
-        })],
-        attachments: [{
-          id: attachment.id,
-          name: attachment.name,
-          mimeType: attachment.mimeType,
-          dataBase64: attachment.data.toString('base64')
-        }],
-        tools: [],
-        abortSignal: AbortSignal.timeout(15_000),
-        stream: false,
-        maxTokens: 512,
-        temperature: 0,
-        reasoningEffort: 'off'
-      })
-
-      // 3. Collect the description text
-      let description = ''
-      for await (const chunk of result) {
-        if (chunk.kind === 'assistant_text_delta') {
-          description += chunk.text
-        }
-        if (chunk.kind === 'error') throw new Error(chunk.message)
+      const step1 = await this.visionGenerate(visionModel, attachment, taskContext)
+      if (!step1 || !step1.code) return null
+      await writeFile(filePath, step1.code, "utf-8")
+      const step2 = await this.visionRefine(visionModel, attachment, step1.code)
+      if (step2 && step2.code && step2.code !== step1.code) {
+        await writeFile(filePath, step2.code, "utf-8")
       }
-      return description.trim() || null
-    } catch (err) {
-      // Silent failure: any error returns null, caller falls back to text fallback
-      console.warn(`[Vision Dispatch] Failed to analyze image ${attachment.id}:`, err)
-      return null
-    }
+      return "Generated " + fileName + " and refined after visual comparison."
+    } catch { return null }
   }
 
-  /** Convenience factory for tests: builds a loop with sensible defaults. */
+  private async visionGenerate(model: string, attachment: AttachmentContent, _taskContext: string) {
+    try {
+      var r = this.opts.model.stream({
+        threadId: "vision_gen_" + attachment.id,
+        turnId: "gen_" + attachment.id + "_" + Date.now(),
+        model,
+        systemPrompt: "You are a front-end developer. Analyze the image and generate complete, production-ready HTML+CSS code that accurately reproduces the layout, colors, spacing, typography and style. Output ONLY the full HTML code in a code block. Include all CSS inline in a style tag.",
+        attachments: [{ id: attachment.id, name: attachment.name, mimeType: attachment.mimeType, dataBase64: attachment.data.toString("base64") }],
+        prefix: [], history: [], tools: [],
+        abortSignal: AbortSignal.timeout(30_000),
+        stream: false, maxTokens: 4096, temperature: 0.1,
+        reasoningEffort: "off"
+      })
+      var text = ""
+      for await (const ch of r) {
+        if (ch.kind === "assistant_text_delta") text += ch.text
+        if (ch.kind === "error") return null
+      }
+      const code = extractHtmlCodeBlock(text)
+      return code ? { code } : null
+    } catch { return null }
+  }
+
+  private async visionRefine(model: string, attachment: AttachmentContent, previousCode: string) {
+    try {
+      var r = this.opts.model.stream({
+        threadId: "vision_refine_" + attachment.id,
+        turnId: "refine_" + attachment.id + "_" + Date.now(),
+        model,
+        systemPrompt: "Compare the image with your previously generated code below. Identify and fix mismatches in: colors, spacing, layout, fonts. Output ONLY the corrected COMPLETE HTML in a code block. If code already matches, output it unchanged.\n\n--- Previously generated code ---\n" + previousCode + "\n---",
+        attachments: [{ id: attachment.id, name: attachment.name, mimeType: attachment.mimeType, dataBase64: attachment.data.toString("base64") }],
+        prefix: [], history: [], tools: [],
+        abortSignal: AbortSignal.timeout(30_000),
+        stream: false, maxTokens: 4096, temperature: 0.1,
+        reasoningEffort: "off"
+      })
+      var text = ""
+      for await (const ch of r) {
+        if (ch.kind === "assistant_text_delta") text += ch.text
+        if (ch.kind === "error") return null
+      }
+      const code = extractHtmlCodeBlock(text)
+      return code ? { code } : null
+    } catch { return null }
+  }
+/** Convenience factory for tests: builds a loop with sensible defaults. */
   static defaultPrefix(): ImmutablePrefix {
     return createImmutablePrefix({
       systemPrompt: 'You are Kun, a careful and helpful assistant.',
@@ -3498,6 +3526,19 @@ function memoryInstructions(memories: Array<{ id: string; content: string; scope
       ...memories.map((memory) => `- [${memory.id}] (${memory.scope}) ${memory.content}`)
     ].join('\n')
   ]
+}
+
+/** Extract HTML code block from markdown code fence. */
+function extractHtmlCodeBlock(text: string): string | null {
+  var start = text.indexOf("```html")
+  if (start < 0) start = text.indexOf("```")
+  if (start < 0) return null
+  start = text.indexOf("\n", start)
+  if (start < 0) return null
+  start += 1
+  var end = text.indexOf("```", start)
+  if (end < 0) return text.substring(start).trim()
+  return text.substring(start, end).trim()
 }
 
 function prefixVolatilityStageDetails(

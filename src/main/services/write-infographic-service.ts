@@ -17,12 +17,7 @@ import {
   type WriteInfographicRequest,
   type WriteInfographicResult
 } from '../../shared/write-infographic'
-import {
-  mapImageSize,
-  createImageGenClient,
-  ImageGenHttpError,
-  type ImageGenClient
-} from '../../../kun/src/adapters/tool/image-gen-tool-provider.js'
+import type { ImageGenClient } from '../../../kun/src/adapters/tool/image-gen-tool-provider.js'
 import { detectImage } from '../../../kun/src/attachments/attachment-store.js'
 
 // Matches WORKSPACE_IMAGE_DIR in workspace-files.ts so infographics land in
@@ -142,10 +137,12 @@ export async function requestWriteInfographic(
   }
 
   const kind: WriteInfographicKind = request.kind ?? 'infographic'
+  const { createImageGenClient } = await import('../../../kun/src/adapters/tool/image-gen-tool-provider.js')
   const client = options.client ?? createImageGenClient(imageGeneration)
   // An explicit defaultSize wins: users set it when their provider only
   // accepts fixed sizes (e.g. gpt-image's 1024x1536). Otherwise use an
   // aspect ratio that suits the image kind.
+  const { mapImageSize } = await import('../../../kun/src/adapters/tool/image-gen-tool-provider.js')
   const size = imageGeneration.defaultSize.trim() ||
     mapImageSize(KIND_ASPECT_RATIO[kind], IMAGE_SIZE_TIER, undefined)
 
@@ -173,10 +170,13 @@ export async function requestWriteInfographic(
       ? await client.edit({ ...generationRequest, images: [reference.image] })
       : await client.generate(generationRequest)
   } catch (error) {
-    if (reference.image && error instanceof ImageGenHttpError && [404, 405, 501].includes(error.status)) {
-      return {
-        ok: false,
-        message: 'the configured image provider does not support reference images'
+    if (reference.image) {
+      const { ImageGenHttpError } = await import('../../../kun/src/adapters/tool/image-gen-tool-provider.js')
+      if (error instanceof ImageGenHttpError && [404, 405, 501].includes(error.status)) {
+        return {
+          ok: false,
+          message: 'the configured image provider does not support reference images'
+        }
       }
     }
     return { ok: false, message: error instanceof Error ? error.message : String(error) }

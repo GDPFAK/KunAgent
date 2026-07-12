@@ -5,6 +5,8 @@ import { SubagentToolPolicy, type SubagentMode, type SubagentProfileConfig, type
 import type { RuntimeEventRecorder } from '../services/runtime-event-recorder.js'
 import type { UsageSnapshot } from '../contracts/usage.js'
 import { loadWorkspaceAgentProfiles } from './workspace-agents.js'
+import type { DelegationStore } from './delegation-store.js'
+import type { WorkerPool } from './worker-pool.js'
 
 const ChildRunUsage = z.object({
   promptTokens: z.number().int().nonnegative().default(0),
@@ -109,7 +111,7 @@ export type ChildRunAggregate = {
   averageCostCny?: number
 }
 
-export class FileDelegationStore {
+export class FileDelegationStore implements DelegationStore {
   constructor(private readonly rootDir: string) {}
 
   async upsert(record: ChildRunRecord): Promise<void> {
@@ -129,6 +131,15 @@ export class FileDelegationStore {
       .filter((record): record is ChildRunRecord => Boolean(record))
       .filter((record) => !parentThreadId || record.parentThreadId === parentThreadId)
       .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
+  }
+
+  async get(id: string): Promise<ChildRunRecord | null> {
+    try {
+      const text = await readFile(join(this.rootDir, `${id}.json`), 'utf8')
+      return ChildRunRecord.parse(JSON.parse(text))
+    } catch {
+      return null
+    }
   }
 }
 
@@ -157,11 +168,12 @@ export class DelegationRuntime {
 
   constructor(private readonly options: {
     config: SubagentsCapabilityConfig
-    store: FileDelegationStore
+    store: DelegationStore
     events?: RuntimeEventRecorder
     nowIso?: () => string
     idGenerator?: () => string
     executor?: ChildRunExecutor
+    workerPool?: WorkerPool
     recordExternalUsage?: (threadId: string, usage: UsageSnapshot) => void
   }) {}
 
@@ -473,13 +485,16 @@ export class DelegationRuntime {
 
   /** Concurrency ceiling; clamps to at least 1 so an enabled runtime never deadlocks. */
   private get parallelLimit(): number {
-    return Math.max(1, this.options.config.maxParallel)
+    const configured = Math.max(1, this.options.config.maxParallel)
+    const pool = this.options.workerPool
+    return pool ? Math.min(configured, pool.maxWorkers) : configured
   }
 
   /** Acquire a parallel slot, queueing (FIFO) when the runtime is saturated. */
   private acquireSlot(signal: AbortSignal): Promise<void> {
     if (signal.aborted) return Promise.reject(new Error('aborted while queued'))
-    if (this.active < this.parallelLimit) {
+    const pool = this.options.workerPool
+    if (this.active < this.parallelLimit && (!pool || pool.idleCount > 0)) {
       this.active += 1
       return Promise.resolve()
     }
@@ -558,6 +573,9 @@ export class DelegationRuntime {
   async diagnostics(parentThreadId?: string): Promise<{
     enabled: boolean
     active: number
+    queued: number
+    workerPoolIdle: number
+    workerPoolBusy: number
     childRuns: ChildRunRecord[]
     aggregates: ChildRunAggregate[]
   }> {
@@ -565,6 +583,9 @@ export class DelegationRuntime {
     return {
       enabled: this.options.config.enabled,
       active: this.active,
+      queued: this.slotWaiters.length,
+      workerPoolIdle: this.options.workerPool?.idleCount ?? 0,
+      workerPoolBusy: this.options.workerPool?.activeCount ?? 0,
       childRuns,
       aggregates: aggregateChildRuns(childRuns)
     }
@@ -611,6 +632,48 @@ export class DelegationRuntime {
 
   private now(): string {
     return this.options.nowIso?.() ?? new Date().toISOString()
+  }
+
+  private publishDelegationEvent(kind: string, extra: Record<string, unknown> = {}): void {
+    const eventKind = 'delegation:' + kind;
+    this.options.events?.record({
+      kind: eventKind as any,
+      threadId: (extra.threadId as string) ?? '',
+      turnId: (extra.turnId as string) ?? '',
+      childId: extra.childId as string,
+      ...extra
+    } as any).catch(() => { /* best-effort */ })
+  }
+
+  async reconcileOrphanedRuns(): Promise<number> {
+    if (typeof (this.options.store as any).listActive !== 'function') return 0
+    const active = await (this.options.store as any).listActive()
+    let reconciled = 0
+    const now = this.now()
+    for (const record of active) {
+      if (record.status === 'queued') {
+        record.status = 'aborted'
+        record.error = 'process restarted queued sub-task never started'
+        record.updatedAt = now
+        await this.options.store.upsert(record)
+        reconciled++
+      } else if (record.status === 'running') {
+        const elapsed = elapsedMs(record.updatedAt, now)
+        if (elapsed > 5 * 60 * 1000) {
+          record.status = 'failed'
+          record.error = 'process restarted running sub-task orphaned'
+          record.updatedAt = now
+          await this.options.store.upsert(record)
+          reconciled++
+        }
+      }
+    }
+    return reconciled
+  }
+
+  /** List children, optionally filtered by parent thread. */
+  async listChildren(parentThreadId?: string): Promise<ChildRunRecord[]> {
+    return this.options.store.list(parentThreadId)
   }
 }
 

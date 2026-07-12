@@ -6,7 +6,7 @@ import type { LlmDebugRound, LlmDebugSink } from '../../services/llm-debug-recor
 import { estimateDeepseekCost } from './deepseek-pricing.js'
 import { estimateMiniMaxCost } from './minimax-pricing.js'
 import { isToolResultBridgeItem, repairModelHistoryItems } from '../../domain/model-history-repair.js'
-import { extractToolResultImages, toolResultTextWithoutImages } from '../../loop/tool-result-image.js'
+import { extractToolResultImages, isOversizedImage, toolResultTextWithoutImages } from '../../loop/tool-result-image.js'
 import { repairToolArguments } from './tool-argument-repair.js'
 import { isDeepSeekHost, probeDeepSeekReachable } from './model-error-probe.js'
 import {
@@ -258,6 +258,10 @@ export class CompatModelClient implements ModelClient {
     const url = buildModelEndpointUrl(this.config.baseUrl, configuredEndpointFormat)
     const stream = request.stream ?? !this.config.nonStreaming
     const body = this.buildRequestBody(request, stream, { endpointFormat })
+    if (bodyHasImages(body)) {
+      const bodySize = JSON.stringify(body).length
+      console.warn('[kun:model] request contains images', { model: requestModel, bodySizeBytes: bodySize, threadId: request.threadId, turnId: request.turnId })
+    }
     if (round) {
       round.requestBody = body
       round.url = redactUrlForLog(url)
@@ -307,7 +311,7 @@ export class CompatModelClient implements ModelClient {
             yield { kind: 'error', message: 'model response had no body' }
             return
           }
-          yield* this.streamSseWithFallback(response.body, request.abortSignal, endpointFormat, requestModel, request.ttfbTimeoutMs, request.fallbackModels, url, headers, round, stream)
+          yield* this.streamSseWithFallback(response.body, request.abortSignal, endpointFormat, requestModel, request.ttfbTimeoutMs, request.fallbackModels, url, headers, round, stream, request.streamIdleTimeoutMs)
           return
         }
         const retryText = await response.text()
@@ -352,7 +356,7 @@ export class CompatModelClient implements ModelClient {
       yield { kind: 'error', message: 'model response had no body' }
       return
     }
-    yield* this.streamSseWithFallback(response.body, request.abortSignal, endpointFormat, requestModel, request.ttfbTimeoutMs, request.fallbackModels, url, headers, round, stream)
+    yield* this.streamSseWithFallback(response.body, request.abortSignal, endpointFormat, requestModel, request.ttfbTimeoutMs, request.fallbackModels, url, headers, round, stream, request.streamIdleTimeoutMs)
   }
 
   /**
@@ -370,12 +374,15 @@ export class CompatModelClient implements ModelClient {
     url: string,
     headers: Record<string, string>,
     round: LlmDebugRound | null,
-    stream: boolean
+    stream: boolean,
+    requestStreamIdleTimeoutMs?: number
   ): AsyncIterable<ModelStreamChunk> {
+    // Use request-level streamIdleTimeoutMs for this stream (set by agent-loop for image requests)
+    const effectiveIdleTimeoutMs = requestStreamIdleTimeoutMs
     let activeModel = model
     let fallbackAttempted = false
     while (true) {
-      const sse = this.streamSse(responseBody, signal, endpointFormat, activeModel, ttfbTimeoutMs)
+      const sse = this.streamSse(responseBody, signal, endpointFormat, activeModel, ttfbTimeoutMs, effectiveIdleTimeoutMs)
       let timedOut = false
       for await (const chunk of sse) {
         if (chunk.kind === 'error' && chunk.code === 'ttfb_timeout') {
@@ -385,6 +392,7 @@ export class CompatModelClient implements ModelClient {
         yield chunk
       }
       if (!timedOut) return
+      console.warn('[kun:model] TTFB timeout, attempting fallback', { activeModel, ttfbTimeoutMs })
       // TTFB timeout — try fallback
       if (fallbackAttempted || !fallbackModels || fallbackModels.length === 0) return
       const nextModel = fallbackModels[0]
@@ -963,7 +971,8 @@ export class CompatModelClient implements ModelClient {
     signal: AbortSignal,
     endpointFormat: ModelEndpointFormat,
     model: string,
-    ttfbTimeoutMs?: number
+    ttfbTimeoutMs?: number,
+    requestStreamIdleTimeoutMs?: number
   ): AsyncIterable<ModelStreamChunk> {
     const decoder = new TextDecoder('utf-8')
     const reader = body.getReader()
@@ -977,7 +986,7 @@ export class CompatModelClient implements ModelClient {
     let stopReason: ModelStopReason = 'stop'
     let finishReason: string | null = null
     let sawDone = false
-    const idleTimeoutMs = normalizeStreamIdleTimeoutMs(this.config.streamIdleTimeoutMs)
+    const idleTimeoutMs = requestStreamIdleTimeoutMs !== undefined ? requestStreamIdleTimeoutMs : normalizeStreamIdleTimeoutMs(this.config.streamIdleTimeoutMs)
     let isFirstChunk = true
     try {
       while (!signal.aborted) {
@@ -2414,6 +2423,20 @@ const MAX_TRANSIENT_RETRIES = 2
 const TRANSIENT_RETRY_BASE_MS = 500
 
 /** Sleep `ms`, resolving early to `true` if the signal aborts first. */
+/** Parse MiniMax API error body for known error codes. */
+function parseMiniMaxErrorCode(body: string): { message: string; code: string } | null {
+  // Try to extract JSON error payload
+  try {
+    const parsed = JSON.parse(body);
+    const code = parsed.base_resp?.status_code ?? parsed.error?.code ?? parsed.code;
+    const msg = parsed.base_resp?.status_msg ?? parsed.error?.message ?? parsed.message ?? body;
+    if (code) {
+      return { message: `MiniMax error ${code}: ${msg}`, code: `minimax_${code}` };
+    }
+  } catch {}
+  return null;
+}
+
 function sleepWithAbort(ms: number, signal: AbortSignal): Promise<boolean> {
   if (signal.aborted) return Promise.resolve(true)
   return new Promise<boolean>((resolve) => {
@@ -2558,7 +2581,23 @@ function normalizeModelId(model: string | undefined): string {
   return model?.trim().toLowerCase() ?? ''
 }
 
-function normalizeStreamIdleTimeoutMs(value: number | undefined): number {
+function bodyHasImages(body: Record<string, unknown>) {
+  const messages = body.messages ?? body.input ?? []
+  if (!Array.isArray(messages)) return false
+  for (const msg of messages) {
+    if (!msg || typeof msg !== 'object') continue
+    const content = msg.content
+    if (Array.isArray(content)) {
+      for (const part of content) {
+        if (part && typeof part === 'object') {
+          const p = part
+          if (p.type === 'image_url' || p.type === 'image' || p.type === 'input_image') return true
+        }
+      }
+    }
+  }
+  return false
+}function normalizeStreamIdleTimeoutMs(value: number | undefined): number {
   if (value === undefined) return DEFAULT_STREAM_IDLE_TIMEOUT_MS
   if (!Number.isFinite(value)) return DEFAULT_STREAM_IDLE_TIMEOUT_MS
   return Math.max(0, Math.floor(value))

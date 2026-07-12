@@ -26,6 +26,7 @@ import {
   ReadTracker,
   type ReadTrackerOptions
 } from './read-tracker.js'
+import { ToolResultCache, isReadOnlyTool } from '../../loop/tool-result-cache.js'
 import { sandboxBlockForTool, type SandboxBlock } from './sandbox-policy.js'
 
 /**
@@ -96,6 +97,7 @@ export class LocalToolHost implements ToolHost {
   private readonly allowList: Set<string>
   private readonly hooks: readonly ResolvedHook[]
   private readonly readTracker: ReadTracker
+  private readonly toolResultCache: ToolResultCache
   private readonly trustedWorkspaceRoots: string[]
 
   constructor(options: LocalToolHostOptions) {
@@ -103,6 +105,7 @@ export class LocalToolHost implements ToolHost {
     this.allowList = new Set(options.allowList ?? [])
     this.hooks = options.hooks ?? []
     this.readTracker = new ReadTracker(normalizeReadTrackerOptions(options.readTracker))
+    this.toolResultCache = new ToolResultCache()
     this.trustedWorkspaceRoots = (options.trustedWorkspaceRoots ?? [])
       .map((p) => p.replaceAll('\\', '/').replace(/\/+$/, '').toLowerCase())
       .filter(Boolean)
@@ -200,6 +203,31 @@ export class LocalToolHost implements ToolHost {
     if (context.abortSignal.aborted) {
       throw new Error('tool call aborted while waiting for approval')
     }
+
+    // Tool result cache: skip execution for read-only tools with cached results
+    if (isReadOnlyTool(activeCall.toolName, activeCall.toolKind ?? tool.toolKind)) {
+      const cached = this.toolResultCache.get(activeCall.toolName, activeCall.arguments)
+      if (cached) {
+        this.readTracker.observeToolResult({
+          context,
+          call: activeCall,
+          output: cached.output,
+          isError: false
+        })
+        const item = makeToolResultItem({
+          id: `item_${activeCall.callId}`,
+          turnId: context.turnId,
+          threadId: context.threadId,
+          callId: activeCall.callId,
+          toolName: activeCall.toolName,
+          toolKind: activeCall.toolKind ?? tool.toolKind,
+          output: cached.output,
+          isError: false
+        })
+        return { item, approved: !needsApproval }
+      }
+    }
+
     let result: Awaited<ReturnType<LocalTool['execute']>>
     try {
       result = await tool.execute(activeCall.arguments, context, async (update) => {
@@ -228,6 +256,19 @@ export class LocalToolHost implements ToolHost {
         approved: true
       }
     }
+    // Cache read-only result or invalidate on file mutation
+    if (ToolResultCache.invalidatesCache(activeCall.toolName, activeCall.toolKind ?? tool.toolKind)) {
+      this.toolResultCache.invalidateAll()
+      // Refresh AGENT.md so the directory tree stays current after file mutations
+      if (context.workspace) {
+        import('../../workspace/project-context.js').then((m) =>
+          m.refreshAgentMd(context.workspace!)
+        ).catch(() => {})
+      }
+    } else if (isReadOnlyTool(activeCall.toolName, activeCall.toolKind ?? tool.toolKind)) {
+      this.toolResultCache.set(activeCall.toolName, activeCall.arguments, result.output)
+    }
+
     let hookedResult: PostToolUseOutcome
     try {
       hookedResult = await runPostToolUseHooks(this.hooks, {

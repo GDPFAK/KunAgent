@@ -36,6 +36,22 @@ export class ContextEstimator {
     return Math.max(1, tokens)
   }
 
+  /** Count total images in an items array. */
+  countImages(items: TurnItem[]): number {
+    let count = 0;
+    for (const item of items) {
+      if (item.kind === 'tool_result') {
+        count += extractToolResultImages(item.output).length;
+      }
+    }
+    return count;
+  }
+
+  /** Estimate image-only tokens from items. */
+  estimateImageTokens(items: TurnItem[]): number {
+    return this.countImages(items) * IMAGE_TOOL_RESULT_TOKEN_ESTIMATE;
+  }
+
   estimateItems(items: TurnItem[]): number {
     return items.reduce((sum, item) => sum + this.estimateItem(item), 0)
   }
