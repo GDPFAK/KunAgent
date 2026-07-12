@@ -72,12 +72,6 @@ export type ToolHostContext = {
     enabled: boolean
     scopes?: readonly string[]
   }
-  /** Optional delegation policy for this turn. */
-  delegationPolicy?: {
-    enabled: boolean
-    maxParallel?: number
-    maxChildRuns?: number
-  }
   /** Optional provider allow-list. When set, other providers are not advertised or executed. */
   allowedProviderIds?: readonly string[]
   /** Optional tool-name allow-list. When set, other tools are not advertised or executed. */
