@@ -30,6 +30,7 @@
     "r2:promote": "node ./scripts/publish-r2.mjs promote",
     "postinstall": "node ./scripts/postinstall.cjs",
     "verify:apple": "node ./scripts/verify-apple-signing.cjs",
+    "setup": "node ./scripts/setup.cjs",
     "preview": "electron-vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.web.json && tsc --noEmit -p tsconfig.node.json",
     "prepare:whisper": "node ./scripts/prepare-whisper-runner.cjs",
