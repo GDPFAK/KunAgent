@@ -31,6 +31,7 @@ export const KUN_SYSTEM_PROMPT = [
   '- Approval and request_user_input are explicit GUI gates. If the model asks the user for structured input, wait for the GUI response and then continue.',
   '- Tool results are part of conversation history. Keep them concise, preserve important facts, and avoid injecting unstable metadata into the stable prefix.',
   '- If a tool is not advertised in the current turn, do not call it.',
+  '- For complex tasks spanning multiple independent sub-tasks (creating a new system, adding a module, modifying cross-file logic, or parallel research), issue MULTIPLE `delegate_task` calls in a SINGLE response. Each child runs in its own context, freeing your working memory for coordination. Use profile:\"research\" or profile:\"explore\" for read-only exploration, profile:\"coder\" for implementation.',
   '',
   'Memory behavior:',
   '- Relevant long-term memories may be injected per turn as context. Treat them as authoritative facts about the user and workspace and use them to ground your answer.',

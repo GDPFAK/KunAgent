@@ -121,23 +121,27 @@ function buildDelegateTaskDescription(
   profiles: { name: string; mode: string; toolPolicy: string; model?: string; providerId?: string; description?: string }[]
 ): string {
   const lines = [
-    'Run a bounded child agent subtask in an isolated Worker thread and return its summary.',
-    'USE THIS WHEN:',
-    '- You have multiple independent sub-tasks that can run in parallel (e.g. research 3 different approaches simultaneously); issue several delegate_task calls in one message.',
-    '- A sub-task needs different tools than the main conversation (e.g. read-only exploration using "explore" profile).',
-    '- A long-running operation should continue in the background (use detach=true so it keeps running after you respond).',
-    '- You want to isolate a risky operation (file writes, shell commands) in a temp workspace.',
-    'DO NOT USE for simple tool calls (read, bash, grep) that complete in one step — just call those directly.',
-    `Children default to the "${runtime.defaultToolPolicy}" tool policy (read-only children may only read/grep/find/ls and cannot edit, run shell, or delegate further).`,
-    'Children execute in isolated Worker threads with automatic crash recovery (retry on failure). The pool has multiple Workers so parallel children run concurrently.',
-    'Use delegation_diagnostics to check Worker pool health, active children, and past run results.'
+    'Run independent sub-tasks in parallel child agents. CRITICAL: to run children IN PARALLEL, issue MULTIPLE delegate_task calls in a SINGLE response — each gets its own worker and they execute concurrently. Issuing one delegate_task per turn runs them sequentially, losing the parallelism benefit. Each child is an isolated Worker thread with its own model context, tool set, and crash recovery.',
+    '',
+    'Example — call multiple in one response for parallelism:',
+    '  delegate_task({ label: "调研现有API", profile: "research", prompt: "搜索项目中所有API路由定义" })',
+    '  delegate_task({ label: "编写新模块", profile: "coder", prompt: "基于文档实现用户管理模块" })',
+    '',
+    'WHEN TO USE — three patterns where delegation saves turns and time:',
+    '',
+    '1. "Research + Implement" split: Delegate research/exploration to a read-only child (profile: "research" / "explore") while you keep designing in the main thread. The child returns findings you act on — no context-switching.',
+    '2. "Split a complex task": Instead of implementing files A, B, C sequentially, delegate each to its own child in one message. They run in parallel; you get three summaries back at once. For page-replication from a screenshot: read the image in the main thread to capture the design spec, then delegate the HTML/CSS implementation to a child so the image data does not crowd your working context.',
+    '3. "Background long-runners": Offload a slow operation (batch migration, large refactor, heavy test run) with detach=true. It reports progress via GUI while you continue the main conversation.',
+    '',
+    'Read-only profiles (research, explore) are cheap — they use less context and have no write/exec permission. Default profile when none specified: coder (full read/write/shell access).',
+    `Available profiles: ${
+      profiles.length
+        ? profiles
+            .map((p) => `${p.name} (${p.toolPolicy}${p.model ? `, ${p.model}` : ''}${p.providerId ? ` @${p.providerId}` : ''}${p.description ? ` — ${p.description}` : ''}`)
+            .join('; ')
+        : 'coder (inherit, full access)'
+    }.`
   ]
-  if (profiles.length) {
-    const summary = profiles
-      .map((profile) => `${profile.name} (${profile.toolPolicy}${profile.model ? `, ${profile.model}` : ''}${profile.providerId ? ` @${profile.providerId}` : ''})${profile.description ? ` — ${profile.description}` : ''}`)
-      .join('; ')
-    lines.push(`Available profiles: ${summary}.`)
-  }
   if (runtime.defaultProfileName) {
     lines.push(`Default profile when omitted: ${runtime.defaultProfileName}.`)
   }
