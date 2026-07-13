@@ -673,31 +673,25 @@ export async function startKunServe(
 ): Promise<KunServeHandle> {
   const runtime = await createKunServeRuntime(options)
   const router = buildRouter(runtime)
+  // Reconcile orphaned turns before accepting requests so every thread is
+  // in a consistent state from the first GUI interaction. This delays
+  // readiness slightly but prevents the race where a GET /v1/threads/:id
+  // arrives while a running/queued turn is still being marked as failed.
+  const orphanedThreadIds = await runtime.turnService.reconcileOrphanedTurns()
+  if (orphanedThreadIds.length > 0) {
+    console.warn(`[kun] marked orphaned turn(s) on ${orphanedThreadIds.length} thread(s) as failed after restart`)
+  }
+  if (orphanedThreadIds.length > 0 && runtime.resumeInterruptedGoals) {
+    const resumed = await runtime.resumeInterruptedGoals(orphanedThreadIds)
+    if (resumed > 0) {
+      console.warn(`[kun] auto-resumed ${resumed} interrupted goal(s) after restart`)
+    }
+  }
   const server = await startNodeHttpServer({
     router,
     host: options.host,
     port: options.port
   })
-  // Background sweep after listen: settle turns orphaned by a crash so
-  // clients stop spinning on them, without delaying readiness. Then resume
-  // goals that were interrupted mid-run so an active goal doesn't sit "in
-  // progress" forever with nothing running (KunAgent/Kun#370).
-  void runtime.turnService
-    .reconcileOrphanedTurns()
-    .then(async (threadIds) => {
-      if (threadIds.length > 0) {
-        console.warn(`[kun] marked orphaned turn(s) on ${threadIds.length} thread(s) as failed after restart`)
-      }
-      if (threadIds.length > 0 && runtime.resumeInterruptedGoals) {
-        const resumed = await runtime.resumeInterruptedGoals(threadIds)
-        if (resumed > 0) {
-          console.warn(`[kun] auto-resumed ${resumed} interrupted goal(s) after restart`)
-        }
-      }
-    })
-    .catch((error) => {
-      console.warn('[kun] orphaned turn reconciliation failed:', error)
-    })
   return {
     ...server,
     runtime,

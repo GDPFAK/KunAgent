@@ -96,6 +96,7 @@ import type { AgentRoleId, AgentRoleConfig } from '../contracts/agent-role.js'
 import type { KunAgentRoleRegistry } from '../delegation/role-registry.js'
 import { ToolStormBreaker, type ToolStormBreakerOptions } from './tool-storm-breaker.js'
 import { healLoadedHistoryItems } from './history-healing.js'
+import { readProjectContext, ensureProjectContextFiles } from '../workspace/project-context.js'
 import { repairDispatchToolArguments } from './tool-call-repair.js'
 import { CREATE_PLAN_TOOL_NAME } from '../adapters/tool/create-plan-tool.js'
 import { planExecution, formatTaskPlan, isPlanComplete } from './task-planner.js'
@@ -1567,6 +1568,9 @@ export class AgentLoop {
     const historyForRequest = forwardHistory.map(
       (item) => item.turnId === turnId ? compactHistoryItem(item) : item
     )
+    const projectContext = thread?.workspace
+      ? await ensureProjectContextFiles(thread.workspace).then(() => readProjectContext(thread.workspace)).catch(() => null)
+      : null
     const runtimeContextInstruction = shouldInjectInitialRuntimeContext({
       stepIndex,
       turnId,
@@ -1600,6 +1604,11 @@ export class AgentLoop {
       ...memoryInstructions(memories),
       ...(skillResolution.catalogInstruction ? [skillResolution.catalogInstruction] : []),
       ...skillResolution.instructions,
+      ...(projectContext?.content
+        ? [`[项目上下文] CLAUDE.md 和 AGENT.md 文件已存在于项目根目录，内容如下：\n${projectContext.content}`]
+        : projectContext !== null
+          ? [`[项目上下文] 当前项目没有 CLAUDE.md 和 AGENT.md 文件。这两个文件用于记录项目架构决策、编码约定、功能说明和目录结构。建议和团队成员共享这两个文件，确保大家在同一上下文工作。若需自动生成，请告知。`]
+          : []),
       ...(userInputDisabled ? [userInputUnavailableInstruction()] : []),
       ...(effectiveToolSpecs.some((tool) => tool.name === 'bash') ? [shellRuntimeInstruction()] : []),
       ...(toolCatalogDriftMessage ? [toolCatalogDriftMessage] : [])

@@ -118,7 +118,7 @@ export async function ensureProjectContextFiles(
 
 async function generateClaudeMd(workspace: string): Promise<string> {
   const lines: string[] = []
-  lines.push('# Claude 项目说明')
+  lines.push('# CLAUDE.md — 项目说明')
   lines.push('')
   lines.push('> 此文件由 Kun 自动生成，你可根据项目需要修改完善。')
   lines.push('')
@@ -179,9 +179,19 @@ async function generateClaudeMd(workspace: string): Promise<string> {
     } catch { /* ignore */ }
   }
 
+  lines.push('## 架构决策')
+  lines.push('')
+  lines.push('（请记录项目的关键架构决策、技术选型理由和注意事项。）')
+  lines.push('')
+
   lines.push('## 编码约定')
   lines.push('')
-  lines.push('（请根据项目实际情况补充编码约定、架构决策和注意事项。）')
+  lines.push('（请根据项目实际情况补充编码规范、命名约定和代码风格。）')
+  lines.push('')
+
+  lines.push('## 功能说明')
+  lines.push('')
+  lines.push('（请描述项目的主要功能模块和各模块的职责边界。）')
   lines.push('')
 
   return lines.join('\n')
@@ -192,7 +202,7 @@ async function generateAgentMd(workspace: string): Promise<string> {
   lines.push('# AGENT.md — 项目结构快照')
   lines.push('')
   lines.push('> 此文件由 Kun 自动维护，反映当前项目状态。')
-  lines.push('> 请勿手动编辑，编辑内容会被下次自动刷新覆盖。')
+  lines.push('> 此文件由 Kun 自动维护，反映当前项目状态。请勿手动编辑，编辑内容会被下次自动刷新覆盖。')
   lines.push('')
 
   // Project name and tech stack

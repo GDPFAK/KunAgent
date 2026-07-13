@@ -142,7 +142,7 @@ type StreamReadResult =
   | { kind: 'aborted' }
   | { kind: 'error'; message: string }
 
-const DEFAULT_STREAM_IDLE_TIMEOUT_MS = 45_000
+const DEFAULT_STREAM_IDLE_TIMEOUT_MS = 120_000
 // Anthropic Messages requires an explicit `max_tokens`. The old 4096 default
 // was far too small for reasoning models: their thinking tokens are drawn from
 // the SAME output budget, so a long think left almost nothing for the tool
