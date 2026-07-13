@@ -10,6 +10,7 @@ import {
   resolveWorkspacePath,
   withToolBoundary
 } from './builtin-tool-utils.js'
+import { tryGetLspDiagnostics, isCodeFile } from './lsp-diagnostics.js'
 
 export function createReadLocalTool(options: ReadLocalToolOptions = {}): LocalTool {
   const statOp = options.operations?.stat ?? defaultReadLocalToolOperations.stat!
@@ -18,9 +19,10 @@ export function createReadLocalTool(options: ReadLocalToolOptions = {}): LocalTo
     options.operations?.detectImageMimeType ?? defaultReadLocalToolOperations.detectImageMimeType!
   const resizeImageOp = options.operations?.resizeImage
   const autoResizeImages = options.autoResizeImages ?? true
+  const lspIntegration = options.lspIntegration !== false
   return LocalToolHost.defineTool({
     name: 'read',
-    description: 'Read a file from the workspace. Supports optional line offset and limit for large files.',
+    description: 'Read a file from the workspace. Supports optional line offset and limit for large files. For code files (.ts, .js, .py, .rs, .go, etc.), the response includes an lsp field with diagnostics from the language server — use these directly, you do NOT need to call lsp separately.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -147,6 +149,11 @@ export function createReadLocalTool(options: ReadLocalToolOptions = {}): LocalTo
         const remaining = allLines.length - (offset - 1 + limit)
         content = `${truncated.text}\n\n[${remaining} more lines in file. Use offset=${nextOffset} to continue.]`
       }
+      // Best-effort LSP diagnostics for code files (e.g. .ts, .js, .py).
+      let lspResult: Awaited<ReturnType<typeof tryGetLspDiagnostics>> | undefined
+      if (lspIntegration && isCodeFile(absolutePath)) {
+        lspResult = await tryGetLspDiagnostics(absolutePath, context.workspace).catch(() => undefined)
+      }
       return {
         output: {
           path: absolutePath,
@@ -158,7 +165,8 @@ export function createReadLocalTool(options: ReadLocalToolOptions = {}): LocalTo
           total_lines: allLines.length,
           truncated: truncated.truncated,
           truncation_by: truncated.truncatedBy ?? null,
-          first_line_exceeds_limit: truncated.firstLineExceedsLimit === true
+          first_line_exceeds_limit: truncated.firstLineExceedsLimit === true,
+          ...(lspResult ? { lsp: lspResult } : {})
         }
       }
     })

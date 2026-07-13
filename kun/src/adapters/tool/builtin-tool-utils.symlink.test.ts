@@ -1,9 +1,25 @@
 import { mkdtemp, mkdir, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import type { ToolHostContext } from '../../ports/tool-host.js'
 import { resolveWorkspacePath } from './builtin-tool-utils.js'
+
+/** Whether symlink creation is supported on this platform. Windows without
+ *  Developer Mode or admin elevation throws EPERM from fs.symlink. */
+let symlinksSupported = true
+
+beforeAll(async () => {
+  const probeDir = await mkdtemp(join(tmpdir(), 'kun-symlink-probe-'))
+  try {
+    await symlink(probeDir, join(probeDir, 'probe'))
+    await rm(join(probeDir, 'probe'), { force: true })
+  } catch {
+    symlinksSupported = false
+  } finally {
+    await rm(probeDir, { recursive: true, force: true }).catch(() => {})
+  }
+})
 
 function context(workspace: string): ToolHostContext {
   return {
@@ -18,6 +34,10 @@ function context(workspace: string): ToolHostContext {
 }
 
 describe('resolveWorkspacePath symlink escape', () => {
+  if (process.platform === 'win32') {
+    it.skip('symlinks require admin/Developer Mode on Windows', () => {})
+    return
+  }
   let base: string
   let workspace: string
   let outside: string

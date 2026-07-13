@@ -15,6 +15,7 @@
 import { readFile } from 'node:fs/promises'
 import { LocalToolHost, type LocalTool } from './local-tool-host.js'
 import { resolveWorkspacePath, withToolBoundary } from './builtin-tool-utils.js'
+import { tryGetLspDiagnostics } from './lsp-diagnostics.js'
 import {
   acquireLspSession,
   lspCloseDocument,
@@ -228,9 +229,48 @@ export function createLspLocalTool(): LocalTool {
       })
   })
 }
+export function createLspDiagnosticsLocalTool(): LocalTool {
+  return LocalToolHost.defineTool({
+    name: 'lsp_diagnostics',
+    description:
+      'Get LSP diagnostics (errors, warnings, hints) for a file. ' +
+      'Returns the full list of diagnostics from the language server. ' +
+      'Never throws — all failures return a status field. ' +
+      'Requires a matching language server to be installed.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        filePath: {
+          type: 'string',
+          description: 'Absolute or workspace-relative path to the source file'
+        }
+      },
+      required: ['filePath'],
+      additionalProperties: false
+    },
+    policy: 'auto',
+    toolKind: 'tool_call',
+    execute: async (args, context) =>
+      withToolBoundary(async () => {
+        const rawPath = typeof args.filePath === 'string' ? args.filePath : ''
+        if (!rawPath.trim()) {
+          return { output: { error: 'filePath is required' }, isError: true }
+        }
+        const { absolutePath, workspaceRoot } = await resolveWorkspacePath(rawPath, context)
+        const result = await tryGetLspDiagnostics(absolutePath, workspaceRoot)
+        return {
+          output: {
+            filePath: absolutePath,
+            status: result.status,
+            serverName: result.serverName,
+            diagnostics: result.diagnostics
+          }
+        }
+      })
+  })
+}
 
-/**
- * Strip file:// URIs to plain paths and slim down verbose LSP types so the
+/** and slim down verbose LSP types so the
  * output is compact enough to fit in the agent's context window.
  */
 function simplifyResult(result: unknown): unknown {

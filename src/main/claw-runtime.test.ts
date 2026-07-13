@@ -121,8 +121,8 @@ function buildModelProvider(overrides: Partial<ModelProviderProfileV1> = {}): Mo
     id: 'minimax',
     name: 'MiniMax',
     apiKey: 'sk-minimax',
-    baseUrl: 'https://api.minimaxi.com/anthropic',
-    endpointFormat: 'messages',
+    baseUrl: 'https://api.minimaxi.com/v1/chat/completions',
+    endpointFormat: 'chat_completions',
     models: ['MiniMax-M3', 'MiniMax-M2.7'],
     modelProfiles: {},
     ...overrides
@@ -1226,7 +1226,7 @@ describe('ClawRuntime', () => {
         name: 'Xiaomi MiMo',
         apiKey: 'sk-xiaomi',
         baseUrl: 'https://api.mimo.example/v1',
-        endpointFormat: 'chat_completions',
+        endpointFormat: 'messages',
         models: ['mimo-v2.5']
       })
     ]

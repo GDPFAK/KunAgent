@@ -551,7 +551,7 @@ describe('CompatModelClient', () => {
       })
     }
     const client = new CompatModelClient({
-      baseUrl: 'https://api.minimaxi.com/anthropic',
+      baseUrl: 'https://api.minimaxi.com/v1/chat/completions',
       apiKey: 'k',
       model: 'MiniMax-M2.5',
       endpointFormat: 'messages',

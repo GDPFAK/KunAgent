@@ -48,9 +48,6 @@ export function buildDelegationToolProviders(runtime: DelegationRuntime | undefi
             ...(typeof args.model === 'string' ? { model: args.model } : {}),
             ...(typeof args.profile === 'string' ? { profile: args.profile } : {}),
             ...(args.detach === true ? { detach: true } : {}),
-            // Emit a partial result the moment the child id exists, so the GUI
-            // can offer "open session" (and stream the child live) while the
-            // child is still running — not only after it completes.
             onStart: (childId, profile) => {
               void onUpdate?.({
                 output: { childId, status: 'running', ...(profile ? { profile } : {}) },
@@ -75,6 +72,45 @@ export function buildDelegationToolProviders(runtime: DelegationRuntime | undefi
             isError: record.status === 'failed' || record.status === 'aborted'
           }
         }
+      }),
+      LocalToolHost.defineTool({
+        name: 'delegation_diagnostics',
+        description: 'Query the delegation subsystem status: active/queued children, Worker pool health (idle/busy workers), and recent child run records. Useful for monitoring long-running background tasks, detecting stuck workers, and inspecting past delegation results.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            parentThreadId: { type: 'string', description: 'Filter child runs by parent thread. Omit to see all.' },
+            limit: { type: 'number', description: 'Max child run records to return. Default 10.' }
+          },
+          additionalProperties: false
+        },
+        policy: 'auto',
+        execute: async (args) => {
+          const parentThreadId = typeof args.parentThreadId === 'string' ? args.parentThreadId.trim() : undefined
+          const limit = Math.min(Math.max(1, typeof args.limit === 'number' ? args.limit : 10), 50)
+          const diag = await runtime.diagnostics(parentThreadId)
+          return {
+            output: {
+              delegationEnabled: diag.enabled,
+              activeChildren: diag.active,
+              queuedChildren: diag.queued,
+              workerPoolIdle: diag.workerPoolIdle,
+              workerPoolBusy: diag.workerPoolBusy,
+              profiles: runtime.listProfiles().map((p) => p.name),
+              recentRuns: diag.childRuns.slice(-limit).map((r) => ({
+                id: r.id,
+                profile: r.profile,
+                status: r.status,
+                summary: r.summary,
+                error: r.error,
+                durationMs: r.durationMs,
+                createdAt: r.createdAt,
+                updatedAt: r.updatedAt
+              })),
+              aggregates: diag.aggregates.slice(0, 10)
+            }
+          }
+        }
       })
     ]
   }]
@@ -85,9 +121,16 @@ function buildDelegateTaskDescription(
   profiles: { name: string; mode: string; toolPolicy: string; model?: string; providerId?: string; description?: string }[]
 ): string {
   const lines = [
-    'Run a bounded child agent task and return its summary.',
-    'Issue several delegate_task calls in one message to investigate in parallel; runs queue once the parallel budget is full.',
-    `Children default to the "${runtime.defaultToolPolicy}" tool policy (read-only children may only read/grep/find/ls and cannot edit, run shell, or delegate further).`
+    'Run a bounded child agent subtask in an isolated Worker thread and return its summary.',
+    'USE THIS WHEN:',
+    '- You have multiple independent sub-tasks that can run in parallel (e.g. research 3 different approaches simultaneously); issue several delegate_task calls in one message.',
+    '- A sub-task needs different tools than the main conversation (e.g. read-only exploration using "explore" profile).',
+    '- A long-running operation should continue in the background (use detach=true so it keeps running after you respond).',
+    '- You want to isolate a risky operation (file writes, shell commands) in a temp workspace.',
+    'DO NOT USE for simple tool calls (read, bash, grep) that complete in one step — just call those directly.',
+    `Children default to the "${runtime.defaultToolPolicy}" tool policy (read-only children may only read/grep/find/ls and cannot edit, run shell, or delegate further).`,
+    'Children execute in isolated Worker threads with automatic crash recovery (retry on failure). The pool has multiple Workers so parallel children run concurrently.',
+    'Use delegation_diagnostics to check Worker pool health, active children, and past run results.'
   ]
   if (profiles.length) {
     const summary = profiles

@@ -693,6 +693,7 @@ async function waitForKunHealth(settings: AppSettingsV1, timeoutMs: number): Pro
   const base = getRuntimeBaseUrlForSettings(settings)
   const deadline = Date.now() + timeoutMs
   let lastError = ''
+  let warnedOnce = false
 
   while (Date.now() <= deadline) {
     try {
@@ -707,7 +708,10 @@ async function waitForKunHealth(settings: AppSettingsV1, timeoutMs: number): Pro
       const msg = e instanceof Error ? e.message : String(e)
       if (msg !== lastError) {
         lastError = msg
-        logWarn('health-probe', `${base}/health: ${msg}`)
+        if (!warnedOnce) {
+          warnedOnce = true
+          logWarn('health-probe', `${base}/health: ${msg}`)
+        }
       }
     }
     await sleep(150)

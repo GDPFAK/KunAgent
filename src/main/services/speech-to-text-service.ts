@@ -8,7 +8,6 @@ import {
   type SpeechTranscriptionRequest,
   type SpeechTranscriptionResult
 } from '../../shared/speech-to-text'
-import { describeNetworkError } from '../../../kun/src/adapters/tool/image-gen-tool-provider.js'
 import { transcribeViaLocalWhisper } from './local-whisper-service'
 
 const FILE_EXTENSION_BY_MIME: Record<string, string> = {
@@ -65,7 +64,7 @@ export async function requestSpeechTranscription(
     if (!trimmed) return { ok: false, message: 'transcription result is empty' }
     return { ok: true, text: trimmed }
   } catch (error) {
-    return { ok: false, message: describeTranscriptionError(error, speechToText.timeoutMs) }
+    return { ok: false, message: await describeTranscriptionError(error, speechToText.timeoutMs) }
   }
 }
 
@@ -166,7 +165,7 @@ export function joinSpeechApiUrl(baseUrl: string, path: string): string {
   return `${baseUrl.trim().replace(/\/+$/, '')}/${path}`
 }
 
-function describeTranscriptionError(error: unknown, timeoutMs: number): string {
+async function describeTranscriptionError(error: unknown, timeoutMs: number): Promise<string> {
   if (error instanceof SpeechHttpError) return error.message
   if (error instanceof DOMException && error.name === 'TimeoutError') {
     return `speech request timed out after ${timeoutMs}ms`
@@ -175,5 +174,6 @@ function describeTranscriptionError(error: unknown, timeoutMs: number): string {
     return 'speech request was canceled'
   }
   if (error instanceof SyntaxError) return 'speech response is not valid JSON'
+  const { describeNetworkError } = await import('../../../kun/src/adapters/tool/image-gen-tool-provider.js')
   return describeNetworkError(error)
 }

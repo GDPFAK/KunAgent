@@ -89,7 +89,7 @@ export type ReadClassification = {
 
 export const COMPACT_RESOURCE_FILE_NAMES = new Set(['AGENTS.md', 'AGENTS.MD', 'CLAUDE.md', 'CLAUDE.MD'])
 
-export type BuiltinToolName = 'read' | 'bash' | 'edit' | 'write' | 'grep' | 'find' | 'ls' | 'lsp'
+export type BuiltinToolName = 'read' | 'bash' | 'edit' | 'write' | 'grep' | 'find' | 'ls' | 'lsp' | 'lsp_diagnostics'
 export const allBuiltinToolNames: Set<BuiltinToolName> = new Set([
   'read',
   'bash',
@@ -107,6 +107,7 @@ export type ReadLocalToolOptions = {
   maxLines?: number
   maxBytes?: number
   autoResizeImages?: boolean
+  lspIntegration?: boolean
   operations?: ReadLocalToolOperations
 }
 
@@ -126,6 +127,7 @@ export type GrepLocalToolOptions = {
   defaultLimit?: number
   rgExecutableCandidates?: string[]
   operations?: GrepLocalToolOperations
+  lspEnrichment?: boolean
 }
 
 export type FindLocalToolOptions = {
