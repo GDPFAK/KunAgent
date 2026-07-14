@@ -75,13 +75,31 @@ function imageFetchFailure(
   request: { timeoutMs: number }
 ): Error {
   const target = url.split('?')[0]
-  if (error instanceof DOMException && error.name === 'TimeoutError') {
+
+  // Our custom configuration timeout (from controllableTimeout)
+  if (isImageProviderTimeoutError(error)) {
     return new Error(`image request to ${target} timed out after ${request.timeoutMs}ms`, { cause: error })
+  }
+
+  if (error instanceof DOMException && error.name === 'TimeoutError') {
+    // undici internal socket/body timeout, not our config timeout
+    return new Error(`image request to ${target} failed: socket/body timeout`, { cause: error })
   }
   if (error instanceof DOMException && error.name === 'AbortError') {
     return new Error(`image request to ${target} was canceled`, { cause: error })
   }
   return new Error(`image request to ${target} failed: ${describeNetworkError(error)}`, { cause: error })
+}
+
+function isImageProviderTimeoutError(error: unknown): boolean {
+  let current: unknown = error
+  for (let depth = 0; depth < 5 && current != null; depth++) {
+    if (current && typeof current === 'object' && (current as Record<string, unknown>).imageProviderTimeout === true) {
+      return true
+    }
+    current = (current as Record<string, unknown>)?.cause
+  }
+  return false
 }
 
 export interface ImageGenClient {
@@ -485,7 +503,8 @@ export class OpenAiCompatImageClient implements ImageGenClient {
     init: (includeResponseFormat: boolean) => { headers: Record<string, string>; body: string | FormData },
     request: { timeoutMs: number; signal: AbortSignal }
   ): Promise<GeneratedImage> {
-    const signal = withTimeout(request.signal, request.timeoutMs)
+    const { signal, cancelTimeout } = controllableTimeout(request.signal, request.timeoutMs)
+    try {
     const post = async (includeResponseFormat: boolean): Promise<Response> => {
       try {
         return await fetch(url, { method: 'POST', ...init(includeResponseFormat), signal })
@@ -519,6 +538,9 @@ export class OpenAiCompatImageClient implements ImageGenClient {
       return { data: Buffer.from(await download.arrayBuffer()), mimeType }
     }
     throw new Error('image provider returned no image data')
+    } finally {
+      cancelTimeout()
+    }
   }
 }
 
@@ -563,18 +585,29 @@ export class MiniMaxImageClient implements ImageGenClient {
     body: Record<string, unknown>,
     request: { timeoutMs: number; signal: AbortSignal }
   ): Promise<GeneratedImage> {
-    const signal = withTimeout(request.signal, request.timeoutMs)
+    const { signal, cancelTimeout } = controllableTimeout(request.signal, request.timeoutMs)
+    try {
     let response: Response
     try {
-      response = await fetch(this.endpointUrl, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${this.apiKey}`,
-          'Content-Type': 'application/json'
+      response = await retryOnce(
+        async () => {
+          const res = await fetch(this.endpointUrl, {
+            method: 'POST',
+            headers: {
+              Authorization: `Bearer ${this.apiKey}`,
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(body),
+            signal
+          })
+          if (!res.ok && [502, 503, 504].includes(res.status)) {
+            throw new ImageGenHttpError(res.status, await res.text())
+          }
+          return res
         },
-        body: JSON.stringify(body),
-        signal
-      })
+        isMiniMaxRetryable,
+        2000
+      )
     } catch (error) {
       throw imageFetchFailure(this.endpointUrl, error, request)
     }
@@ -607,6 +640,9 @@ export class MiniMaxImageClient implements ImageGenClient {
       return { data: Buffer.from(await download.arrayBuffer()), mimeType }
     }
     throw new Error('MiniMax image provider returned no image data')
+    } finally {
+      cancelTimeout()
+    }
   }
 }
 
@@ -677,8 +713,68 @@ export function minimaxImageDimensionFields(
   return { aspect_ratio: best.label }
 }
 
-function withTimeout(signal: AbortSignal, timeoutMs: number): AbortSignal {
-  return AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)])
+function controllableTimeout(outerSignal: AbortSignal, timeoutMs: number): { signal: AbortSignal; cancelTimeout: () => void } {
+  const controller = new AbortController()
+  let timer: ReturnType<typeof setTimeout> | undefined
+
+  const onOuterAbort = (): void => {
+    if (timer !== undefined) clearTimeout(timer)
+    timer = undefined
+    controller.abort(outerSignal.reason)
+  }
+
+  if (outerSignal.aborted) {
+    controller.abort(outerSignal.reason)
+  } else {
+    outerSignal.addEventListener('abort', onOuterAbort, { once: true })
+    timer = setTimeout(() => {
+      outerSignal.removeEventListener('abort', onOuterAbort)
+      timer = undefined
+      const err = new Error('ImageProviderTimeout')
+      ;(err as unknown as Record<string, unknown>).imageProviderTimeout = true
+      controller.abort(err)
+    }, timeoutMs)
+  }
+
+  return {
+    signal: controller.signal,
+    cancelTimeout: () => {
+      if (timer !== undefined) clearTimeout(timer)
+      timer = undefined
+      outerSignal.removeEventListener('abort', onOuterAbort)
+    }
+  }
+}
+
+async function retryOnce<T>(
+  fn: () => Promise<T>,
+  isRetryable: (error: unknown) => boolean,
+  delayMs: number
+): Promise<T> {
+  try {
+    return await fn()
+  } catch (error) {
+    if (!isRetryable(error)) throw error
+    await sleep(delayMs)
+    return fn()
+  }
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms))
+}
+
+const RETRYABLE_NODE_CODES = new Set(['ECONNRESET', 'ECONNREFUSED', 'ENETUNREACH', 'ETIMEDOUT', 'EPIPE'])
+
+function isMiniMaxRetryable(error: unknown): boolean {
+  if (error instanceof ImageGenHttpError) {
+    return [502, 503, 504].includes(error.status)
+  }
+  if (error instanceof Error) {
+    const code = (error as { code?: string }).code
+    if (typeof code === 'string' && RETRYABLE_NODE_CODES.has(code)) return true
+  }
+  return false
 }
 
 function telemetry(startedAt: number, provider: string): Record<string, unknown> {
@@ -702,3 +798,6 @@ function pickString(value: unknown): string | undefined {
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
+
+// Exported for testing
+export { controllableTimeout, isMiniMaxRetryable, retryOnce }

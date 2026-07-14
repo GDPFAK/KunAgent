@@ -476,6 +476,7 @@ const GOAL_NO_TOOL_REPEAT_SIMILARITY = 0.85
 const GOAL_NO_TOOL_REPEAT_MIN_LENGTH = 12
 const GOAL_NO_TOOL_REPEAT_MAX_RECOVERY_STEPS = 3
 const EMPTY_POST_TOOL_MAX_RECOVERY_STEPS = 1
+const REMAINING_WORK_MAX_RECOVERY_STEPS = 3
 
 function goalNoToolRecoveryInstruction(recoveryStep: number): string {
   return [
@@ -494,6 +495,15 @@ function emptyPostToolRecoveryInstruction(): string {
     '- The previous model response ended without a final answer after tool execution.',
     '- Continue the task now: inspect the tool result, call additional tools if needed, or provide a clear final answer.',
     '- Do not stop with an empty response.'
+  ].join('\n')
+}
+
+function remainingWorkContinuationInstruction(): string {
+  return [
+    'Work continuation:',
+    '- The previous response stopped while the task may still be incomplete.',
+    '- If there are remaining files, issues, or steps to address, continue working now by calling the appropriate tools.',
+    '- If everything is complete, provide a final summary of what was accomplished.'
   ].join('\n')
 }
 
@@ -758,6 +768,8 @@ export class AgentLoop {
   private readonly lastNoToolTextByTurn = new Map<string, string>()
   private readonly goalNoToolRecoveryStepsByTurn = new Map<string, number>()
   private readonly emptyPostToolRecoveryStepsByTurn = new Map<string, number>()
+  /** Per-turn remaining-work continuation attempts (no active goal, model stopped with text after file changes). */
+  private readonly remainingWorkRecoveryStepsByTurn = new Map<string, number>()
   /** Consecutive model steps where ALL tool results were no-ops (write skipped, suppressed, etc.). */
   private readonly stuckNoOpCounts = new Map<string, number>()
   private readonly turnFailures = new Map<string, TurnFailure>()
@@ -933,6 +945,7 @@ export class AgentLoop {
       this.goalNoToolRecoveryStepsByTurn.delete(turnId)
       this.turnMadeProgress.delete(turnId)
       this.emptyPostToolRecoveryStepsByTurn.delete(turnId)
+      this.remainingWorkRecoveryStepsByTurn.delete(turnId)
       this.delegateTaskCallCounts.delete(turnId)
       this.delegateTaskResultSummaries.delete(turnId)
       this.stuckNoOpCounts.delete(turnId)
@@ -1610,6 +1623,9 @@ export class AgentLoop {
       ...((this.emptyPostToolRecoveryStepsByTurn.get(turnId) ?? 0) > 0
         ? [emptyPostToolRecoveryInstruction()]
         : []),
+      ...((this.remainingWorkRecoveryStepsByTurn.get(turnId) ?? 0) > 0
+        ? [remainingWorkContinuationInstruction()]
+        : []),
       ...imageGenerationReferenceInstructions({
         imageAttachments: attachments.imageAttachments,
         textFallbacks: attachments.textFallbacks,
@@ -2107,6 +2123,20 @@ export class AgentLoop {
         this.lastNoToolTextByTurn.set(turnId, textAccumulator.value)
         return 'continue'
       }
+      // Remaining-work continuation (no active goal, model stopped with text after file changes)
+      if (
+        stopReason === 'stop' &&
+        !activeGoalInstruction &&
+        textAccumulator.value.trim() &&
+        hasCurrentTurnFileChange
+      ) {
+        const remainingAttempts = (this.remainingWorkRecoveryStepsByTurn.get(turnId) ?? 0) + 1
+        if (remainingAttempts <= REMAINING_WORK_MAX_RECOVERY_STEPS) {
+          this.remainingWorkRecoveryStepsByTurn.set(turnId, remainingAttempts)
+          return 'continue'
+        }
+        // Recovery attempts exhausted — let the turn end normally
+      }
       if (stopReason === 'length') {
         // The model hit its output-token ceiling and was cut off without a tool
         // call. Don't report this as a clean completion — surface a warning so
@@ -2142,6 +2172,7 @@ export class AgentLoop {
     this.lastNoToolTextByTurn.delete(turnId)
     this.goalNoToolRecoveryStepsByTurn.delete(turnId)
     this.emptyPostToolRecoveryStepsByTurn.delete(turnId)
+    this.remainingWorkRecoveryStepsByTurn.delete(turnId)
     const dispatched = await this.dispatchToolCalls({
       calls: completedToolCalls,
       threadId,

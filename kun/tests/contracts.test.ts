@@ -496,7 +496,7 @@ describe('cli', () => {
     expect(config.attachments.textFallbackPreferredMimeType).toBe('image/webp')
     expect(config.memory.scopes).toEqual(['user', 'workspace', 'project'])
     expect(config.imageGen.enabled).toBe(false)
-    expect(config.imageGen.timeoutMs).toBe(180_000)
+    expect(config.imageGen.timeoutMs).toBe(300_000)
     expect(config.imageGen.maxReferenceImages).toBe(4)
   })
 

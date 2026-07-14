@@ -328,7 +328,7 @@ export const ImageGenCapabilityConfig = CapabilityToggleConfig.extend({
   apiKey: z.string().min(1).optional(),
   model: z.string().min(1).optional(),
   defaultSize: z.string().min(1).optional(),
-  timeoutMs: z.number().int().positive().default(180_000),
+  timeoutMs: z.number().int().positive().default(300_000),
   maxReferenceImages: z.number().int().positive().max(8).default(4)
 }).strict()
 export type ImageGenCapabilityConfig = z.infer<typeof ImageGenCapabilityConfig>
