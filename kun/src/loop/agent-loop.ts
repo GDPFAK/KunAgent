@@ -203,6 +203,10 @@ export function canUpgradeThreadTitle(thread: { title?: string | null; titleAuto
   if (thread.titleAuto === true) return true
   return isAutoTitleableThreadTitle(thread.title)
 }
+const MAX_DELEGATE_TASK_CALLS_PER_TURN = 8
+/** Minimum child tool invocations required for delegate_task to count as "progress" (Layer 3). */
+const MAX_DELEGATE_TASK_TOOL_INVOCATIONS_FOR_PROGRESS = 1
+const DELEGATE_TASK_LOOP_WINDOW = 3
 const MAX_TOOL_CATALOG_SNAPSHOTS = 256
 
 type TurnFailure = {
@@ -754,9 +758,17 @@ export class AgentLoop {
   private readonly lastNoToolTextByTurn = new Map<string, string>()
   private readonly goalNoToolRecoveryStepsByTurn = new Map<string, number>()
   private readonly emptyPostToolRecoveryStepsByTurn = new Map<string, number>()
+  /** Consecutive model steps where ALL tool results were no-ops (write skipped, suppressed, etc.). */
+  private readonly stuckNoOpCounts = new Map<string, number>()
   private readonly turnFailures = new Map<string, TurnFailure>()
   /** Turns that executed at least one real (non-goal-status) tool call. */
   private readonly turnMadeProgress = new Set<string>()
+  // ---- delegate_task loop protection (Layers 2-4) ----
+  /** Per-turn delegate_task call count (Layer 2). */
+  private readonly delegateTaskCallCounts = new Map<string, number>()
+  /** Per-turn delegate_task result summaries for loop detection (Layer 4). */
+  private readonly delegateTaskResultSummaries = new Map<string, Array<{ summary: string; isError: boolean; toolInvocations: number }>>()
+  // ----------------------------------------------------
   /** Cumulative prompt tokens consumed by goal auto-resume attempts per thread. */
   private readonly goalResumeTokens = new Map<string, number>()
   /** Cached tool specs per turn, refreshed every 5 model steps + on drift. */
@@ -921,6 +933,9 @@ export class AgentLoop {
       this.goalNoToolRecoveryStepsByTurn.delete(turnId)
       this.turnMadeProgress.delete(turnId)
       this.emptyPostToolRecoveryStepsByTurn.delete(turnId)
+      this.delegateTaskCallCounts.delete(turnId)
+      this.delegateTaskResultSummaries.delete(turnId)
+      this.stuckNoOpCounts.delete(turnId)
       this.turnFailures.delete(turnId)
       this.cachedTurnTools.delete(turnId)
       await this.runTurnEndHooks(threadId, turnId, finalStatus ?? 'failed', finalError)
@@ -2167,10 +2182,108 @@ export class AgentLoop {
     const context = this.createToolContext(input)
     let index = 0
     let executedAny = false
+    // Tracks whether ALL tool calls in this dispatch round produced no-op results.
+    // When true at the end, we check the stuck-NoOp counter to break the loop.
+    let stepAllNoOp = true
+
+    /** Check whether a tool result counts as "real work" (not suppressed / no-op). */
+    const resultIsRealWork = (result: ToolHostResult): boolean => {
+      if (result.item.kind !== 'tool_result') return false
+      if (result.item.isError) return false
+      const output = result.item.output
+      if (!output || typeof output !== 'object') return true // unknown → assume real
+      const raw = output as Record<string, unknown>
+      const info = typeof raw.info === 'string' ? raw.info : ''
+      // write tool: bytes_written === 0 with skip/unchanged info → no-op
+      if (typeof raw.bytes_written === 'number' && raw.bytes_written === 0 && info) return false
+      // edit tool: replacements === 0 → no-op
+      if (typeof raw.replacements === 'number' && raw.replacements === 0) return false
+      return true
+    }
+
     const markProgress = (toolName: string): void => {
+      // Layer 3: delegate_task does NOT automatically mark progress — the
+      // result must be inspected after execution to determine if real work
+      // was done (see handleDelegateTaskProgress after persistToolCallResult).
+      if (toolName === DELEGATE_TASK_TOOL_NAME) return
       if (!GOAL_NON_PROGRESS_TOOL_NAMES.has(toolName)) {
         this.turnMadeProgress.add(input.turnId)
       }
+    }
+
+    // ── Helper: inspect a delegate_task result and conditionally mark progress ──
+    const handleDelegateTaskProgress = (result: ToolHostResult): void => {
+      if (result.item.kind !== 'tool_result') return
+      const output = result.item.output
+      if (!output || typeof output !== 'object') return
+      const raw = output as Record<string, unknown>
+      const isError = result.item.isError === true
+      const status = raw.status
+      const toolInvocations = typeof raw.toolInvocations === 'number' ? raw.toolInvocations : 0
+      // Real progress: child completed successfully AND called at least one tool.
+      if (!isError && status !== 'failed' && status !== 'aborted' && toolInvocations > MAX_DELEGATE_TASK_TOOL_INVOCATIONS_FOR_PROGRESS) {
+        this.turnMadeProgress.add(input.turnId)
+      }
+    }
+
+    // ── Helper: check delegate_task call count cap (Layer 2) ──
+    const checkDelegateTaskCap = (turnId: string): { ok: true } | { ok: false; reason: string } => {
+      const count = (this.delegateTaskCallCounts.get(turnId) ?? 0) + 1
+      if (count > MAX_DELEGATE_TASK_CALLS_PER_TURN) {
+        return {
+          ok: false,
+          reason:
+            `delegate_task called ${count} times this turn (max ${MAX_DELEGATE_TASK_CALLS_PER_TURN}). ` +
+            'The per-turn delegation cap prevented another parallel delegation. Consolidate the remaining work into fewer delegations or continue directly.'
+        }
+      }
+      this.delegateTaskCallCounts.set(turnId, count)
+      return { ok: true }
+    }
+
+    // ── Helper: check delegate_task result loop (Layer 4) ──
+    const checkDelegateTaskLoop = (turnId: string): { ok: true } | { ok: false; reason: string } => {
+      const records = this.delegateTaskResultSummaries.get(turnId)
+      if (!records || records.length < DELEGATE_TASK_LOOP_WINDOW) return { ok: true }
+      const window = records.slice(-DELEGATE_TASK_LOOP_WINDOW)
+      // Loop detected when all N most-recent results share the same error/outcome pattern.
+      const allFailed = window.every((r) => r.isError)
+      const allIdle = window.every((r) => r.toolInvocations <= MAX_DELEGATE_TASK_TOOL_INVOCATIONS_FOR_PROGRESS)
+      if (allFailed || allIdle) {
+        return {
+          ok: false,
+          reason:
+            `delegate_task was suppressed: the last ${DELEGATE_TASK_LOOP_WINDOW} delegations ` +
+            (allFailed
+              ? 'all failed or aborted. Fix the root cause before retrying.'
+              : 'returned without making meaningful progress. Consolidate the remaining work or continue directly.')
+        }
+      }
+      return { ok: true }
+    }
+
+    // ── Helper: record delegate_task result for loop detection (Layer 4) ──
+    const recordDelegateTaskResult = (turnId: string, result: ToolHostResult): void => {
+      if (result.item.kind !== 'tool_result') return
+      const output = result.item.output
+      const raw = output && typeof output === 'object' ? (output as Record<string, unknown>) : {}
+      const summary = typeof raw.summary === 'string' ? raw.summary : ''
+      const isError = result.item.isError === true
+      const toolInvocations = typeof raw.toolInvocations === 'number' ? raw.toolInvocations : 0
+      const records = this.delegateTaskResultSummaries.get(turnId) ?? []
+      records.push({ summary, isError, toolInvocations })
+      this.delegateTaskResultSummaries.set(turnId, records)
+    }
+
+    // ── Helper: suppress a delegate_task call with a reason ──
+    const suppressDelegateTask = async (call: ToolCallLike, reason: string): Promise<void> => {
+      executedAny = true
+      await this.persistSuppressedToolCall({
+        threadId: input.threadId,
+        turnId: input.turnId,
+        call,
+        reason
+      })
     }
 
     while (index < input.calls.length) {
@@ -2191,6 +2304,24 @@ export class AgentLoop {
         continue
       }
 
+      // ── Layer 2 + Layer 4: pre-flight checks for delegate_task ──
+      if (call.toolName === DELEGATE_TASK_TOOL_NAME) {
+        const capCheck = checkDelegateTaskCap(input.turnId)
+        if (!capCheck.ok) {
+          await suppressDelegateTask(call, capCheck.reason)
+          index += 1
+          continue
+        }
+        const loopCheck = checkDelegateTaskLoop(input.turnId)
+        if (!loopCheck.ok) {
+          // Roll back the cap increment since we're not actually executing.
+          this.delegateTaskCallCounts.set(input.turnId, (this.delegateTaskCallCounts.get(input.turnId) ?? 1) - 1)
+          await suppressDelegateTask(call, loopCheck.reason)
+          index += 1
+          continue
+        }
+      }
+
       if (!this.isParallelSafeToolCall(call, input.approvalPolicy, input.toolProviderKinds)) {
         const result = await this.executeToolCallSafely({
           threadId: input.threadId,
@@ -2201,6 +2332,12 @@ export class AgentLoop {
         executedAny = true
         markProgress(call.toolName)
         await this.persistToolCallResult(input.threadId, input.turnId, call, result)
+        // Layer 3 + Layer 4: post-execution handling for delegate_task
+        if (call.toolName === DELEGATE_TASK_TOOL_NAME) {
+          handleDelegateTaskProgress(result)
+          recordDelegateTaskResult(input.turnId, result)
+        }
+        if (resultIsRealWork(result)) stepAllNoOp = false
         index += 1
         continue
       }
@@ -2227,6 +2364,23 @@ export class AgentLoop {
           break
         }
 
+        // ── Layer 2 + Layer 4: pre-flight for each delegate_task in a batch ──
+        if (next.toolName === DELEGATE_TASK_TOOL_NAME) {
+          const capCheck = checkDelegateTaskCap(input.turnId)
+          if (!capCheck.ok) {
+            suppressedAfterBatch = { call: next, reason: capCheck.reason }
+            index += 1
+            break
+          }
+          const loopCheck = checkDelegateTaskLoop(input.turnId)
+          if (!loopCheck.ok) {
+            this.delegateTaskCallCounts.set(input.turnId, (this.delegateTaskCallCounts.get(input.turnId) ?? 1) - 1)
+            suppressedAfterBatch = { call: next, reason: loopCheck.reason }
+            index += 1
+            break
+          }
+        }
+
         batch.push(next)
         index += 1
       }
@@ -2249,6 +2403,12 @@ export class AgentLoop {
         if (result.status === 'rejected') throw result.reason
         markProgress(batchCall.toolName)
         await this.persistToolCallResult(input.threadId, input.turnId, batchCall, result.value)
+        // Layer 3 + Layer 4: post-execution handling for delegate_task
+        if (batchCall.toolName === DELEGATE_TASK_TOOL_NAME && result.status === 'fulfilled') {
+          handleDelegateTaskProgress(result.value)
+          recordDelegateTaskResult(input.turnId, result.value)
+        }
+        if (result.status === 'fulfilled' && resultIsRealWork(result.value)) stepAllNoOp = false
       }
 
       if (suppressedAfterBatch) {
@@ -2259,6 +2419,29 @@ export class AgentLoop {
           reason: suppressedAfterBatch.reason
         })
       }
+    }
+
+    // ── Stuck-no-op detection: if all tools in this step produced no-op results, ──
+    // increment the counter; after 2 consecutive all-no-op steps, force-stop.
+    if (executedAny && stepAllNoOp) {
+      const count = (this.stuckNoOpCounts.get(input.turnId) ?? 0) + 1
+      this.stuckNoOpCounts.set(input.turnId, count)
+      if (count >= 2) {
+        await this.opts.events.record({
+          kind: 'error',
+          threadId: input.threadId,
+          turnId: input.turnId,
+          message:
+            `Turn stopped: ${count} consecutive model steps produced no meaningful tool results. ` +
+            'All tool calls were suppressed or resulted in no-ops (file already up-to-date, write cap hit, etc.).',
+          code: 'stuck_noop_loop',
+          severity: 'warning'
+        })
+        return 'all_suppressed'
+      }
+    } else if (executedAny && !stepAllNoOp) {
+      // At least one tool did real work → reset the stuck counter.
+      this.stuckNoOpCounts.delete(input.turnId)
     }
 
     return executedAny ? 'continue' : 'all_suppressed'

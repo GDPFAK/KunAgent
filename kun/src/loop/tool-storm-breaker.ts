@@ -14,7 +14,7 @@ type RecentToolCall = {
 const DEFAULT_WINDOW_SIZE = 8
 const DEFAULT_THRESHOLD = 3
 const MUTATING_TOOL_NAMES = new Set(['write', 'edit', 'edit_diff', 'apply_patch', 'delete', 'move'])
-const STORM_EXEMPT_TOOL_NAMES = new Set(['request_user_input', 'user_input', 'delegate_task'])
+const STORM_EXEMPT_TOOL_NAMES = new Set(['request_user_input', 'user_input'])
 
 /**
  * Prevents repeated identical tool calls from inflating dynamic history

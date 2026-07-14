@@ -267,9 +267,45 @@ export function getReadClassification(absolutePath: string, workspace: string): 
 }
 
 export function formatDimensionNote(image: ResizedImageResult): string | undefined {
-  if (!image.wasResized || !image.originalWidth || !image.originalHeight) return undefined
+  if (!image.originalWidth || !image.originalHeight) return undefined
   const scale = image.originalWidth / image.width
-  return `[Image: original ${image.originalWidth}x${image.originalHeight}, displayed at ${image.width}x${image.height}. Multiply coordinates by ${scale.toFixed(2)} to map to original image.]`
+  const ratio = image.originalWidth / image.originalHeight
+  const base = `[Image: original ${image.originalWidth}x${image.originalHeight}, aspect ratio ${ratio.toFixed(2)}:1`
+  const coordPart = image.wasResized
+    ? `, displayed at ${image.width}x${image.height}. Multiply coordinates by ${scale.toFixed(2)} to map to original image.`
+    : '.'
+  // Detailed layout guidance for design/code-replication images (≥600×400).
+  // Three tiers: compact for small images, standard for medium, full for large.
+  const layoutHint = image.originalWidth >= 600 && image.originalHeight >= 400
+    ? image.originalWidth >= 1000 && image.originalHeight >= 600
+      ? [
+          ' REQUIRED WORKFLOW — do NOT go straight to code:',
+          '',
+          ' STEP 1 — OUTPUT layout analysis as text:',
+          '  · Identify every section (topbar, sidebar, main panels, footer) and list them with estimated pixel width/height.',
+          '  · Count columns in card grids. If 3 cards side by side, state "exactly 3 columns".',
+          '  · Measure gaps between sections (sidebar-to-main, card-to-card) in px.',
+          '  · Pick 5-8 colors (sidebar bg, card bg, accent, text, border) and write exact hex values.',
+          '  · Note font sizes in px (headings vs body vs labels) and weights.',
+          '  · List every interactive element (buttons, badges, avatars, dropdowns).',
+          '  Write this analysis as a block in your response before calling any tool.',
+          '',
+          ' STEP 2 — Write HTML + CSS using ONLY the measurements from STEP 1:',
+          '  · Use explicit grid-template-columns (e.g. 220px 1fr) not flex:1 guesses.',
+          '  · Use the exact gap/color/font values from your analysis.',
+          '  · Every element listed in STEP 1 must appear in the code.',
+          '',
+          ' STEP 3 — After writing the code, read the reference image AGAIN:',
+          '  · Call `read` on the same image file a second time.',
+          '  · Cross-check every CSS value against what you see in the image.',
+          '  · If any proportion, gap, color, or font is wrong, edit the file immediately.',
+          '  · Repeat until all measurements match.',
+        ].join('\n')
+      : [
+          ' LAYOUT WORKFLOW: First OUTPUT a measurement analysis (section widths, column counts, gaps, colors, font sizes). Then write code using ONLY those measurements. Then read the image again and cross-check each CSS value.',
+        ].join('\n')
+    : ''
+  return `${base}${coordPart}${layoutHint}]`
 }
 
 export function describeKind(mode: TruncateMode): string {

@@ -1,4 +1,5 @@
 import { dirname } from 'node:path'
+import { readFile } from 'node:fs/promises'
 import { LocalToolHost, type LocalTool } from './local-tool-host.js'
 import {
   applyEditsToNormalizedContent,
@@ -16,6 +17,40 @@ import { defaultEditLocalToolOperations, defaultWriteLocalToolOperations } from 
 import { parseEditInstructions, resolveWorkspacePath, withToolBoundary } from './builtin-tool-utils.js'
 import { assertCanWritePath } from './sandbox-policy.js'
 import { tryGetLspDiagnostics, isCodeFile } from './lsp-diagnostics.js'
+
+/** Max real writes (edit or write) to the same absolute path within one turn.
+ *  Prevents the model from repeatedly rewriting the same file in a loop.
+ *  Set to 8 to leave room for iterative layout refinement (design tasks). */
+const MAX_WRITES_PER_FILE_PER_TURN = 8
+
+// ── Per-turn, per-file write counter ──
+// Key: `${turnId}:${absolutePath}`. Tracks how many times each file has been
+// actually *modified* (not just content-identical checked) in the current turn.
+// Module-level is fine: the AgentLoop clears turn state naturally, and the map
+// is bounded by concurrent turns × files per turn.
+const fileWriteCounters = new Map<string, number>()
+
+function writeCapKey(turnId: string, absolutePath: string): string {
+  return `${turnId}::${absolutePath}`
+}
+
+/**
+ * Check whether the file has exceeded its per-turn write budget.
+ * Returns `true` when the write should proceed, `false` when capped.
+ * When a write is actually performed, the caller must call
+ * {@link incrementWriteCounter} to update the budget.
+ */
+function canWriteToFile(turnId: string, absolutePath: string): boolean {
+  const key = writeCapKey(turnId, absolutePath)
+  const count = fileWriteCounters.get(key) ?? 0
+  return count < MAX_WRITES_PER_FILE_PER_TURN
+}
+
+/** Record that a real (content-changing) write happened. */
+function incrementWriteCounter(turnId: string, absolutePath: string): void {
+  const key = writeCapKey(turnId, absolutePath)
+  fileWriteCounters.set(key, (fileWriteCounters.get(key) ?? 0) + 1)
+}
 
 /**
  * Arguments that failed JSON parsing arrive as `{ __raw: "<partial json>" }`
@@ -64,6 +99,37 @@ export function createWriteLocalTool(_options: WriteLocalToolOptions = {}): Loca
       const { absolutePath, relativePath } = await resolveWorkspacePath(rawPath, context)
       assertCanWritePath(absolutePath, context)
       return withFileMutationQueue(absolutePath, async () => {
+        // ── Per-file write frequency cap: prevent loop rewrites ──
+        if (!canWriteToFile(context.turnId, absolutePath)) {
+          return {
+            output: {
+              path: absolutePath,
+              relative_path: relativePath,
+              bytes_written: 0,
+              info:
+                `write to this file was skipped (file modified ${MAX_WRITES_PER_FILE_PER_TURN} times this turn). ` +
+                'Consolidate remaining changes into fewer edits or start a new turn.'
+            }
+          }
+        }
+
+        // ── Content-identical guard: skip write when file already has the same content ──
+        try {
+          const existing = await readFile(absolutePath, 'utf8')
+          if (existing === content) {
+            return {
+              output: {
+                path: absolutePath,
+                relative_path: relativePath,
+                bytes_written: 0,
+                info: 'content unchanged — file already contains the provided content'
+              }
+            }
+          }
+        } catch {
+          // File doesn't exist or can't be read; proceed with write.
+        }
+        incrementWriteCounter(context.turnId, absolutePath)
         await mkdirOp(dirname(absolutePath))
         await writeFileOp(absolutePath, content)
         return {
@@ -122,11 +188,38 @@ export function createEditLocalTool(_options: EditLocalToolOptions = {}): LocalT
       const { absolutePath, relativePath } = await resolveWorkspacePath(rawPath, context)
       assertCanWritePath(absolutePath, context)
       const editResult = await withFileMutationQueue(absolutePath, async () => {
+        // ── Per-file write frequency cap: prevent loop rewrites ──
+        if (!canWriteToFile(context.turnId, absolutePath)) {
+          return {
+            output: {
+              path: absolutePath,
+              relative_path: relativePath,
+              replacements: 0,
+              bytes_written: 0,
+              info:
+                `edit to this file was skipped (file modified ${MAX_WRITES_PER_FILE_PER_TURN} times this turn). ` +
+                'Consolidate remaining changes into fewer edits or start a new turn.'
+            }
+          }
+        }
         const rawSource = await readFileOp(absolutePath)
         const { bom, text: source } = stripBom(rawSource)
         const lineEnding = detectLineEnding(source)
         const normalizedSource = normalizeToLF(source)
         const { baseContent, newContent } = applyEditsToNormalizedContent(normalizedSource, edits, relativePath)
+        // ── No-op edit guard: skip write when edits produced no change ──
+        if (baseContent === newContent) {
+          return {
+            output: {
+              path: absolutePath,
+              relative_path: relativePath,
+              replacements: 0,
+              bytes_written: 0,
+              info: 'no changes applied — the target content already matches the edits'
+            }
+          }
+        }
+        incrementWriteCounter(context.turnId, absolutePath)
         const next = bom + restoreLineEndings(newContent, lineEnding)
         await writeFileOp(absolutePath, next)
         const diff = generateDisplayDiff(baseContent, newContent)

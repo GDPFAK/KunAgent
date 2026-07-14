@@ -22,7 +22,7 @@ export function createReadLocalTool(options: ReadLocalToolOptions = {}): LocalTo
   const lspIntegration = options.lspIntegration !== false
   return LocalToolHost.defineTool({
     name: 'read',
-    description: 'Read a file from the workspace. Supports optional line offset and limit for large files. For code files (.ts, .js, .py, .rs, .go, etc.), the response includes an lsp field with diagnostics from the language server — use these directly, you do NOT need to call lsp separately.',
+    description: 'Read a file from the workspace. Supports optional line offset and limit for large files. For code files (.ts, .js, .py, .rs, .go, etc.), the response includes an lsp field with diagnostics from the language server �?use these directly, you do NOT need to call lsp separately.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -83,6 +83,7 @@ export function createReadLocalTool(options: ReadLocalToolOptions = {}): LocalTo
               mime_type: resized.mimeType,
               width: resized.width,
               height: resized.height,
+              aspect_ratio: resized.originalWidth && resized.originalHeight ? Number((resized.originalWidth / resized.originalHeight).toFixed(2)) : null,
               byte_size: fileBuffer.length,
               data_base64: resized.dataBase64,
               note: dimensionNote
@@ -101,6 +102,7 @@ export function createReadLocalTool(options: ReadLocalToolOptions = {}): LocalTo
             mime_type: image.mimeType,
             width: image.width ?? null,
             height: image.height ?? null,
+            aspect_ratio: image.width && image.height ? Number((image.width / image.height).toFixed(2)) : null,
             byte_size: fileBuffer.length,
             data_base64: fileBuffer.toString('base64'),
             note: `Read image file [${image.mimeType}]`,

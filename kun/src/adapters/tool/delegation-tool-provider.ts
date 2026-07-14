@@ -16,20 +16,20 @@ export function buildDelegationToolProviders(runtime: DelegationRuntime | undefi
     tools: [
       LocalToolHost.defineTool({
         name: 'delegate_task',
-        description: buildDelegateTaskDescription(runtime, profiles),
+        description: 'Assign a sub-task to a child agent that runs independently with its own model context and tools. Use for any sub-task that can be isolated: research, file changes, refactoring, or analysis. The child returns a summary and its results are visible in the conversation.',
         inputSchema: {
           type: 'object',
           properties: {
-            label: { type: 'string', description: 'A 2-4 word name for this subagent, shown in the UI as its title (e.g. "审查登录流程", "fix failing test", "greet user"). ALWAYS provide it so the user can tell subagents apart, especially when delegating several in parallel. Prefer a distinct label per call.' },
-            prompt: { type: 'string', description: 'The task for the child agent.' },
-            workspace: { type: 'string' },
-            model: { type: 'string', description: 'Override the child model. Defaults to the profile model or server default.' },
+            label: { type: 'string', description: 'Short name for this subagent (2-4 words), shown in the UI. Always provide so results are identifiable.' },
+            prompt: { type: 'string', description: 'The full task description for the child agent. Be self-contained: include all context, file paths, and requirements the child needs to complete the task without referencing the parent conversation.' },
+            workspace: { type: 'string', description: 'Workspace root path. Defaults to the parent workspace.' },
+            model: { type: 'string', description: 'Override the child model. Defaults to the profile model or main model.' },
             profile: profileNames.length
-              ? { type: 'string', enum: profileNames, description: 'Subagent role to apply (model, preamble, tool policy).' }
-              : { type: 'string', description: 'Subagent role to apply (model, preamble, tool policy).' },
+              ? { type: 'string', enum: profileNames, description: 'Subagent role. Determines tool access: "explore"=read-only, "coder"=full access.' }
+              : { type: 'string', description: 'Subagent role. Determines tool access: "explore"=read-only, "coder"=full access.' },
             detach: {
               type: 'boolean',
-              description: 'Fire-and-forget. The call returns immediately with a queued/running record; the child keeps executing in the background and can be checked via diagnostics or aborted from the GUI.'
+              description: 'Fire-and-forget: the child runs in background and reports progress via the UI. Use for slow operations like batch migrations.'
             }
           },
           required: ['prompt'],
@@ -114,36 +114,4 @@ export function buildDelegationToolProviders(runtime: DelegationRuntime | undefi
       })
     ]
   }]
-}
-
-function buildDelegateTaskDescription(
-  runtime: DelegationRuntime,
-  profiles: { name: string; mode: string; toolPolicy: string; model?: string; providerId?: string; description?: string }[]
-): string {
-  const lines = [
-    'Run independent sub-tasks in parallel child agents. CRITICAL: to run children IN PARALLEL, issue MULTIPLE delegate_task calls in a SINGLE response — each gets its own worker and they execute concurrently. Issuing one delegate_task per turn runs them sequentially, losing the parallelism benefit. Each child is an isolated Worker thread with its own model context, tool set, and crash recovery.',
-    '',
-    'Example — call multiple in one response for parallelism:',
-    '  delegate_task({ label: "调研现有API", profile: "research", prompt: "搜索项目中所有API路由定义" })',
-    '  delegate_task({ label: "编写新模块", profile: "coder", prompt: "基于文档实现用户管理模块" })',
-    '',
-    'WHEN TO USE — three patterns where delegation saves turns and time:',
-    '',
-    '1. "Research + Implement" split: Delegate research/exploration to a read-only child (profile: "research" / "explore") while you keep designing in the main thread. The child returns findings you act on — no context-switching.',
-    '2. "Split a complex task": Instead of implementing files A, B, C sequentially, delegate each to its own child in one message. They run in parallel; you get three summaries back at once. For page-replication from a screenshot: read the image in the main thread to capture the design spec, then delegate the HTML/CSS implementation to a child so the image data does not crowd your working context.',
-    '3. "Background long-runners": Offload a slow operation (batch migration, large refactor, heavy test run) with detach=true. It reports progress via GUI while you continue the main conversation.',
-    '',
-    'Read-only profiles (research, explore) are cheap — they use less context and have no write/exec permission. Default profile when none specified: coder (full read/write/shell access).',
-    `Available profiles: ${
-      profiles.length
-        ? profiles
-            .map((p) => `${p.name} (${p.toolPolicy}${p.model ? `, ${p.model}` : ''}${p.providerId ? ` @${p.providerId}` : ''}${p.description ? ` — ${p.description}` : ''}`)
-            .join('; ')
-        : 'coder (inherit, full access)'
-    }.`
-  ]
-  if (runtime.defaultProfileName) {
-    lines.push(`Default profile when omitted: ${runtime.defaultProfileName}.`)
-  }
-  return lines.join(' ')
 }
