@@ -10,6 +10,7 @@ import type { ApprovalPolicy, SandboxMode } from '../contracts/policy.js'
 import type { RuntimeTuningConfig } from '../config/kun-config.js'
 import { AgentLoop } from '../loop/agent-loop.js'
 import { normalizeRoleReasoningEffort } from '../loop/reasoning-effort.js'
+import type { ModelContextProfile } from '../loop/model-context-profile.js'
 import type { ContextCompactionConfig, ModelConfig } from '../loop/model-context-profile.js'
 import { ContextCompactor } from '../loop/context-compactor.js'
 import { InflightTracker } from '../loop/inflight-tracker.js'
@@ -41,6 +42,8 @@ export type ChildAgentExecutorOptions = {
   runtime?: RuntimeTuningConfig
   nowIso?: () => string
   modelCapabilities?: (model: string) => ModelCapabilityMetadata
+  /** All registered model context profiles — forwarded to the child AgentLoop for vision dispatch. */
+  modelProfiles?: readonly ModelContextProfile[]
   skillRuntime?: SkillRuntime
   memoryStore?: MemoryStore
   /** Capability flags — passed through to the child AgentLoop so role routing works in subagents. */
@@ -161,6 +164,7 @@ export function createChildAgentExecutor(options: ChildAgentExecutorOptions): Ch
       ...(blockedProviderIds ? { blockedProviderIds } : {}),
       ...(blockedSkillIds ? { blockedSkillIds } : {}),
       ...(options.modelCapabilities ? { modelCapabilities: options.modelCapabilities } : {}),
+      ...(options.modelProfiles ? { modelProfiles: options.modelProfiles } : {}),
       ...(options.skillRuntime ? { skillRuntime: options.skillRuntime } : {}),
       ...(options.memoryStore ? { memoryStore: options.memoryStore } : {}),
       ...(options.contextCompaction ? { contextCompaction: options.contextCompaction } : {}),

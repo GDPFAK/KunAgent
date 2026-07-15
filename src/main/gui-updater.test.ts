@@ -87,21 +87,60 @@ afterEach(() => {
   vi.resetModules()
 })
 
-function platformManifestName(): string {
-  if (process.platform === 'darwin') return 'latest-mac.yml'
-  if (process.platform === 'linux') return 'latest-linux.yml'
-  return 'latest.yml'
-}
-
 describe('checkGuiUpdate feed URL', () => {
-  it('prefers the kun-agent update feed when metadata is reachable', async () => {
+  it('uses GitHub provider feed when metadata is reachable', async () => {
     process.env.DEEPSEEK_GUI_ALLOW_UNSIGNED_UPDATES = '1'
-    const fetchMock = vi.fn().mockResolvedValue({ ok: true })
+    updater.checkForUpdates.mockResolvedValue({
+      updateInfo: { version: '0.2.0', releaseDate: '2026-06-06T00:00:00.000Z' },
+      isUpdateAvailable: true
+    })
+
+    const module = await import('./gui-updater')
+    module.initializeGuiUpdater(() => null, () => 'stable')
+
+    await expect(module.checkGuiUpdate('stable')).resolves.toMatchObject({
+      ok: true,
+      latestVersion: '0.2.0',
+      hasUpdate: true
+    })
+    expect(updater.setFeedURL).toHaveBeenLastCalledWith({
+      provider: 'github',
+      owner: 'GDPFAK',
+      repo: 'KunAgent'
+    })
+  })
+
+  it('falls back to manual (GitHub API) update check when auto update is disallowed', async () => {
+    delete process.env.DEEPSEEK_GUI_ALLOW_UNSIGNED_UPDATES
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ tag_name: 'v0.2.0', published_at: '2026-06-06T00:00:00.000Z' })
+    })
     vi.stubGlobal('fetch', fetchMock)
     updater.checkForUpdates.mockResolvedValue({
       updateInfo: { version: '0.2.0', releaseDate: '2026-06-06T00:00:00.000Z' },
       isUpdateAvailable: true
     })
+
+    const module = await import('./gui-updater')
+    module.initializeGuiUpdater(() => null, () => 'stable')
+
+    const result = await module.checkGuiUpdate('stable')
+    expect(result.ok).toBe(true)
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://api.github.com/repos/GDPFAK/KunAgent/releases/latest',
+      expect.any(Object)
+    )
+  })
+
+  it('uses manual update when checkForUpdates returns no result', async () => {
+    process.env.DEEPSEEK_GUI_ALLOW_UNSIGNED_UPDATES = '1'
+    updater.checkForUpdates.mockResolvedValue(null as never)
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ tag_name: 'v0.2.0', published_at: '2026-06-06T00:00:00.000Z' })
+    })
+    vi.stubGlobal('fetch', fetchMock)
 
     const module = await import('./gui-updater')
     module.initializeGuiUpdater(() => null, () => 'stable')
@@ -112,89 +151,9 @@ describe('checkGuiUpdate feed URL', () => {
       hasUpdate: true
     })
     expect(fetchMock).toHaveBeenCalledWith(
-      `https://www.kun-agent.com/api/r2/deepseek-gui/channels/stable/latest/${platformManifestName()}`,
-      expect.objectContaining({ method: 'HEAD' })
+      'https://api.github.com/repos/GDPFAK/KunAgent/releases/latest',
+      expect.any(Object)
     )
-    expect(updater.setFeedURL).toHaveBeenLastCalledWith({
-      provider: 'generic',
-      url: 'https://www.kun-agent.com/api/r2/deepseek-gui/channels/stable/latest/'
-    })
-  })
-
-  it('falls back to the bare kun-agent feed before the legacy feed', async () => {
-    process.env.DEEPSEEK_GUI_ALLOW_UNSIGNED_UPDATES = '1'
-    const fetchMock = vi.fn()
-      .mockResolvedValueOnce({ ok: false, status: 404 })
-      .mockResolvedValueOnce({ ok: true })
-    vi.stubGlobal('fetch', fetchMock)
-    updater.checkForUpdates.mockResolvedValue({
-      updateInfo: { version: '0.2.0', releaseDate: '2026-06-06T00:00:00.000Z' },
-      isUpdateAvailable: true
-    })
-
-    const module = await import('./gui-updater')
-    module.initializeGuiUpdater(() => null, () => 'stable')
-
-    await expect(module.checkGuiUpdate('stable')).resolves.toMatchObject({
-      ok: true,
-      latestVersion: '0.2.0',
-      hasUpdate: true
-    })
-    expect(fetchMock).toHaveBeenNthCalledWith(
-      1,
-      `https://www.kun-agent.com/api/r2/deepseek-gui/channels/stable/latest/${platformManifestName()}`,
-      expect.objectContaining({ method: 'HEAD' })
-    )
-    expect(fetchMock).toHaveBeenNthCalledWith(
-      2,
-      `https://kun-agent.com/api/r2/deepseek-gui/channels/stable/latest/${platformManifestName()}`,
-      expect.objectContaining({ method: 'HEAD' })
-    )
-    expect(updater.setFeedURL).toHaveBeenLastCalledWith({
-      provider: 'generic',
-      url: 'https://kun-agent.com/api/r2/deepseek-gui/channels/stable/latest/'
-    })
-  })
-
-  it('falls back to the legacy deepseek-gui feed when both kun-agent feeds are unavailable', async () => {
-    process.env.DEEPSEEK_GUI_ALLOW_UNSIGNED_UPDATES = '1'
-    const fetchMock = vi.fn()
-      .mockResolvedValueOnce({ ok: false, status: 404 })
-      .mockResolvedValueOnce({ ok: false, status: 404 })
-      .mockResolvedValueOnce({ ok: true })
-    vi.stubGlobal('fetch', fetchMock)
-    updater.checkForUpdates.mockResolvedValue({
-      updateInfo: { version: '0.2.0', releaseDate: '2026-06-06T00:00:00.000Z' },
-      isUpdateAvailable: true
-    })
-
-    const module = await import('./gui-updater')
-    module.initializeGuiUpdater(() => null, () => 'stable')
-
-    await expect(module.checkGuiUpdate('stable')).resolves.toMatchObject({
-      ok: true,
-      latestVersion: '0.2.0',
-      hasUpdate: true
-    })
-    expect(fetchMock).toHaveBeenNthCalledWith(
-      1,
-      `https://www.kun-agent.com/api/r2/deepseek-gui/channels/stable/latest/${platformManifestName()}`,
-      expect.objectContaining({ method: 'HEAD' })
-    )
-    expect(fetchMock).toHaveBeenNthCalledWith(
-      2,
-      `https://kun-agent.com/api/r2/deepseek-gui/channels/stable/latest/${platformManifestName()}`,
-      expect.objectContaining({ method: 'HEAD' })
-    )
-    expect(fetchMock).toHaveBeenNthCalledWith(
-      3,
-      `https://deepseek-gui.com/api/r2/deepseek-gui/channels/stable/latest/${platformManifestName()}`,
-      expect.objectContaining({ method: 'HEAD' })
-    )
-    expect(updater.setFeedURL).toHaveBeenLastCalledWith({
-      provider: 'generic',
-      url: 'https://deepseek-gui.com/api/r2/deepseek-gui/channels/stable/latest/'
-    })
   })
 })
 
@@ -281,7 +240,6 @@ describe('showPostUpdateReleaseNotes', () => {
     const module = await import('./gui-updater')
     module.initializeGuiUpdater(() => null, () => 'stable', undefined, () => 'zh')
 
-    await module.showPostUpdateReleaseNotes()
     await module.showPostUpdateReleaseNotes()
 
     expect(showMessageBox).toHaveBeenCalledTimes(1)

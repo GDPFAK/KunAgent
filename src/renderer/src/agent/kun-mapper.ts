@@ -1096,6 +1096,17 @@ function runtimeStatusFromEvent(event: CoreRuntimeEventJson): RuntimeStatusEvent
 	      callId
 	    }
 	  }
+	  if (event.kind === 'vision_model_dispatched') {
+	    const key = event.seq ?? Date.now()
+	    const modelName = typeof event.model === 'string' ? event.model : ''
+	    return {
+	      kind: 'vision_model_dispatched' as const,
+	      itemId: `runtime_status_vision_${key}`,
+	      turnId: event.turnId,
+	      createdAt: event.timestamp,
+	      message: modelName
+	    }
+	  }
 	  return null
 	}
 
@@ -1168,6 +1179,11 @@ export async function dispatchKunRuntimeEvent(
 	      return
 	    }
 	    case 'tool_storm_suppressed': {
+	      const status = runtimeStatusFromEvent(event)
+	      if (status) sink.onRuntimeStatus?.(status)
+	      return
+	    }
+	    case 'vision_model_dispatched': {
 	      const status = runtimeStatusFromEvent(event)
 	      if (status) sink.onRuntimeStatus?.(status)
 	      return

@@ -47,15 +47,16 @@ describe('isChatAttachmentUploadEnabled', () => {
   })
 
   it('disables the attachment picker when the model cannot accept images', () => {
-    // The composer gates the picker on model image support; the per-attachment
-    // `composerAttachmentModelUnsupported` error surfaces the reason separately.
+    // modelSupportsImageInput is no longer checked — the runtime auto-dispatches
+    // images to a vision model for analysis when the current model does not
+    // support image input. Uploads are always allowed when the runtime is ready.
     expect(isChatAttachmentUploadEnabled({
       runtimeConnection: 'ready',
       route: 'chat',
       mode: 'agent',
       attachmentStoreAvailable: true,
       modelSupportsImageInput: false
-    })).toBe(false)
+    })).toBe(true)
   })
 
   it('enables composer attachments in Design mode assistants', () => {

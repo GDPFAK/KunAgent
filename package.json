@@ -81,6 +81,7 @@
     "rehype-harden": "^1.1.8",
     "rehype-raw": "^7.0.0",
     "remark-gfm": "^4.0.1",
+    "setup": "^0.0.3",
     "shiki": "^3.23.0",
     "streamdown": "^2.5.0",
     "zod": "^4.4.3",

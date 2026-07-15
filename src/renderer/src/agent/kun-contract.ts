@@ -585,6 +585,14 @@ export type CoreRuntimeEventJson = {
   message?: string
   code?: string
   severity?: 'info' | 'warning' | 'error'
+  /** Vision model id dispatched for image analysis. */
+  model?: string
+  /** Provider id the vision request was routed to. */
+  providerId?: string
+  /** Whether the vision dispatch succeeded. */
+  success?: boolean
+  /** Image size in bytes for vision dispatch. */
+  imageSizeBytes?: number
   child?: CoreChildRuntimeMetadataJson
 }
 

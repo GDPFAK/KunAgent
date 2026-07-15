@@ -1,4 +1,4 @@
-import { isAbsolute, join, relative, resolve } from 'node:path'
+﻿import { isAbsolute, join, relative, resolve } from 'node:path'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { randomBytes } from 'node:crypto'
 import type { ModelClient, ModelRequest, ModelToolSpec } from '../ports/model-client.js'
@@ -59,7 +59,7 @@ import { touchThread } from '../domain/thread.js'
 import { repairModelHistoryItems } from '../domain/model-history-repair.js'
 import type { TurnItem } from '../contracts/items.js'
 import type { ThreadGoal, ThreadTodoList } from '../contracts/threads.js'
-import { modelCapabilitiesForModel, type ContextCompactionConfig } from './model-context-profile.js'
+import { findVisionCapableModelId, modelCapabilitiesForModel, type ContextCompactionConfig, type ModelContextProfile } from './model-context-profile.js'
 import type { SkillRuntime } from '../skills/skill-runtime.js'
 import type { AttachmentContent, AttachmentStore } from '../attachments/attachment-store.js'
 import { detectImage } from '../attachments/attachment-store.js'
@@ -135,8 +135,8 @@ const VISION_DISPATCH_MODEL_CANDIDATES: readonly string[] = [
  * Maximum prompt tokens an auto-resume chain may accumulate across consecutive
  * failed turns before the goal is moved to `blocked`. Prevents a permanently
  * failing goal from burning unbounded tokens through repeated restart cycles
- * (one turn can fail for many reasons — model timeout, tool crash, provider
- * overload — but the resume budget bounds the total cost of retrying).
+ * (one turn can fail for many reasons —?model timeout, tool crash, provider
+ * overload —?but the resume budget bounds the total cost of retrying).
  */
 const GOAL_RESUME_TOKEN_BUDGET = 100_000
 
@@ -194,9 +194,9 @@ function isAutoTitleableThreadTitle(title: string | null | undefined): boolean {
 /**
  * Whether the backend LLM titler may (re)generate a thread's title.
  *
- * - `titleAuto === false` → user renamed it manually; never overwrite.
- * - `titleAuto === true`  → client set a provisional first-message title; upgrade it.
- * - absent (legacy)       → only upgrade placeholder titles, never a real one.
+ * - `titleAuto === false` —?user renamed it manually; never overwrite.
+ * - `titleAuto === true`  —?client set a provisional first-message title; upgrade it.
+ * - absent (legacy)       —?only upgrade placeholder titles, never a real one.
  */
 export function canUpgradeThreadTitle(thread: { title?: string | null; titleAuto?: boolean }): boolean {
   if (thread.titleAuto === false) return false
@@ -264,7 +264,7 @@ export const PLAN_MODE_INSTRUCTION = [
   'You are in Plan mode.',
   'Investigate the task first using read-only tools: prefer `read`, `grep`, `find`, and `ls` to gather the facts you need.',
   'Do NOT modify project files, apply edits, run shell commands, or run mutating commands in this mode.',
-  'If the request is ambiguous or hinges on a decision only the user can make, ask before planning: prefer the `user_input` tool to ask one concise round of clarifying questions (offer concrete options when there are any), then use the answer to write the plan in the same turn. If that tool is not available, end your turn with the question(s) in prose and wait for the answer. Either way, do NOT call `create_plan` until the ambiguity is resolved — a set of options the user still has to choose between is not a plan.',
+  'If the request is ambiguous or hinges on a decision only the user can make, ask before planning: prefer the `user_input` tool to ask one concise round of clarifying questions (offer concrete options when there are any), then use the answer to write the plan in the same turn. If that tool is not available, end your turn with the question(s) in prose and wait for the answer. Either way, do NOT call `create_plan` until the ambiguity is resolved —?a set of options the user still has to choose between is not a plan.',
   'When you understand the task well enough, call the `create_plan` tool to save a complete implementation plan as Markdown.',
   'Use `operation: "draft"` for the first plan, and `operation: "refine"` when revising an existing plan; you may call `create_plan` multiple times as the plan evolves.',
   'Write concrete, actionable steps rather than vague intentions, and structure the saved Markdown with `##` section headings (e.g. Summary, Steps, Tests, Risks).',
@@ -274,7 +274,7 @@ export const PLAN_MODE_INSTRUCTION = [
 
 /** Read-only tools allowed during the investigation phase of a Plan-mode
  * turn (step 0, before `create_plan` has been called). Matches the
- * PLAN_MODE_INSTRUCTION guidance. `bash` is intentionally excluded —
+ * PLAN_MODE_INSTRUCTION guidance. `bash` is intentionally excluded —?
  * it can execute arbitrary commands and its policy is `on-request` which
  * auto-approves under `approvalPolicy: auto`. */
 const PLAN_READ_ONLY_TOOL_NAMES = new Set([
@@ -299,7 +299,7 @@ const PLAN_INTERACTIVE_TOOL_NAMES = new Set(['user_input', 'request_user_input']
  * function so the behaviour can be unit-tested without spinning up the
  * full agent loop.
  *
- * - Not plan-active or plan already satisfied → pass through unchanged.
+ * - Not plan-active or plan already satisfied —?pass through unchanged.
  * - Step 0 (investigation): read-only + interactive (user_input) tools + create_plan.
  * - Step > 0 (must produce plan): only create_plan.
  */
@@ -327,9 +327,9 @@ export function resolvePlanModeToolSpecs(
 
 /**
  * A GUI plan context whose workspace doesn't match the thread it runs in is
- * stale — e.g. carried in by a conversation fork (the fork keeps the source
+ * stale —?e.g. carried in by a conversation fork (the fork keeps the source
  * thread's workspace, but the plan context can point elsewhere). Such a context
- * must be ignored — running the turn as a normal agent turn — instead of being
+ * must be ignored —?running the turn as a normal agent turn —?instead of being
  * passed to create_plan, which hard-fails on the workspace mismatch, or forcing
  * a plan-only tool set the forked history can't satisfy.
  */
@@ -354,7 +354,7 @@ const PLAN_CLARIFYING_CUE =
  * A Plan-mode turn requires `create_plan`; when the model returns prose
  * instead of calling the tool, the loop materializes that prose into the
  * plan (see runStep). But if the model is asking the user to make a
- * decision (an ambiguous request), that prose is a question, not a plan —
+ * decision (an ambiguous request), that prose is a question, not a plan —?
  * materializing it produces a useless "plan" full of unanswered options.
  * Detect that case so the turn can pause for the user instead.
  *
@@ -477,6 +477,11 @@ const GOAL_NO_TOOL_REPEAT_MIN_LENGTH = 12
 const GOAL_NO_TOOL_REPEAT_MAX_RECOVERY_STEPS = 3
 const EMPTY_POST_TOOL_MAX_RECOVERY_STEPS = 1
 const REMAINING_WORK_MAX_RECOVERY_STEPS = 3
+/** Cross-turn assistant text similarity threshold —?fires when N consecutive
+ *  turns produce near-identical assistant responses, even when tools are
+ *  being called. Complements the existing stagnation detectors which only
+ *  look at tool/file-write absence. */
+const CROSS_TURN_TEXT_LOOP_WINDOW = 3
 
 function goalNoToolRecoveryInstruction(recoveryStep: number): string {
   return [
@@ -657,12 +662,14 @@ export type AgentLoopOptions = {
   nowIso: () => string
   nowMs?: () => number
   modelCapabilities?: (model: string) => ModelCapabilityMetadata
+  /** All registered model context profiles —?used to dynamically find a vision-capable model. */
+  modelProfiles?: readonly ModelContextProfile[]
   skillRuntime?: SkillRuntime
   attachmentStore?: AttachmentStore
   memoryStore?: MemoryStore
   tokenEconomy?: TokenEconomyConfig
   contextCompaction?: ContextCompactionConfig
-  /** Model fallback settings — auto-switch to a fallback model when TTFB exceeds threshold. */
+  /** Model fallback settings —?auto-switch to a fallback model when TTFB exceeds threshold. */
   modelFallback?: {
     enabled: boolean
     ttfbTimeoutMs: number
@@ -686,7 +693,7 @@ export type AgentLoopOptions = {
   /**
    * Hard allow-list intersected into every tool context for this loop. Used
    * by read-only subagents to clamp the inherited tool host to investigation
-   * tools — enforced at both the schema (listTools) and execute layers.
+   * tools —?enforced at both the schema (listTools) and execute layers.
    */
   forcedAllowedToolNames?: readonly string[]
   /**
@@ -780,6 +787,9 @@ export class AgentLoop {
   private readonly delegateTaskCallCounts = new Map<string, number>()
   /** Per-turn delegate_task result summaries for loop detection (Layer 4). */
   private readonly delegateTaskResultSummaries = new Map<string, Array<{ summary: string; isError: boolean; toolInvocations: number }>>()
+  /** Assistant response texts for cross-turn similarity loop detection.
+   *  Keyed by threadId, stores the last N turn-stop assistant texts. */
+  private readonly crossTurnAssistantTexts = new Map<string, string[]>()
   // ----------------------------------------------------
   /** Cumulative prompt tokens consumed by goal auto-resume attempts per thread. */
   private readonly goalResumeTokens = new Map<string, number>()
@@ -1045,7 +1055,7 @@ export class AgentLoop {
 
   /**
    * After the FIRST assistant reply completes, generate a concise LLM title for
-   * the thread — but only when the thread still carries a default/placeholder
+   * the thread —?but only when the thread still carries a default/placeholder
    * title (so a user-set or already-generated title is never overwritten) and
    * only on the first completed turn. Model precedence: titleModel -> smallModel
    * -> main conversation model. Persists the title to the thread store and emits
@@ -1092,7 +1102,7 @@ export class AgentLoop {
     // Re-check the title is still upgradeable (no user rename raced us).
     const latest = await this.opts.threadStore.get(threadId)
     if (!latest || !canUpgradeThreadTitle(latest)) return
-    // Keep titleAuto:true — the LLM title is still auto-generated, so a later
+    // Keep titleAuto:true —?the LLM title is still auto-generated, so a later
     // user rename can still lock it, but we won't re-title (gated by turn count).
     const updated = touchThread({ ...latest, title, titleAuto: true }, this.opts.nowIso())
     await this.opts.threadStore.upsert(updated)
@@ -1374,7 +1384,7 @@ export class AgentLoop {
     const candidatePlanContext = turn?.guiPlan
       ? { ...turn.guiPlan, turnId }
       : this.opts.activePlanContext
-    // A plan context whose workspace doesn't match this thread is stale — e.g.
+    // A plan context whose workspace doesn't match this thread is stale —?e.g.
     // carried in by a conversation fork. Drop it so the turn runs as a normal
     // agent turn instead of hard-failing create_plan on the workspace mismatch
     // or forcing a plan-only tool set the cloned history can't satisfy.
@@ -1636,9 +1646,9 @@ export class AgentLoop {
       ...(skillResolution.catalogInstruction ? [skillResolution.catalogInstruction] : []),
       ...skillResolution.instructions,
       ...(projectContext?.content
-        ? [`[项目上下文] CLAUDE.md 和 AGENT.md 文件已存在于项目根目录，内容如下：\n${projectContext.content}`]
+        ? [`[项目上下文] CLAUDE.md —?AGENT.md 文件已存在于项目根目录，内容如下：\n${projectContext.content}`]
         : projectContext !== null
-          ? [`[项目上下文] 当前项目没有 CLAUDE.md 和 AGENT.md 文件。这两个文件用于记录项目架构决策、编码约定、功能说明和目录结构。建议和团队成员共享这两个文件，确保大家在同一上下文工作。若需自动生成，请告知。`]
+          ? [`[项目上下文] 当前项目没有 CLAUDE.md —?AGENT.md 文件。这两个文件用于记录项目架构决策、编码约定、功能说明和目录结构。建议和团队成员共享这两个文件，确保大家在同一上下文工作。若需自动生成，请告知。`]
           : []),
       ...(userInputDisabled ? [userInputUnavailableInstruction()] : []),
       ...(effectiveToolSpecs.some((tool) => tool.name === 'bash') ? [shellRuntimeInstruction()] : []),
@@ -1944,7 +1954,7 @@ export class AgentLoop {
         ) {
           // The model asked the user to decide instead of producing a plan
           // (ambiguous request). Don't materialize a question into a bogus
-          // plan — end the turn so the user can answer; the next plan turn
+          // plan —?end the turn so the user can answer; the next plan turn
           // produces a real plan once the scope is settled.
           if (isPlanClarifyingQuestion(textAccumulator.value)) {
             return 'stop'
@@ -2123,6 +2133,50 @@ export class AgentLoop {
         this.lastNoToolTextByTurn.set(turnId, textAccumulator.value)
         return 'continue'
       }
+      // ── Cross-turn text similarity loop detection ──
+      // Detects when the agent produces near-identical assistant text across
+      // consecutive turns even when tools are being called (e.g. file lookups,
+      // small edits). The existing stagnation detectors only check for
+      // tool/file-write absence and miss textual repetition loops.
+      if (stopReason === 'stop' && textAccumulator.value.trim().length > 0) {
+        const recent = this.crossTurnAssistantTexts.get(threadId) ?? []
+        const current = textAccumulator.value
+        // Count how many of the most recent texts are similar to current.
+        let consecutiveSimilar = 0
+        for (let i = recent.length - 1; i >= 0; i -= 1) {
+          if (isRepeatedNoToolAssistantText(recent[i]!, current)) {
+            consecutiveSimilar += 1
+          } else {
+            break // non-similar breaks the chain
+          }
+        }
+        if (consecutiveSimilar >= CROSS_TURN_TEXT_LOOP_WINDOW - 1) {
+          const message =
+            `Turn stopped: assistant response text is nearly identical across ` +
+            `${CROSS_TURN_TEXT_LOOP_WINDOW} consecutive turns, indicating a content ` +
+            `repetition loop. Review the model's approach or restart the task.`
+          await this.opts.events.record({
+            kind: 'error', threadId, turnId, message,
+            code: 'cross_turn_text_loop', severity: 'warning'
+          })
+          await this.opts.turns.applyItem(
+            threadId,
+            makeErrorItem({
+              id: this.opts.ids.next('item_error'), turnId, threadId,
+              message, code: 'cross_turn_text_loop', severity: 'warning'
+            })
+          )
+          // Save current text so future turns can reference it
+          recent.push(textAccumulator.value)
+          while (recent.length > CROSS_TURN_TEXT_LOOP_WINDOW) recent.shift()
+          this.crossTurnAssistantTexts.set(threadId, recent)
+          return 'stop'
+        }
+        // Save current text for future cross-turn comparison
+        recent.push(textAccumulator.value)
+        while (recent.length > CROSS_TURN_TEXT_LOOP_WINDOW) recent.shift()
+        this.crossTurnAssistantTexts.set(threadId, recent)
+      }
       // Remaining-work continuation (no active goal, model stopped with text after file changes)
       if (
         stopReason === 'stop' &&
@@ -2135,11 +2189,11 @@ export class AgentLoop {
           this.remainingWorkRecoveryStepsByTurn.set(turnId, remainingAttempts)
           return 'continue'
         }
-        // Recovery attempts exhausted — let the turn end normally
+        // Recovery attempts exhausted —?let the turn end normally
       }
       if (stopReason === 'length') {
         // The model hit its output-token ceiling and was cut off without a tool
-        // call. Don't report this as a clean completion — surface a warning so
+        // call. Don't report this as a clean completion —?surface a warning so
         // the truncation is visible instead of looking like the model "gave up".
         const message =
           'The model reached its maximum output length and the response was truncated. ' +
@@ -2222,18 +2276,18 @@ export class AgentLoop {
       if (result.item.kind !== 'tool_result') return false
       if (result.item.isError) return false
       const output = result.item.output
-      if (!output || typeof output !== 'object') return true // unknown → assume real
+      if (!output || typeof output !== 'object') return true // unknown —?assume real
       const raw = output as Record<string, unknown>
       const info = typeof raw.info === 'string' ? raw.info : ''
-      // write tool: bytes_written === 0 with skip/unchanged info → no-op
+      // write tool: bytes_written === 0 with skip/unchanged info —?no-op
       if (typeof raw.bytes_written === 'number' && raw.bytes_written === 0 && info) return false
-      // edit tool: replacements === 0 → no-op
+      // edit tool: replacements === 0 —?no-op
       if (typeof raw.replacements === 'number' && raw.replacements === 0) return false
       return true
     }
 
     const markProgress = (toolName: string): void => {
-      // Layer 3: delegate_task does NOT automatically mark progress — the
+      // Layer 3: delegate_task does NOT automatically mark progress —?the
       // result must be inspected after execution to determine if real work
       // was done (see handleDelegateTaskProgress after persistToolCallResult).
       if (toolName === DELEGATE_TASK_TOOL_NAME) return
@@ -2471,7 +2525,7 @@ export class AgentLoop {
         return 'all_suppressed'
       }
     } else if (executedAny && !stepAllNoOp) {
-      // At least one tool did real work → reset the stuck counter.
+      // At least one tool did real work —?reset the stuck counter.
       this.stuckNoOpCounts.delete(input.turnId)
     }
 
@@ -2483,7 +2537,7 @@ export class AgentLoop {
     approvalPolicy: ToolHostContext['approvalPolicy'],
     toolProviderKinds: ReadonlyMap<string, ToolProviderKind | undefined>
   ): boolean {
-    // always / untrusted / never 会触发审批或阻断工具调用，不能并发扇出。
+    // always / untrusted / never 会触发审批或阻断工具调用，不能并发扇出—?
     if (approvalPolicy === 'always' || approvalPolicy === 'untrusted' || approvalPolicy === 'never') return false
     // Delegated children are isolated runs; multiple in one assistant message
     // are independent and safe to fan out. The delegation runtime caps real
@@ -2598,7 +2652,7 @@ export class AgentLoop {
           const planActive =
             input.context.threadMode === 'plan' || Boolean(input.context.guiPlan)
           const guidance = planActive
-            ? `\`${input.call.toolName}\` is not available in Plan mode. Do NOT try to write deliverable files now. Call \`create_plan\` and put a COMPLETE implementation plan in its \`markdown\` argument — concrete steps, the files to create with their intended contents, and how to verify. Do NOT copy this message into the plan; write the actual plan. If the request is still ambiguous, ask the user a clarifying question and wait instead.`
+            ? `\`${input.call.toolName}\` is not available in Plan mode. Do NOT try to write deliverable files now. Call \`create_plan\` and put a COMPLETE implementation plan in its \`markdown\` argument —?concrete steps, the files to create with their intended contents, and how to verify. Do NOT copy this message into the plan; write the actual plan. If the request is still ambiguous, ask the user a clarifying question and wait instead.`
             : 'Use only tools advertised in the current turn context.'
           await this.opts.events.record({
             kind: 'error',
@@ -3073,7 +3127,7 @@ export class AgentLoop {
    * estimator (which omits the system prompt and tool schemas) and could
    * skip compaction for an already-oversized thread. `loadUsageRecords`
    * returns per-request deltas ordered oldest-first, so the last positive
-   * entry is the most recent request's prompt size — the best available
+   * entry is the most recent request's prompt size —?the best available
    * proxy for the current context pressure. Best-effort: any failure leaves
    * the estimator (plus overhead floor) as the fallback.
    */
@@ -3293,7 +3347,7 @@ export class AgentLoop {
         const roleConfig = this.opts.roleRegistry?.getById(roleId)
         this.turnRoles.set(key, roleConfig)
       } catch {
-        // Role resolution failure is non-fatal — the turn continues without
+        // Role resolution failure is non-fatal —?the turn continues without
         // role-specific prompting.
         this.turnRoles.set(key, undefined)
       }
@@ -3341,13 +3395,23 @@ export class AgentLoop {
       // base64 fallback if no vision model is available or it fails.
       const visionDescription = await this.dispatchImageToVisionModel(attachment, input.threadId, input.turnPrompt, input.workspace)
       if (visionDescription) {
-        textFallbacks.push({
-          id: attachment.id,
-          name: attachment.name,
-          mimeType: 'text/plain',
-          dataBase64: Buffer.from(visionDescription, 'utf8').toString('base64'),
-          byteSize: Buffer.byteLength(visionDescription, 'utf8')
-        })
+        const dataBase64 = Buffer.from(visionDescription, 'utf8').toString('base64')
+        if (Buffer.byteLength(dataBase64, 'utf8') <= textFallbackPolicy.textFallbackMaxBase64Bytes) {
+          textFallbacks.push({
+            id: attachment.id,
+            name: attachment.name,
+            mimeType: 'text/plain',
+            dataBase64,
+            byteSize: Buffer.byteLength(visionDescription, 'utf8')
+          })
+        } else {
+          // Vision description exceeds the max fallback size; fall back to the
+          // original attachment's text fallback (e.g. compressed base64).
+          textFallbacks.push(buildTextAttachmentFallback(
+            attachment,
+            textFallbackPolicy.textFallbackMaxBase64Bytes
+          ))
+        }
       } else {
         textFallbacks.push(buildTextAttachmentFallback(
           attachment,
@@ -3428,21 +3492,30 @@ export class AgentLoop {
   }
 
   /**
-   * Find a vision-capable model from the configured model list.
-   * Checks known candidates via `modelCapabilities` and returns the first
-   * match. Returns null when no vision model is available — the caller
-   * degrades gracefully to text-only fallback.
+   * Find a vision-capable model from the configured model profiles.
+   * Scans all registered profiles (built-in + user-configured) for one
+   * that declares image input support, with a hardcoded fallback list
+   * when no profiles are available.
+   *
+   * Returns the model id and optional providerId for cross-provider routing.
    */
-  private findVisionCapableModel(): string | null {
+  private findVisionCapableModel(): { model: string; providerId?: string } | null {
+    // First, try the dynamic profile scan —?catches user-registered
+    // multimodal models (e.g. gpt-4o, gemini-2.0-flash, etc.) that
+    // declare inputModalities: ['text', 'image'] in their profile.
+    if (this.opts.modelProfiles) {
+      const fromProfiles = findVisionCapableModelId(this.opts.modelProfiles)
+      if (fromProfiles) return fromProfiles
+    }
+    // Fallback: check hardcoded candidates via modelCapabilities (legacy).
     if (!this.opts.modelCapabilities) return null
     for (const candidate of VISION_DISPATCH_MODEL_CANDIDATES) {
       try {
         const caps = this.opts.modelCapabilities(candidate)
         if (caps.inputModalities.includes('image')) {
-          return candidate
+          return { model: candidate }
         }
       } catch {
-        // Skip models that can't be resolved
         continue
       }
     }
@@ -3454,9 +3527,10 @@ export class AgentLoop {
    * Returns a concise Chinese description of the image, or null on any
    * failure (the caller falls back to the existing text fallback).
    *
-   * The request is lightweight: no tools, no history, low maxTokens,
-   * 15-second timeout. Failures are silent — a timeout or error just
-   * returns null so the conversation is never blocked.
+   * The request is lightweight: no tools, no history, generous maxTokens.
+   * visionGenerate has a 2-minute timeout for complex pages; visionRefine
+   * has 1 minute. Total max wait ~3 minutes. Failures are silent — a
+   * timeout or error just returns null so the conversation is never blocked.
    */
   private async dispatchImageToVisionModel(
     attachment: AttachmentContent,
@@ -3464,33 +3538,75 @@ export class AgentLoop {
     taskContext: string,
     workspace: string
   ): Promise<string | null> {
-    const visionModel = this.findVisionCapableModel()
-    if (!visionModel) return null
+    const resolved = this.findVisionCapableModel()
+    if (!resolved) return null
+    const { model: visionModel, providerId } = resolved
     const fileName = "vision_" + attachment.id.slice(0, 8) + ".html"
     const filePath = join(workspace, fileName)
+
+    // Emit a status event so the GUI shows which vision model was invoked.
+    const recordVisionEvent = async (success: boolean) => {
+      try {
+        await this.opts.events.record({
+          kind: 'vision_model_dispatched',
+          threadId,
+          model: visionModel,
+          providerId,
+          imageSizeBytes: attachment.byteSize ?? attachment.data.byteLength,
+          success
+        })
+      } catch {
+        // Best-effort: event recording failure must not break the flow.
+      }
+    }
+
     try {
-      const step1 = await this.visionGenerate(visionModel, attachment, taskContext)
-      if (!step1 || !step1.code) return null
+      const step1 = await this.visionGenerate(visionModel, providerId, attachment, taskContext)
+      if (!step1 || !step1.code) {
+        await recordVisionEvent(false)
+        return null
+      }
       await writeFile(filePath, step1.code, "utf-8")
-      const step2 = await this.visionRefine(visionModel, attachment, step1.code)
+      const step2 = await this.visionRefine(visionModel, providerId, attachment, step1.code)
       if (step2 && step2.code && step2.code !== step1.code) {
         await writeFile(filePath, step2.code, "utf-8")
       }
-      return "Generated " + fileName + " and refined after visual comparison."
-    } catch { return null }
+      await recordVisionEvent(true)
+      // Return a structured description with design summary, changelog and file path
+      // so the main model gets actionable design insight without needing to read the file first.
+      const parts: string[] = [
+        "--- Vision Model Analysis ---",
+        "Design summary from " + visionModel + ":"
+      ]
+      if (step1?.summary) parts.push(step1.summary)
+      parts.push("Generated file: " + fileName)
+      if (step2?.changelog) parts.push("Refinement changes: " + step2.changelog)
+      return parts.join("\n")
+    } catch {
+      await recordVisionEvent(false)
+      return null
+    }
   }
 
-  private async visionGenerate(model: string, attachment: AttachmentContent, _taskContext: string) {
+  private async visionGenerate(model: string, providerId: string | undefined, attachment: AttachmentContent, _taskContext: string) {
     try {
       var r = this.opts.model.stream({
         threadId: "vision_gen_" + attachment.id,
         turnId: "gen_" + attachment.id + "_" + Date.now(),
         model,
-        systemPrompt: "You are a front-end developer. Analyze the image and generate complete, production-ready HTML+CSS code that accurately reproduces the layout, colors, spacing, typography and style. Output ONLY the full HTML code in a code block. Include all CSS inline in a style tag.",
+        ...(providerId ? { providerId } : {}),
+        systemPrompt: "You are a front-end developer specializing in dashboard UI. Analyze the image (typically a data dashboard) and reproduce it as HTML+CSS. "
+          + "Focus on accurately capturing: data table structures with headers and rows, KPI cards/metrics, chart placeholders (use visual approximation with CSS/SVG), "
+          + "grid/card-based layout, sidebar navigation, filter bars, and status indicators. "
+          + "First, output a brief design summary listing: the color palette, typography, grid layout structure, card spacing, "
+          + "and any data visualization components observed (charts, tables, KPI cards, progress bars). "
+          + "Then output the COMPLETE production-ready HTML code in a ```html code block. Include all CSS inline in a style tag. "
+          + "Use realistic placeholder data (not lorem ipsum) — use common dashboard metric names, realistic numbers, and chart labels. "
+          + "The code must accurately reproduce the dashboard layout, color scheme, component spacing, and overall visual hierarchy.",
         attachments: [{ id: attachment.id, name: attachment.name, mimeType: attachment.mimeType, dataBase64: attachment.data.toString("base64") }],
-        prefix: [], history: [], tools: [],
-        abortSignal: AbortSignal.timeout(30_000),
-        stream: false, maxTokens: 4096, temperature: 0.1,
+        prefix: [{ kind: 'user_message', id: 'vision_prompt', turnId: 'vision', threadId: 'vision', role: 'user', status: 'completed', createdAt: '', text: (_taskContext?.trim() || 'Analyze this image') }], history: [], tools: [],
+        abortSignal: AbortSignal.timeout(120_000),
+        stream: false, maxTokens: 16384, temperature: 0.1,
         reasoningEffort: "off"
       })
       var text = ""
@@ -3499,21 +3615,29 @@ export class AgentLoop {
         if (ch.kind === "error") return null
       }
       const code = extractHtmlCodeBlock(text)
-      return code ? { code } : null
+      const summary = extractPreface(text)
+      return code ? { code, summary } : null
     } catch { return null }
   }
 
-  private async visionRefine(model: string, attachment: AttachmentContent, previousCode: string) {
+  private async visionRefine(model: string, providerId: string | undefined, attachment: AttachmentContent, previousCode: string) {
     try {
       var r = this.opts.model.stream({
         threadId: "vision_refine_" + attachment.id,
         turnId: "refine_" + attachment.id + "_" + Date.now(),
         model,
-        systemPrompt: "Compare the image with your previously generated code below. Identify and fix mismatches in: colors, spacing, layout, fonts. Output ONLY the corrected COMPLETE HTML in a code block. If code already matches, output it unchanged.\n\n--- Previously generated code ---\n" + previousCode + "\n---",
+        ...(providerId ? { providerId } : {}),
+        systemPrompt: "Compare the dashboard image with your previously generated code below. "
+          + "Focus on dashboard-specific accuracy: data table columns/rows alignment, KPI card values and icons, "
+          + "chart shapes and positions, grid card boundaries, sidebar items, and color consistency. "
+          + "First, briefly describe what mismatches you found (color accuracy, data table alignment, chart placement, spacing). "
+          + "Then output the CORRECTED COMPLETE HTML in a ```html code block. "
+          + "If the code already matches the image, output it unchanged.\n\n"
+          + "--- Previously generated code ---\n" + previousCode + "\n---",
         attachments: [{ id: attachment.id, name: attachment.name, mimeType: attachment.mimeType, dataBase64: attachment.data.toString("base64") }],
-        prefix: [], history: [], tools: [],
-        abortSignal: AbortSignal.timeout(30_000),
-        stream: false, maxTokens: 4096, temperature: 0.1,
+        prefix: [{ kind: 'user_message', id: 'vision_prompt', turnId: 'vision', threadId: 'vision', role: 'user', status: 'completed', createdAt: '', text: 'Re-evaluate the design against this image' }], history: [], tools: [],
+        abortSignal: AbortSignal.timeout(60_000),
+        stream: false, maxTokens: 16384, temperature: 0.1,
         reasoningEffort: "off"
       })
       var text = ""
@@ -3522,7 +3646,8 @@ export class AgentLoop {
         if (ch.kind === "error") return null
       }
       const code = extractHtmlCodeBlock(text)
-      return code ? { code } : null
+      const changelog = extractPreface(text)
+      return code ? { code, changelog } : null
     } catch { return null }
   }
 /** Convenience factory for tests: builds a loop with sensible defaults. */
@@ -3764,6 +3889,17 @@ function extractHtmlCodeBlock(text: string): string | null {
   return text.substring(start, end).trim()
 }
 
+/**
+ * Extract text that appears before the first code block marker.
+ * Used to capture the model's design summary / changelog that
+ * accompanies the generated HTML code block.
+ */
+function extractPreface(text: string): string {
+  const start = text.indexOf("```")
+  if (start < 0) return text.trim()
+  return text.substring(0, start).trim()
+}
+
 function prefixVolatilityStageDetails(
   findings: PrefixVolatilityFinding[]
 ): Record<string, unknown> | undefined {
@@ -3777,3 +3913,7 @@ function prefixVolatilityStageDetails(
     noRegexDetector: true
   }
 }
+
+
+
+

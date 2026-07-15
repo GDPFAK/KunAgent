@@ -45,12 +45,14 @@ export function createThreadRecord(input: {
   forkedFromTurnCount?: number
   goal?: ThreadGoal
   todos?: ThreadTodoList
+  consecutiveStagnantTurns?: number
   createdAt?: string
 }): ThreadEntity {
   const now = input.createdAt ?? new Date().toISOString()
   return {
     id: input.id,
     title: input.title,
+    consecutiveStagnantTurns: input.consecutiveStagnantTurns ?? 0,
     ...(input.titleAuto !== undefined ? { titleAuto: input.titleAuto } : {}),
     workspace: input.workspace,
     model: input.model,

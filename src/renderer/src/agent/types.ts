@@ -332,6 +332,7 @@ export type RuntimeStatusEventPayload = {
     | 'tool_catalog_changed'
     | 'tool_storm_suppressed'
     | 'compaction_summary_fallback'
+    | 'vision_model_dispatched'
   itemId: string
   turnId?: string
   createdAt?: string

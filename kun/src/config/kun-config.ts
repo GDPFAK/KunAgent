@@ -70,7 +70,9 @@ export const ModelContextProfileConfigSchema = z
     // every model would be pinned to chat_completions.
     endpointFormat: z
       .preprocess(normalizeModelEndpointFormat, z.enum(MODEL_ENDPOINT_FORMATS))
-      .optional()
+      .optional(),
+    /** Provider id that serves this model (used for cross-provider vision dispatch routing). */
+    providerId: z.string().min(1).optional()
   })
   .strict()
   .superRefine((profile, ctx) => {

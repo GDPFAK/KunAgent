@@ -145,6 +145,13 @@ export const ThreadSchema = z.object({
   forkedFromTurnCount: z.number().int().nonnegative().optional(),
   goal: ThreadGoalSchema.optional(),
   todos: ThreadTodoListSchema.optional(),
+  /**
+   * Consecutive agent turns that ended with pending todos but zero
+   * progress (no tool calls, no file changes). Persisted across thread
+   * restarts so the stagnation detector has memory across retries.
+   * Reset to 0 whenever a turn makes progress or completes all todos.
+   */
+  consecutiveStagnantTurns: z.number().int().nonnegative().default(0),
   createdAt: z.string(),
   updatedAt: z.string(),
   turns: z.array(TurnSchema).default([])

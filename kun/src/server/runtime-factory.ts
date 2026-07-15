@@ -340,6 +340,7 @@ export async function createKunServeRuntime(
           approvalPolicy: options.approvalPolicy,
           sandboxMode: options.sandboxMode,
           modelCapabilities,
+          modelProfiles,
           skillRuntime,
           tokenEconomy,
           // Persist the child as a hidden `side` thread on the shared stores +
@@ -502,6 +503,7 @@ export async function createKunServeRuntime(
     ids,
     nowIso,
     modelCapabilities,
+    modelProfiles,
     skillRuntime,
     tokenEconomy,
     contextCompaction: options.contextCompaction,

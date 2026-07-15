@@ -29,6 +29,8 @@ export type ModelContextProfile = ModelContextThresholds & {
   messageParts: readonly ModelMessagePartSupport[]
   reasoning?: ModelReasoningCapabilityMetadata
   endpointFormat?: ModelEndpointFormat
+  /** Provider id that serves this model (used for cross-provider vision dispatch routing). */
+  providerId?: string
 }
 
 export type ModelContextProfileConfig = {
@@ -50,6 +52,8 @@ export type ModelContextProfileConfig = {
   messageParts?: readonly ModelMessagePartSupport[]
   reasoning?: ModelReasoningCapabilityMetadata
   endpointFormat?: ModelEndpointFormat
+  /** Provider id that serves this model (used for cross-provider routing). */
+  providerId?: string
 }
 
 export type ModelConfig = {
@@ -247,6 +251,7 @@ function mergeModelContextProfile(
   const reasoning = input.reasoning ?? current?.reasoning
   const endpointFormat = input.endpointFormat ?? current?.endpointFormat
   const maxOutputTokens = input.maxOutputTokens ?? current?.maxOutputTokens
+  const providerId = input.providerId ?? current?.providerId
   return {
     canonicalModel,
     modelIds,
@@ -261,7 +266,8 @@ function mergeModelContextProfile(
     ...(reasoning
       ? { reasoning: copyReasoningCapability(reasoning) }
       : {}),
-    ...(endpointFormat ? { endpointFormat } : {})
+    ...(endpointFormat ? { endpointFormat } : {}),
+    ...(providerId ? { providerId } : {})
   }
 }
 
@@ -330,4 +336,25 @@ function uniqueModelCapabilityValues<T extends string>(values: readonly T[]): T[
 function normalizeModelId(model: string | undefined): string {
   const normalized = model?.trim().toLowerCase() ?? ''
   return normalized === 'auto' ? '' : normalized
+}
+
+/**
+ * Scan the model profiles for the first model that supports image input modality.
+ * Returns the canonical model ID (e.g. `"gpt-4o"`) when found, or `null` when
+ * no registered profile declares image support.
+ *
+ * This replaces the old hardcoded `VISION_DISPATCH_MODEL_CANDIDATES` approach:
+ * instead of checking a fixed list of deepseek model names, we inspect every
+ * profile the system knows about — including user-configured models whose
+ * `inputModalities` includes `"image"`.
+ */
+export function findVisionCapableModelId(
+  profiles: readonly ModelContextProfile[]
+): { model: string; providerId?: string } | null {
+  for (const profile of profiles) {
+    if (profile.inputModalities.includes('image')) {
+      return { model: profile.canonicalModel, ...(profile.providerId ? { providerId: profile.providerId } : {}) }
+    }
+  }
+  return null
 }

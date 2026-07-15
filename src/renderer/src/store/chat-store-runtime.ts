@@ -465,6 +465,11 @@ function runtimeStatusText(event: RuntimeStatusEventPayload): string {
   if (event.kind === 'compaction_summary_fallback') {
     return event.message?.trim() || i18n.t('common:compactionSummaryFallbackStatus')
   }
+  if (event.kind === 'vision_model_dispatched') {
+    const model = event.message?.trim()
+    if (model) return `🔍 ${model}`
+    return ''
+  }
 	  return event.message?.trim() || ''
 	}
 

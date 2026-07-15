@@ -59,7 +59,8 @@ export const RuntimeEventKind = z.enum([
   'delegation:failed',
   'delegation:aborted',
   'delegation:progress',
-  'lsp:diagnostics'
+  'lsp:diagnostics',
+'vision_model_dispatched'
 ])
 export type RuntimeEventKind = z.infer<typeof RuntimeEventKind>
 
@@ -331,6 +332,18 @@ export const LspDiagnosticsEvent = RuntimeEventBase.extend({
 })
 export type LspDiagnosticsEvent = z.infer<typeof LspDiagnosticsEvent>
 
+export const VisionModelDispatchedEvent = RuntimeEventBase.extend({
+  kind: z.literal('vision_model_dispatched'),
+  model: z.string().min(1),
+  /** Base64 image size in bytes carried in the vision request. */
+  imageSizeBytes: z.number().int().nonnegative().optional(),
+  /** Provider id the vision request was routed to (if cross-provider). */
+  providerId: z.string().optional(),
+  /** Whether the vision dispatch succeeded and produced a description. */
+  success: z.boolean().optional()
+})
+export type VisionModelDispatchedEvent = z.infer<typeof VisionModelDispatchedEvent>
+
 export const RuntimeEvent = z.discriminatedUnion('kind', [
   ItemEvent,
   ThreadLifecycleEvent,
@@ -350,7 +363,8 @@ export const RuntimeEvent = z.discriminatedUnion('kind', [
   HeartbeatEvent,
   WorkerPoolEvent,
   DelegationEvent,
-  LspDiagnosticsEvent
+  LspDiagnosticsEvent,
+  VisionModelDispatchedEvent
 ])
 export type RuntimeEvent = z.infer<typeof RuntimeEvent>
 

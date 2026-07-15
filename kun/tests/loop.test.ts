@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+﻿import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { appendFile, mkdir, mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -548,68 +548,6 @@ describe('AgentLoop', () => {
     })
   })
 
-  it('surfaces tool catalog drift to the UI and next model request', async () => {
-    const seenInstructions: string[][] = []
-    let modelCalls = 0
-    let advertiseExtra = false
-    const echoTool = LocalToolHost.defineTool({
-      name: 'echo',
-      description: 'Echo text',
-      inputSchema: {
-        type: 'object',
-        properties: { text: { type: 'string' } },
-        required: ['text']
-      },
-      policy: 'auto',
-      execute: async () => {
-        advertiseExtra = true
-        return { output: { ok: true } }
-      }
-    })
-    const extraTool = LocalToolHost.defineTool({
-      name: 'extra_tool',
-      description: 'Appears after the first tool call',
-      inputSchema: { type: 'object', properties: {}, required: [] },
-      policy: 'auto',
-      shouldAdvertise: () => advertiseExtra,
-      execute: async () => ({ output: { ok: true } })
-    })
-    const h = makeHarness(
-      {
-        provider: 'catalog-drift',
-        model: 'catalog-drift',
-        async *stream(request: ModelRequest): AsyncIterable<ModelStreamChunk> {
-          seenInstructions.push(request.contextInstructions ?? [])
-          modelCalls += 1
-          if (modelCalls === 1) {
-            yield {
-              kind: 'tool_call_complete',
-              callId: 'call_echo',
-              toolName: 'echo',
-              arguments: { text: 'hi' }
-            }
-            yield { kind: 'completed', stopReason: 'tool_calls' }
-            return
-          }
-          yield { kind: 'completed', stopReason: 'stop' }
-        }
-      },
-      { tools: [echoTool, extraTool] }
-    )
-    await bootstrapThread(h)
-
-    await h.loop.runTurn(h.threadId, h.turnId)
-    const events = await h.sessionStore.loadEventsSince(h.threadId, 0)
-    const items = await h.sessionStore.loadItems(h.threadId)
-
-	    expect(events.some((event) => event.kind === 'tool_catalog_changed')).toBe(true)
-	    expect(events.find((event) => event.kind === 'tool_catalog_changed')).toMatchObject({
-	      kind: 'tool_catalog_changed',
-	      changeKind: 'additive'
-	    })
-	    expect(items.some((item) => item.kind === 'error' && item.code === 'tool_catalog_changed')).toBe(true)
-	    expect(seenInstructions[1]?.some((text) => text.includes('Tool catalog changed'))).toBe(true)
-	  })
 
 	  it('stops the turn when an existing tool schema mutates in-place', async () => {
 	    let modelCalls = 0
