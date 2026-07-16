@@ -233,11 +233,24 @@ function unsupportedMessage(): string {
 }
 
 function sanitizeUpdaterError(raw: string, channel: GuiUpdateChannel): string {
-  const message = raw.trim()
+  let message = raw.trim()
   if (!message) {
     return `Could not check for updates on the ${channel} channel. Open the download page instead.`
   }
-  return message.split(/\n(?:Headers:|Data:)/, 1)[0].trim() || message
+  // Strip the atom/XML feed body that electron-updater appends after "\nXML:\n"
+  message = message.split(/\nXML:/, 1)[0]
+  // Strip everything from the updater's known long-error prefixes onward to remove
+  // the full stack trace (builder-util-runtime encodes response details after these)
+  message = message.split(/(?:Unable to find latest version on GitHub|Cannot parse releases feed):/, 1)[0]
+  // Strip the "method: GET" request descriptor that builder-util-runtime appends
+  message = message.split(/\nmethod: GET/, 1)[0]
+  // Strip "Headers:", "Data:", "request:" suffix blocks
+  message = message.split(/\n(?:Headers|Data|request):/, 1)[0]
+  message = message.trim()
+  if (!message) {
+    return `Could not check for updates on the ${channel} channel. Open the download page instead.`
+  }
+  return message
 }
 
 function toGuiInfo(updateInfo: UpdateInfo, hasUpdate: boolean, manualOnly = false): Extract<GuiUpdateInfo, { ok: true }> {
@@ -555,7 +568,21 @@ export async function checkGuiUpdate(channel?: GuiUpdateChannel): Promise<GuiUpd
     emitGuiUpdateState(info.hasUpdate ? { status: 'available', info } : { status: 'not_available', info })
     return info
   } catch (e) {
-    const message = sanitizeUpdaterError(e instanceof Error ? e.message : String(e), selectedChannel)
+    // Detect errors that indicate the updater's GitHub provider failed to find a valid
+    // release (e.g. no NSIS installer in the latest tag, or no stable semver tag exists).
+    // Fall back to a direct GitHub API call so the user still gets a meaningful result
+    // instead of a cryptic 406 / atom-feed error.
+    const err = e instanceof Error ? e : undefined
+    const code: string | undefined = (err as unknown as { code?: string }).code
+    const isUpdaterFeedError =
+      code === 'ERR_UPDATER_LATEST_VERSION_NOT_FOUND' ||
+      code === 'ERR_UPDATER_NO_PUBLISHED_VERSIONS' ||
+      code === 'ERR_UPDATER_INVALID_RELEASE_FEED' ||
+      code === 'ERR_UPDATER_CHANNEL_FILE_NOT_FOUND'
+    if (isUpdaterFeedError) {
+      return checkManualUpdate(selectedChannel, 'no_stable_version')
+    }
+    const message = sanitizeUpdaterError(err?.message ?? String(e), selectedChannel)
     const info: GuiUpdateInfo = {
       ok: false,
       currentVersion: app.getVersion(),

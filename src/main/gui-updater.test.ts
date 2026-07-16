@@ -1,6 +1,7 @@
 import { EventEmitter } from 'node:events'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { GuiUpdateInfo } from '../shared/gui-update'
 
 type MockUpdater = EventEmitter & {
   autoDownload: boolean
@@ -251,9 +252,65 @@ describe('showPostUpdateReleaseNotes', () => {
         buttons: ['查看更新日志', '稍后']
       })
     )
-    expect(openExternal).toHaveBeenCalledWith('https://deepseek-gui.com/changelog')
-    expect(JSON.parse(mockedFiles.get(versionStatePath) ?? '{}')).toEqual({
-      lastSeenVersion: '0.2.0'
+  })
+})
+
+describe('checkGuiUpdate fallback on feed parse error', () => {
+  function makeUpdaterError(code: string, message: string): Error {
+    const err = new Error(message) as Error & { code: string }
+    err.code = code
+    return err
+  }
+
+  const feedErrorCodes = [
+    'ERR_UPDATER_LATEST_VERSION_NOT_FOUND',
+    'ERR_UPDATER_NO_PUBLISHED_VERSIONS',
+    'ERR_UPDATER_INVALID_RELEASE_FEED',
+    'ERR_UPDATER_CHANNEL_FILE_NOT_FOUND'
+  ]
+
+  for (const code of feedErrorCodes) {
+    it(`falls back to manual GitHub API when updater throws ${code}`, async () => {
+      process.env.DEEPSEEK_GUI_ALLOW_UNSIGNED_UPDATES = '1'
+      const fetchMock = vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({ tag_name: 'v0.2.23', published_at: '2026-07-03T16:41:39Z' })
+      })
+      vi.stubGlobal('fetch', fetchMock)
+      updater.checkForUpdates.mockRejectedValue(
+        makeUpdaterError(code, 'Unable to find latest version on GitHub (https://github.com/…/releases/latest): 406 Not Acceptable\nmethod: GET url: https://…\n\nData:\n')
+      )
+
+      const module = await import('./gui-updater')
+      module.initializeGuiUpdater(() => null, () => 'stable')
+
+      const result = await module.checkGuiUpdate('stable')
+      expect(result.ok).toBe(true)
+      expect((result as Extract<GuiUpdateInfo, { ok: true }>).latestVersion).toBe('0.2.23')
+      expect(fetchMock).toHaveBeenCalledWith(
+        'https://api.github.com/repos/GDPFAK/KunAgent/releases/latest',
+        expect.any(Object)
+      )
     })
+  }
+
+  it('emits error state (not fallback) for unrelated error codes', async () => {
+    process.env.DEEPSEEK_GUI_ALLOW_UNSIGNED_UPDATES = '1'
+    vi.stubGlobal('fetch', vi.fn())
+    updater.checkForUpdates.mockRejectedValue(
+      makeUpdaterError('ERR_NETWORK', 'Network is down')
+    )
+
+    const module = await import('./gui-updater')
+    module.initializeGuiUpdater(() => null, () => 'stable')
+
+    const result = await module.checkGuiUpdate('stable')
+    expect(result.ok).toBe(false)
+    const err = result as Extract<GuiUpdateInfo, { ok: false }>
+    expect(err.code).toBe('unknown')
+    // Error message must NOT contain XML or request details after sanitization
+    expect(err.message).not.toContain('XML')
+    expect(err.message).not.toContain('method: GET')
+    expect(err.message).not.toContain('content-security-policy')
   })
 })

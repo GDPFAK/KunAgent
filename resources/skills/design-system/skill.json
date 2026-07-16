@@ -1,0 +1,25 @@
+{
+  "id": "design-system",
+  "name": "Design system & craft",
+  "version": "1.0.0",
+  "description": "Brand-grade visual craft for design work — design-system-first thinking and anti-AI-slop rules.",
+  "entry": "SKILL.md",
+  "triggers": {
+    "commands": [
+      "/design"
+    ],
+    "promptPatterns": [
+      "design",
+      "mockup",
+      "prototype",
+      "ui",
+      "design system",
+      "设计",
+      "原型",
+      "界面",
+      "配色"
+    ],
+    "fileTypes": []
+  },
+  "priority": 0
+}
